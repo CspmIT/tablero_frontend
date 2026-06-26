@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, LayoutGrid, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet } from 'lucide-react';
 import { DataProvider, useData } from './data/DataContext.jsx';
+import { isAuthenticated, logout } from './api/auth.js';
+import LoginFlow from './modules/Login/LoginFlow.jsx';
 import Layout from './components/Layout.jsx';
 import Equipo from './modules/Equipo.jsx';
 import Grilla from './modules/Grilla.jsx';
@@ -67,9 +69,20 @@ function Contenido({ activo }) {
 
 export default function App() {
   const [activo, setActivo] = useState('kanban');
+  const [autenticado, setAutenticado] = useState(isAuthenticated());
+
+  if (!autenticado) {
+    return <LoginFlow onLogged={() => setAutenticado(true)} />;
+  }
+
+  const cerrarSesion = () => {
+    logout();
+    setAutenticado(false);
+  };
+
   return (
     <DataProvider>
-      <Layout modulos={MODULOS} infoGrupo={INFO} activo={activo} onSelect={setActivo}>
+      <Layout modulos={MODULOS} infoGrupo={INFO} activo={activo} onSelect={setActivo} onLogout={cerrarSesion}>
         <Contenido activo={activo} />
       </Layout>
     </DataProvider>

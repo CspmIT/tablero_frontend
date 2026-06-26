@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react';
-import { Menu, ClipboardList, ChevronDown } from 'lucide-react';
+import { Menu, ClipboardList, ChevronDown, LogOut } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import FotoImg from './FotoImg.jsx';
 import iconUrl from '../assets/cooptech-icon.png';
 
-export default function Layout({ modulos, infoGrupo = [], activo, onSelect, children }) {
+export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLogout, children }) {
   const [abierto, setAbierto] = useState(false); // menú cerrado por defecto
   const [infoAbierto, setInfoAbierto] = useState(false);
+  const [userAbierto, setUserAbierto] = useState(false);
   const infoBtnRef = useRef(null);
   const [flyPos, setFlyPos] = useState({ top: 0, left: 0 });
   const toggleInfo = () => {
@@ -31,11 +32,27 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, chil
           <span className="font-semibold tracking-wide">COOPTECH</span>
           <span className="hidden sm:inline text-sm text-blue-200">· Tablero de Mando</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="relative flex items-center gap-3">
           {me && <span className="hidden sm:inline text-sm text-blue-100">{me.nombre}</span>}
-          <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center text-sm font-semibold overflow-hidden">
+          <button onClick={() => setUserAbierto((o) => !o)}
+            className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center text-sm font-semibold overflow-hidden hover:ring-2 hover:ring-white/40">
             <FotoImg foto={yo?.foto} alt={me?.nombre || ''} fallback={inicial} />
-          </div>
+          </button>
+          {userAbierto && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setUserAbierto(false)} />
+              <div className="absolute right-0 top-11 z-50 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 text-slate-700">
+                <div className="px-4 py-2 border-b border-slate-100">
+                  <p className="text-sm font-medium truncate">{me?.nombre || 'Usuario'}</p>
+                  {me?.email && <p className="text-xs text-slate-400 truncate">{me.email}</p>}
+                </div>
+                <button onClick={() => { setUserAbierto(false); onLogout?.(); }}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left hover:bg-slate-50">
+                  <LogOut size={16} /> Cerrar sesión
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </header>
 

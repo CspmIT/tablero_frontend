@@ -13,6 +13,8 @@ function recurso(path) {
 
 export const api = {
   me: () => http.get('/auth/me'),
+  // Emite el JWT final a partir de { email, tokenApp } (público; sin auth previa).
+  loginCooptech: (body) => http.post('/auth/loginCooptech', body),
 
   colaboradores: {
     ...recurso('/colaboradores'),

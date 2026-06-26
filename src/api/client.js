@@ -31,6 +31,15 @@ async function request(method, path, { body, query, isForm } = {}) {
   }
 
   const res = await fetch(url, { method, headers, body: payload });
+
+  // Token vencido/ inválido: limpiamos la sesión y volvemos al login.
+  // (Sólo si había un token; en modo dev sin token el backend no responde 401.)
+  if (res.status === 401 && token) {
+    localStorage.removeItem('cooptech_token');
+    localStorage.removeItem('cooptech_user');
+    if (typeof window !== 'undefined') window.location.reload();
+  }
+
   if (res.status === 204) return null;
 
   let data = null;
