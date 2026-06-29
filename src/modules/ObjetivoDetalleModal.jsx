@@ -13,6 +13,7 @@ export default function ObjetivoDetalleModal({ open, objetivo, pct, api, readOnl
   const [subiendo, setSubiendo] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
+  const [ampliada, setAmpliada] = useState(null); // { src, nombre } de la foto en pantalla completa
 
   const cargarFotos = useCallback(async () => {
     if (!objetivo?.id) return;
@@ -47,6 +48,14 @@ export default function ObjetivoDetalleModal({ open, objetivo, pct, api, readOnl
     })();
     return () => { cancelado = true; creados.forEach((u) => URL.revokeObjectURL(u)); };
   }, [fotos]);
+
+  // Cierra el visor de pantalla completa con Escape.
+  useEffect(() => {
+    if (!ampliada) return;
+    const onKey = (e) => { if (e.key === 'Escape') setAmpliada(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ampliada]);
 
   if (!open || !objetivo) return null;
 
@@ -152,11 +161,14 @@ export default function ObjetivoDetalleModal({ open, objetivo, pct, api, readOnl
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {fotos.map((f) => (
                   <div key={f.id} className="relative group border border-slate-200 rounded-lg overflow-hidden bg-slate-50 aspect-[4/3]">
-                    <a href={urls[f.id]} target="_blank" rel="noreferrer">
+                    <button type="button"
+                      onClick={() => urls[f.id] && setAmpliada({ src: urls[f.id], nombre: f.nombre })}
+                      disabled={!urls[f.id]}
+                      className="w-full h-full block cursor-zoom-in disabled:cursor-default">
                       {urls[f.id]
                         ? <img src={urls[f.id]} alt={f.nombre} className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center text-xs text-slate-400">Cargando…</div>}
-                    </a>
+                    </button>
                     {!readOnly && (
                       <button onClick={() => borrarFoto(f.id)}
                         className="absolute top-1 right-1 p-1 rounded bg-white/90 text-red-500 opacity-0 group-hover:opacity-100 transition"
@@ -171,6 +183,18 @@ export default function ObjetivoDetalleModal({ open, objetivo, pct, api, readOnl
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       </div>
+
+      {ampliada && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60]"
+          onClick={(e) => { e.stopPropagation(); setAmpliada(null); }}>
+          <button type="button" onClick={(e) => { e.stopPropagation(); setAmpliada(null); }}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white hover:bg-white/20"
+            title="Cerrar"><X size={22} /></button>
+          <img src={ampliada.src} alt={ampliada.nombre}
+            className="max-w-[95vw] max-h-[95vh] object-contain"
+            onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }

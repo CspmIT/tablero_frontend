@@ -20,7 +20,13 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
   const { me, colaboradores } = useData();
   const yo = colaboradores?.find((c) => String(c.id) === String(me?.colaboradorId));
   const inicial = (me?.nombre || 'U').trim().charAt(0).toUpperCase();
-  const infoActivo = infoGrupo.some((m) => m.id === activo);
+
+  // Visibilidad por rol: un ítem sin `roles` lo ve todo el mundo; si tiene `roles`,
+  // sólo los tipos listados (según me.tipo).
+  const puedeVer = (item) => !item.roles || item.roles.includes(me?.tipo);
+  const modulosVisibles = modulos.filter(puedeVer);
+  const infoVisibles = infoGrupo.filter(puedeVer);
+  const infoActivo = infoVisibles.some((m) => m.id === activo);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
@@ -65,7 +71,7 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
             <Menu size={20} />
           </button>
           <nav className="flex-1 py-1 overflow-y-auto">
-            {modulos.map(m => {
+            {modulosVisibles.map(m => {
               const Icono = m.icon;
               const esActivo = activo === m.id;
               return (
@@ -82,7 +88,7 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
               );
             })}
 
-            {infoGrupo.length > 0 && (
+            {infoVisibles.length > 0 && (
               <div className="mt-1 border-t border-slate-100 pt-1">
                 <button ref={infoBtnRef} onClick={toggleInfo}
                   title={!abierto ? 'Información adicional' : undefined}
@@ -98,7 +104,7 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
                     <div className="fixed inset-0 z-40" onClick={() => setInfoAbierto(false)} />
                     <div className="fixed z-50 w-52 bg-white rounded-xl shadow-lg border border-slate-200 py-1"
                       style={{ top: flyPos.top, left: flyPos.left }}>
-                      {infoGrupo.map((m) => {
+                      {infoVisibles.map((m) => {
                         const I = m.icon;
                         return (
                           <button key={m.id} onClick={() => { onSelect(m.id); setInfoAbierto(false); }}

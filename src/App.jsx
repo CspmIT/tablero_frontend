@@ -18,9 +18,10 @@ import Dashboard from './modules/Dashboard.jsx';
 import Importar from './modules/Importar.jsx';
 import ImportarGrilla from './modules/ImportarGrilla.jsx';
 
-// Navegación principal
+// Navegación principal.
+// `roles`: si está, sólo esos tipos de colaborador ven el ítem; si falta, lo ven todos.
 const MODULOS = [
-  { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true },
+  { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true, roles: ['manager', 'gerencial'] },
   { id: 'grilla', label: 'Grilla', icon: CalendarDays, listo: true },
   { id: 'guardias', label: 'Guardias', icon: Shield, listo: true },
   { id: 'crm', label: 'CRM', icon: Handshake, listo: true },
@@ -28,14 +29,15 @@ const MODULOS = [
   { id: 'objetivos', label: 'Objetivos', icon: Target, listo: true },
 ];
 
-// Agrupados bajo "Información adicional" (igual que el standalone)
+// Agrupados bajo "Información adicional" (igual que el standalone).
+// El grupo es sólo para manager, salvo Francos que lo ve todo el mundo.
 const INFO = [
-  { id: 'equipo', label: 'Equipo', icon: Users, listo: true },
-  { id: 'costos', label: 'Costos op.', icon: Wallet, listo: true },
+  { id: 'equipo', label: 'Equipo', icon: Users, listo: true, roles: ['manager'] },
+  { id: 'costos', label: 'Costos op.', icon: Wallet, listo: true, roles: ['manager'] },
   { id: 'francos', label: 'Francos', icon: CalendarMinus, listo: true },
-  { id: 'feriados', label: 'Fechas especiales', icon: CalendarCheck, listo: true },
-  { id: 'importar', label: 'Importar datos', icon: Upload, listo: true },
-  { id: 'importar_grilla', label: 'Importar grilla', icon: FileSpreadsheet, listo: true },
+  { id: 'feriados', label: 'Fechas especiales', icon: CalendarCheck, listo: true, roles: ['manager'] },
+  { id: 'importar', label: 'Importar datos', icon: Upload, listo: true, roles: ['manager'] },
+  { id: 'importar_grilla', label: 'Importar grilla', icon: FileSpreadsheet, listo: true, roles: ['manager'] },
 ];
 
 function Contenido({ activo }) {
