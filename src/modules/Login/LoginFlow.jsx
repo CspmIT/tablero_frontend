@@ -45,12 +45,11 @@ export default function LoginFlow({ onLogged }) {
         } catch { /* dejamos tokenApp en null; el paso final avisa */ }
       }
 
-      if (clientes.length > 1) {
-        setCtx({ email, tokenApp, clientes });
-        setPaso('select');
-      } else {
-        await emitirJwt(email, tokenApp);
-      }
+      // Por ahora salteamos la pantalla de selección de cooperativas y entramos
+      // directo al tablero. El backend es single-tenant (el tokenApp es el mismo
+      // para todos los clientes), así que el cliente sólo sería contexto.
+      void clientes;
+      await emitirJwt(email, tokenApp);
     } catch (e) {
       setError(traducirError(e));
     } finally {
