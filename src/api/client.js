@@ -1,6 +1,6 @@
 import { getToken } from './auth.js';
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1';
+const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 export class ApiError extends Error {
   constructor(status, code, message) {
