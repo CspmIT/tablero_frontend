@@ -1,0 +1,46 @@
+{
+	"productName": "Tablero",
+	"version": "1.0.0",
+	"identifier": "com.cooptech.tablero",
+	"build": {
+		"beforeDevCommand": "npm run dev",
+		"beforeBuildCommand": "npm run build",
+		"devUrl": "http://localhost:5173",
+		"frontendDist": "../dist"
+	},
+	"bundle": {
+		"active": true,
+		"targets": ["msi", "deb", "rpm", "appimage", "dmg"],
+		"icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+		"createUpdaterArtifacts": true
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "Tablero",
+				"width": 1024,
+				"height": 768,
+				"resizable": true,
+				"maximized": true
+			}
+		],
+		"security": {
+			"capabilities": [
+				{
+					"identifier": "store-access",
+					"windows": ["main"],
+					"platforms": ["linux", "macOS", "windows"],
+					"permissions": ["store:default", "process:default", "updater:default", "core:app:allow-version"]
+				}
+			]
+		}
+	},
+	"plugins": {
+		"updater": {
+			"active": true,
+			"endpoints": ["https://storageov.cooptech.com.ar/releases/tablero-releases/latest.json"],
+			"dialog": true,
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyQjU2ODZCMTA2M0EzRDQKUldUVW8yTVFhMmkxb3V3WFdoaWpsOTZ0NzdSWHA2eUlrQmpHOUxrb2hxVlhKL1YxVzhHSDh1SVkK"
+		}
+	}
+}

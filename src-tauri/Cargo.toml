@@ -1,0 +1,16 @@
+[package]
+name = "tablero-desktop"
+version = "1.0.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.4.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.4.0", features = ["tray-icon"] }
+tauri-plugin-store = "2.4.1"
+tauri-plugin-updater = "2.4.1"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-process = "2"
