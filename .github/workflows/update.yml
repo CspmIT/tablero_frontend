@@ -102,7 +102,7 @@ jobs:
                       -H "secretkey: $SECRET" \
                       -H "Content-Type: application/octet-stream" \
                       --data-binary "@$f" \
-                      "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/v${VERSION}/${name}"
+                      "${STORAGEOV_URL}/minio/uploadRelease/${RELEASES_BUCKET}/v${VERSION}/${name}"
                     echo
                   done
 
@@ -225,7 +225,7 @@ jobs:
                     -H "secretkey: $SECRET" \
                     -H "Content-Type: application/octet-stream" \
                     --data-binary "@latest.json" \
-                    "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/v${VERSION}/latest.json"
+                    "${STORAGEOV_URL}/minio/uploadRelease/${RELEASES_BUCKET}/v${VERSION}/latest.json"
 
                   # Última (la que consulta el updater de Tauri en /tablero-releases/latest.json)
                   curl -fsS -X POST \
@@ -233,7 +233,7 @@ jobs:
                     -H "secretkey: $SECRET" \
                     -H "Content-Type: application/octet-stream" \
                     --data-binary "@latest.json" \
-                    "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/latest.json"
+                    "${STORAGEOV_URL}/minio/uploadRelease/${RELEASES_BUCKET}/latest.json"
 
                   # downloads.json (la que consulta el modal de descargas del front)
                   curl -fsS -X POST \
@@ -241,7 +241,7 @@ jobs:
                     -H "secretkey: $SECRET" \
                     -H "Content-Type: application/octet-stream" \
                     --data-binary "@downloads.json" \
-                    "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/downloads.json"
+                    "${STORAGEOV_URL}/minio/uploadRelease/${RELEASES_BUCKET}/downloads.json"
 
             # Publica latest.json también como asset de un GitHub Release
             # para que los desktops viejos (con endpoint github.com hardcodeado)
