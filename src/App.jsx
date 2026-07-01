@@ -4,6 +4,7 @@ import { DataProvider, useData } from './data/DataContext.jsx';
 import { isAuthenticated, logout } from './api/auth.js';
 import LoginFlow from './modules/Login/LoginFlow.jsx';
 import Layout from './components/Layout.jsx';
+import UpdateManager from './components/UpdateManager.jsx';
 import Equipo from './modules/Equipo.jsx';
 import Grilla from './modules/Grilla.jsx';
 import MiSemana from './modules/MiSemana.jsx';
@@ -87,6 +88,7 @@ export default function App() {
       <Layout modulos={MODULOS} infoGrupo={INFO} activo={activo} onSelect={setActivo} onLogout={cerrarSesion}>
         <Contenido activo={activo} />
       </Layout>
+      <UpdateManager />
     </DataProvider>
   );
 }
