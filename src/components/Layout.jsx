@@ -31,7 +31,7 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
   const infoActivo = infoVisibles.some((m) => m.id === activo);
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
+    <div className="h-screen overflow-hidden flex flex-col bg-slate-50 text-slate-800">
       {/* Topbar con gradiente de marca */}
       <header className="h-14 flex items-center justify-between px-4 text-white shrink-0
                          bg-gradient-to-r from-coop-azul to-[#1a2d6b] shadow">

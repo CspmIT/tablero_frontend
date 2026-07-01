@@ -39,7 +39,6 @@
 		"updater": {
 			"active": true,
 			"endpoints": ["https://storageov.cooptech.com.ar/releases/tablero-releases/latest.json"],
-			"dialog": true,
 			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEyQjU2ODZCMTA2M0EzRDQKUldUVW8yTVFhMmkxb3V3WFdoaWpsOTZ0NzdSWHA2eUlrQmpHOUxrb2hxVlhKL1YxVzhHSDh1SVkK"
 		}
 	}
