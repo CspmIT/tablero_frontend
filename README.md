@@ -5,8 +5,8 @@ Se conecta al backend (la API) que levantaste por separado.
 
 ## Qué necesitás
 
-- **Node.js 20 o superior** (el mismo que usaste para el backend).
-- El **backend corriendo** (en `http://localhost:4000` o en tu túnel).
+-   **Node.js 20 o superior** (el mismo que usaste para el backend).
+-   El **backend corriendo** (en `http://localhost:4000` o en tu túnel).
 
 ## Cómo levantarlo
 
@@ -34,8 +34,8 @@ el guardado en el navegador por llamadas a esta API.
 
 ## Estructura
 
-- `src/api/` — la comunicación con el backend:
-  - `client.js` — el envío de pedidos (maneja la dirección, el token y los errores).
-  - `index.js` — los métodos por recurso (leads, proyectos, etc.).
-  - `auth.js` — el token de sesión.
-- `src/App.jsx` — por ahora, el panel de verificación.
+-   `src/api/` — la comunicación con el backend:
+    -   `client.js` — el envío de pedidos (maneja la dirección, el token y los errores).
+    -   `index.js` — los métodos por recurso (leads, proyectos, etc.).
+    -   `auth.js` — el token de sesión.
+-   `src/App.jsx` — por ahora, el panel de verificación

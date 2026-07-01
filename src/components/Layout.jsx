@@ -1,13 +1,15 @@
 import { useState, useRef } from 'react';
-import { Menu, ClipboardList, ChevronDown, LogOut } from 'lucide-react';
+import { Menu, ClipboardList, ChevronDown, LogOut, MonitorDown } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import FotoImg from './FotoImg.jsx';
+import DesktopDownloadModal from './DesktopDownloadModal.jsx';
 import iconUrl from '../assets/cooptech-icon.png';
 
 export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLogout, children }) {
   const [abierto, setAbierto] = useState(false); // menú cerrado por defecto
   const [infoAbierto, setInfoAbierto] = useState(false);
   const [userAbierto, setUserAbierto] = useState(false);
+  const [descargaAbierto, setDescargaAbierto] = useState(false);
   const infoBtnRef = useRef(null);
   const [flyPos, setFlyPos] = useState({ top: 0, left: 0 });
   const toggleInfo = () => {
@@ -39,6 +41,12 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
           <span className="hidden sm:inline text-sm text-blue-200">· Tablero de Mando</span>
         </div>
         <div className="relative flex items-center gap-3">
+          <button onClick={() => setDescargaAbierto(true)}
+            title="Descargar versión escritorio"
+            className="flex items-center gap-1.5 rounded-lg bg-white/15 hover:bg-white/25 px-3 py-1.5 text-sm font-medium">
+            <MonitorDown size={16} />
+            <span className="hidden sm:inline">Descargar versión escritorio</span>
+          </button>
           {me && <span className="hidden sm:inline text-sm text-blue-100">{me.nombre}</span>}
           <button onClick={() => setUserAbierto((o) => !o)}
             className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center text-sm font-semibold overflow-hidden hover:ring-2 hover:ring-white/40">
@@ -125,6 +133,8 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
 
         <main className="flex-1 p-6 overflow-auto">{children}</main>
       </div>
+
+      <DesktopDownloadModal open={descargaAbierto} onClose={() => setDescargaAbierto(false)} />
     </div>
   );
 }

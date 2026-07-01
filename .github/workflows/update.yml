@@ -1,0 +1,268 @@
+name: Tauri Release
+
+on:
+    push:
+        branches:
+            - tauri
+
+env:
+    STORAGEOV_URL: https://storageov.cooptech.com.ar
+    # Bucket de MinIO donde viven los releases del Tablero (separado de Reconecta).
+    RELEASES_BUCKET: tablero-releases
+
+permissions:
+    contents: write
+
+jobs:
+    build:
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - platform: windows-latest
+                      target: windows-x86_64
+                    - platform: ubuntu-latest
+                      target: linux-x86_64
+
+        runs-on: ${{ matrix.platform }}
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Install dependencies (Linux)
+              if: matrix.platform == 'ubuntu-latest'
+              run: |
+                  sudo apt update
+                  sudo apt install -y \
+                    libwebkit2gtk-4.1-dev \
+                    libgtk-3-dev \
+                    libayatana-appindicator3-dev \
+                    librsvg2-dev
+
+            - name: Install frontend deps
+              run: npm ci
+
+            - name: Build Tauri
+              uses: tauri-apps/tauri-action@v0.5.16
+              env:
+                  # El front baja/lee archivos directo contra storageov, así que
+                  # estas VITE_ se hornean en el bundle de Vite. Como .env está en
+                  # .gitignore, hay que inyectarlas acá en CI.
+                  VITE_API_URL: https://tablero.cooptech.com.ar/api
+                  VITE_ENTORNO: prod
+                  VITE_MINIO_URL: https://storageov.cooptech.com.ar
+                  VITE_MINIO_BUCKET: tablero
+                  VITE_MINIO_RELEASES_BUCKET: ${{ env.RELEASES_BUCKET }}
+                  VITE_MINIO_ACCESS: ${{ secrets.MINIO_ACCESS }}
+                  VITE_MINIO_SECRET: ${{ secrets.MINIO_SECRET }}
+                  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+                  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+            - name: Get version
+              id: version
+              shell: bash
+              run: echo "value=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> $GITHUB_OUTPUT
+
+            - name: Upload artifacts to storageov
+              shell: bash
+              env:
+                  VERSION: ${{ steps.version.outputs.value }}
+                  ACCESS: ${{ secrets.MINIO_ACCESS }}
+                  SECRET: ${{ secrets.MINIO_SECRET }}
+              run: |
+                  set -euo pipefail
+                  BUNDLE_DIR=src-tauri/target/release/bundle
+
+                  mapfile -t files < <(find "$BUNDLE_DIR" -maxdepth 2 -type f \( \
+                    -name "*.msi" -o -name "*.msi.zip" -o -name "*.msi.zip.sig" -o \
+                    -name "*.exe" -o -name "*.nsis.zip" -o -name "*.nsis.zip.sig" -o \
+                    -name "*.deb" -o -name "*.rpm" -o \
+                    -name "*.AppImage" -o -name "*.AppImage.tar.gz" -o -name "*.AppImage.tar.gz.sig" -o \
+                    -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \
+                  \))
+
+                  if [ ${#files[@]} -eq 0 ]; then
+                    echo "No artifacts found under $BUNDLE_DIR" >&2
+                    exit 1
+                  fi
+
+                  for f in "${files[@]}"; do
+                    name=$(basename "$f")
+                    echo "→ $name"
+                    curl -fsS -X POST \
+                      -H "accesskey: $ACCESS" \
+                      -H "secretkey: $SECRET" \
+                      -H "Content-Type: application/octet-stream" \
+                      --data-binary "@$f" \
+                      "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/v${VERSION}/${name}"
+                    echo
+                  done
+
+            - name: Extract release metadata
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  BUNDLE_DIR=src-tauri/target/release/bundle
+                  SIG_FILE=$(find "$BUNDLE_DIR" -maxdepth 2 -type f -name "*.sig" | head -n 1)
+                  if [ -z "$SIG_FILE" ]; then
+                    echo "No .sig file produced — check that createUpdaterArtifacts is true" >&2
+                    exit 1
+                  fi
+                  BUNDLE_FILE="${SIG_FILE%.sig}"
+
+                  mkdir -p updater-meta
+                  cp "$SIG_FILE" "updater-meta/${{ matrix.target }}.sig"
+                  basename "$BUNDLE_FILE" > "updater-meta/${{ matrix.target }}.filename"
+
+                  # Nombres de los instaladores que verá el usuario en el modal de descargas
+                  # (distintos del bundle del updater, que es un .zip/.tar.gz).
+                  case "${{ matrix.target }}" in
+                    windows-x86_64)
+                      MSI=$(find "$BUNDLE_DIR/msi" -maxdepth 1 -name "*.msi" | head -n 1)
+                      [ -n "$MSI" ] && basename "$MSI" > updater-meta/installer.windows.msi
+                      ;;
+                    linux-x86_64)
+                      APP=$(find "$BUNDLE_DIR/appimage" -maxdepth 1 -name "*.AppImage" | head -n 1)
+                      DEB=$(find "$BUNDLE_DIR/deb" -maxdepth 1 -name "*.deb" | head -n 1)
+                      [ -n "$APP" ] && basename "$APP" > updater-meta/installer.linux.appimage
+                      [ -n "$DEB" ] && basename "$DEB" > updater-meta/installer.linux.deb
+                      ;;
+                  esac
+
+            - name: Upload updater metadata artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: updater-meta-${{ matrix.target }}
+                  path: updater-meta/
+
+    publish-latest-json:
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Download updater metadata
+              uses: actions/download-artifact@v4
+              with:
+                  path: meta
+                  pattern: updater-meta-*
+                  merge-multiple: true
+
+            - name: Get version
+              id: version
+              run: echo "value=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> $GITHUB_OUTPUT
+
+            - name: Generate latest.json
+              env:
+                  VERSION: ${{ steps.version.outputs.value }}
+              run: |
+                  set -euo pipefail
+                  BASE_URL="${STORAGEOV_URL}/releases/${RELEASES_BUCKET}/v${VERSION}"
+
+                  jq -n \
+                    --arg version  "$VERSION" \
+                    --arg date     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    --arg notes    "${RELEASE_NOTES:-Nueva versión disponible}" \
+                    --arg win_sig  "$(cat meta/windows-x86_64.sig)" \
+                    --arg win_url  "$BASE_URL/$(cat meta/windows-x86_64.filename)" \
+                    --arg lnx_sig  "$(cat meta/linux-x86_64.sig)" \
+                    --arg lnx_url  "$BASE_URL/$(cat meta/linux-x86_64.filename)" \
+                    '{
+                      version: $version,
+                      notes: $notes,
+                      pub_date: $date,
+                      platforms: {
+                        "windows-x86_64": { signature: $win_sig, url: $win_url },
+                        "linux-x86_64":   { signature: $lnx_sig, url: $lnx_url }
+                      }
+                    }' > latest.json
+
+                  echo "── latest.json ──"
+                  cat latest.json
+
+            - name: Generate downloads.json
+              env:
+                  VERSION: ${{ steps.version.outputs.value }}
+              run: |
+                  set -euo pipefail
+                  BASE_URL="${STORAGEOV_URL}/releases/${RELEASES_BUCKET}/v${VERSION}"
+
+                  jq -n \
+                    --arg version "v${VERSION}" \
+                    --arg base    "$BASE_URL" \
+                    --arg win_msi "$(cat meta/installer.windows.msi 2>/dev/null || echo)" \
+                    --arg app     "$(cat meta/installer.linux.appimage 2>/dev/null || echo)" \
+                    --arg deb     "$(cat meta/installer.linux.deb 2>/dev/null || echo)" \
+                    '{
+                      version: $version,
+                      windows:  (if $win_msi == "" then null else { name: $win_msi, browser_download_url: ($base + "/" + $win_msi) } end),
+                      appImage: (if $app == ""     then null else { name: $app,     browser_download_url: ($base + "/" + $app) }     end),
+                      deb:      (if $deb == ""     then null else { name: $deb,     browser_download_url: ($base + "/" + $deb) }     end)
+                    }' > downloads.json
+
+                  echo "── downloads.json ──"
+                  cat downloads.json
+
+            - name: Upload latest.json to storageov
+              env:
+                  VERSION: ${{ steps.version.outputs.value }}
+                  ACCESS: ${{ secrets.MINIO_ACCESS }}
+                  SECRET: ${{ secrets.MINIO_SECRET }}
+              run: |
+                  set -euo pipefail
+
+                  # Versionada (histórico)
+                  curl -fsS -X POST \
+                    -H "accesskey: $ACCESS" \
+                    -H "secretkey: $SECRET" \
+                    -H "Content-Type: application/octet-stream" \
+                    --data-binary "@latest.json" \
+                    "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/v${VERSION}/latest.json"
+
+                  # Última (la que consulta el updater de Tauri en /tablero-releases/latest.json)
+                  curl -fsS -X POST \
+                    -H "accesskey: $ACCESS" \
+                    -H "secretkey: $SECRET" \
+                    -H "Content-Type: application/octet-stream" \
+                    --data-binary "@latest.json" \
+                    "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/latest.json"
+
+                  # downloads.json (la que consulta el modal de descargas del front)
+                  curl -fsS -X POST \
+                    -H "accesskey: $ACCESS" \
+                    -H "secretkey: $SECRET" \
+                    -H "Content-Type: application/octet-stream" \
+                    --data-binary "@downloads.json" \
+                    "${STORAGEOV_URL}/minio/uploadRelease/releases/${RELEASES_BUCKET}/downloads.json"
+
+            # Publica latest.json también como asset de un GitHub Release
+            # para que los desktops viejos (con endpoint github.com hardcodeado)
+            # puedan seguir actualizándose. Las URLs apuntan a storageov,
+            # así que el repo solo aloja el latest.json, no los binarios.
+            - name: Publish latest.json to GitHub release
+              env:
+                  VERSION: ${{ steps.version.outputs.value }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  RELEASE_NOTES: ${{ env.RELEASE_NOTES }}
+              run: |
+                  set -euo pipefail
+                  TAG="v${VERSION}"
+                  TITLE="Tablero ${TAG}"
+                  NOTES="${RELEASE_NOTES:-Nueva versión disponible}"
+
+                  if gh release view "$TAG" >/dev/null 2>&1; then
+                    echo "Release $TAG ya existe, actualizando latest.json"
+                    gh release upload "$TAG" latest.json --clobber
+                  else
+                    gh release create "$TAG" latest.json \
+                      --title "$TITLE" \
+                      --notes "$NOTES"
+                  fi
