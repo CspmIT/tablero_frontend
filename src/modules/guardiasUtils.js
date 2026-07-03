@@ -35,14 +35,24 @@ export function ferMidWeek(weekObj, feriados, anio) {
   const bridge = bridgeDaysAtStart(weekObj, feriados, anio);
   const startIdx = Math.max(bridge, 1);
   const res = [];
-  for (let i = startIdx; i < 5; i++) { const iso = fmtISO(ds[i]); if (feriados[iso]) res.push({ date: iso, name: feriados[iso] }); }
+  for (let i = startIdx; i < ds.length; i++) {
+    const day = ds[i].getDay(); // 0 = domingo, 6 = sábado
+    if (day === 0 || day === 6) continue; // un feriado en fin de semana no suma franco adicional
+    const iso = fmtISO(ds[i]);
+    if (feriados[iso]) res.push({ date: iso, name: feriados[iso] });
+  }
   return res;
 }
 
-// Francos ganados por una guardia: 1 base + feriados mid-week + puente a la semana siguiente.
+// Máximo de francos que puede sumar una guardia en una semana.
+export const MAX_FRANCOS = 2;
+
+// Francos ganados por una guardia: 1 base + feriados mid-week + puente a la semana
+// siguiente, topeado en MAX_FRANCOS (nunca más de 2 francos por semana).
 export function ganadosForAssignment(assignment, weekObj, feriados, anio, guardias) {
   if (assignment.vacation) return 0;
-  return 1 + ferMidWeek(weekObj, feriados, anio).length + bridgeDaysToNext(weekObj, feriados, guardias, anio);
+  const total = 1 + ferMidWeek(weekObj, feriados, anio).length + bridgeDaysToNext(weekObj, feriados, guardias, anio);
+  return Math.min(total, MAX_FRANCOS);
 }
 
 // Genera las semanas (lun a dom) del año, desde el primer lunes.
