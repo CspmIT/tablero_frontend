@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { isTauri } from '../utils/isTauri.js';
 
 // Lógica del actualizador de la app de escritorio (Tauri v2).
 // Espeja el flujo de Reconecta (useUpdater.js) pero expone estado en vez de
@@ -15,7 +16,6 @@ import { relaunch } from '@tauri-apps/plugin-process';
 
 // El chequeo sólo tiene sentido dentro del binario Tauri; en el navegador
 // (dev web o build de Vite servido aparte) no existe el updater.
-const enTauri = () => typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
 
 export function useUpdater() {
 	const [status, setStatus] = useState('idle');
@@ -24,7 +24,7 @@ export function useUpdater() {
 	const [error, setError] = useState(null);
 
 	const checkForUpdates = useCallback(async () => {
-		if (!enTauri()) return;
+		if (!isTauri()) return;
 		try {
 			const found = await check(); // lee latest.json del endpoint de tauri.conf.json
 			if (found) {
