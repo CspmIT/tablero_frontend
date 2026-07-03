@@ -1,6 +1,6 @@
 {
 	"productName": "Tablero",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"identifier": "com.cooptech.tablero",
 	"build": {
 		"beforeDevCommand": "npm run dev",

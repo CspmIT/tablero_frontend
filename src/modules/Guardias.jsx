@@ -126,8 +126,7 @@ export default function Guardias() {
                       if (st === 'vac') { cls = 'bg-slate-100 text-slate-400 italic text-xs'; label = 'vac.'; }
                       else if (st === 'assigned') {
                         label = String(ganados);
-                        if (ganados >= 3) cls = 'bg-emerald-500 text-white font-bold';
-                        else if (ganados === 2) cls = 'bg-blue-600 text-white font-bold';
+                        if (ganados >= 2) cls = 'bg-blue-600 text-white font-bold';
                         else cls = 'bg-slate-800 text-white font-bold';
                       }
                       return (
