@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useData } from '../data/DataContext.jsx';
 import { isActiveCollab, isInterno, fmtISO } from './grillaUtils.js';
-import { mergeWeeks, ganadosForAssignment } from './guardiasUtils.js';
+import { mergeWeeks, ganadosForAssignment, datesOfWeekObj } from './guardiasUtils.js';
 import { cumpleYaPaso, mmddFromCollab, fmtFeriadoDate } from './fechasUtils.js';
 
 const inputCls = 'border border-slate-300 rounded-lg px-2 py-1.5 text-sm';
@@ -49,10 +49,21 @@ export default function Francos() {
 
   useEffect(() => { recargar(); }, [recargar]);
 
+  // Una semana de guardia recién "gana" francos cuando ya terminó (su domingo
+  // quedó antes de hoy). Así no se suman guardias futuras ni la que está en curso.
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const semanaTerminada = (w) => {
+    const ds = datesOfWeekObj(w, anio);
+    const domingo = ds[6];
+    return domingo && domingo < hoy;
+  };
+
   const cf = (c) => {
     const carry = carryMap[c.id] || 0;
     let ganados = 0;
     for (const w of weeks) {
+      if (!semanaTerminada(w)) continue;
       for (const a of (w.asignaciones || [])) {
         if (a.id === c.id) ganados += ganadosForAssignment(a, w, feriadosMap, anio, weeks);
       }
