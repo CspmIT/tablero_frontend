@@ -95,7 +95,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
           <table className="w-full min-w-[860px] text-sm border-collapse table-fixed">
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-left">
-                <th className="px-3 py-2 font-medium sticky left-0 bg-slate-50 w-32 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.12)]">Colaborador</th>
+                <th className="px-3 py-2 font-medium sticky left-0 z-10 bg-slate-50 w-32 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.12)]">Colaborador</th>
                 {dates.map((d, i) => (
                   <th key={i} className="px-3 py-2 font-medium">
                     {DAYS_ES[i]} <span className="text-slate-400 font-normal">{fmtDDMM(d)}</span>
@@ -114,7 +114,8 @@ export default function Grilla({ vista = 'grilla', setVista }) {
                 const esGuardia = guardSet.has(c.id);
                 return (
                   <tr key={c.id} className="hover:bg-slate-50/50 align-top">
-                    <td className={`px-3 py-2 align-top sticky left-0 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.12)] ${esGuardia ? 'bg-coop-naranja/10 border-l-4 border-coop-naranja' : 'bg-white'}`}>
+                    {/* Fondo opaco: la celda es sticky y con transparencia se ve el contenido al scrollear */}
+                    <td className={`px-3 py-2 align-top sticky left-0 z-10 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.12)] ${esGuardia ? 'bg-[#fef4e9] border-l-4 border-coop-naranja' : 'bg-white'}`}>
                       <div className="flex items-start gap-1 font-medium text-slate-800 break-words">
                         {esGuardia && <Shield size={13} className="text-coop-naranja mt-0.5 shrink-0" />}
                         <span>{c.nombre}</span>
