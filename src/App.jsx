@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, LayoutGrid, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet } from 'lucide-react';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, LayoutGrid, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet, Sparkles, BarChart3 } from 'lucide-react';
 import { DataProvider, useData } from './data/DataContext.jsx';
 import { isAuthenticated, logout } from './api/auth.js';
 import LoginFlow from './modules/Login/LoginFlow.jsx';
@@ -18,6 +18,9 @@ import Costos from './modules/Costos.jsx';
 import Dashboard from './modules/Dashboard.jsx';
 import Importar from './modules/Importar.jsx';
 import ImportarGrilla from './modules/ImportarGrilla.jsx';
+import Asistente from './modules/Asistente.jsx';
+import Analisis from './modules/Analisis.jsx';
+import MiMes from './modules/MiMes.jsx';
 
 // Navegación principal.
 // `roles`: si está, sólo esos tipos de colaborador ven el ítem; si falta, lo ven todos.
@@ -28,6 +31,8 @@ const MODULOS = [
   { id: 'crm', label: 'CRM', icon: Handshake, listo: true },
   { id: 'kanban', label: 'Kanban', icon: SquareKanban, listo: true },
   { id: 'objetivos', label: 'Objetivos', icon: Target, listo: true },
+  { id: 'asistente', label: 'Asistente IA', icon: Sparkles, listo: true },
+  { id: 'analisis', label: 'Análisis', icon: BarChart3, listo: true, roles: ['manager', 'gerencial', 'externo'] },
 ];
 
 // Agrupados bajo "Información adicional" (igual que el standalone).
@@ -53,6 +58,7 @@ function Contenido({ activo }) {
   );
   if (activo === 'equipo') return <Equipo />;
   if (activo === 'grilla') {
+    if (subVista === 'mimes') return <MiMes vista={subVista} setVista={setSubVista} />;
     return subVista === 'misemana'
       ? <MiSemana vista={subVista} setVista={setSubVista} />
       : <Grilla vista={subVista} setVista={setSubVista} />;
@@ -65,6 +71,8 @@ function Contenido({ activo }) {
   if (activo === 'objetivos') return <Objetivos />;
   if (activo === 'costos') return <Costos />;
   if (activo === 'dashboard') return <Dashboard />;
+  if (activo === 'asistente') return <Asistente />;
+  if (activo === 'analisis') return <Analisis />;
   if (activo === 'importar') return <Importar />;
   if (activo === 'importar_grilla') return <ImportarGrilla />;
   return <p className="text-slate-400">Este módulo todavía no está migrado.</p>;

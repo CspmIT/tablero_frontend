@@ -7,6 +7,12 @@
 		{
 			"name": "tablero_frontend",
 			"path": ".."
+		},
+		{
+			"path": "../../../../Descargas/Leo_back"
+		},
+		{
+			"path": "../../../../Descargas/Leo_front"
 		}
 	],
 	"settings": {
