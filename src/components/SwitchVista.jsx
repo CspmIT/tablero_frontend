@@ -1,4 +1,5 @@
-// Switch para alternar entre la Grilla (vista del manager) y Mi semana (vista personal).
+// Switch para alternar entre la Grilla (vista del manager), Mi semana (personal)
+// y Mi mes (calendario mensual de solo lectura).
 // Ambas comparten el mismo item de menu; este control va al lado del titulo.
 export default function SwitchVista({ vista, setVista }) {
   const tab = (id, label) => (
@@ -15,6 +16,7 @@ export default function SwitchVista({ vista, setVista }) {
     <div className="inline-flex items-center gap-1 bg-slate-100 rounded-xl p-1">
       {tab('grilla', 'Grilla')}
       {tab('misemana', 'Mi semana')}
+      {tab('mimes', 'Mi mes')}
     </div>
   );
 }

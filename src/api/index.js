@@ -46,6 +46,9 @@ export const api = {
     actividades: (id) => http.get(`/leads/${id}/actividades`),
     addActividad: (id, body) => http.post(`/leads/${id}/actividades`, body),
     ganar: (id, body) => http.post(`/leads/${id}/ganar`, body),
+    facturacion: (id) => http.get(`/leads/${id}/facturacion`),
+    setFacturacion: (id, body) => http.put(`/leads/${id}/facturacion`, body),
+    videollamada: (id, body) => http.post(`/leads/${id}/videollamada`, body),
   },
 
   archivos: {
@@ -75,4 +78,14 @@ export const api = {
   },
   importar: (data) => http.post('/import', data),
   importarReset: () => http.post('/import/reset', { confirmar: 'BLANQUEAR' }),
+
+  asistente: {
+    estado: () => http.get('/asistente/estado'),
+    chat: (messages) => http.post('/asistente/chat', { messages }),
+    setClave: (apiKey) => http.put('/asistente/clave', { apiKey }),
+    borrarClave: () => http.del('/asistente/clave'),
+  },
+  analisis: {
+    horasExtra: (mes) => http.get('/analisis/horas-extra', { mes }),
+  },
 };
