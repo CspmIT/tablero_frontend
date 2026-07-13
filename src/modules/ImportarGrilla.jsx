@@ -68,18 +68,20 @@ export default function ImportarGrilla() {
       <p className="text-sm text-slate-500 mb-5">Carga la grilla semanal (presencias, home office, viajes, licencias, francos, feriados) desde la planilla «Horario Flexible». Cada hoja de año contiene un año.</p>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
-        <label className="text-sm text-coop-azul hover:underline cursor-pointer">
-          Elegir archivo .xlsx
-          <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onArchivo} className="hidden" />
-        </label>
-        {hojas.length > 0 && (
-          <span className="ml-4 text-sm text-slate-600">
-            Hoja (año):{' '}
-            <select value={hoja} onChange={(e) => cambiarHoja(e.target.value)} className="border border-slate-300 rounded px-2 py-1 text-sm">
-              {hojas.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="text-sm text-coop-azul hover:underline cursor-pointer">
+            Elegir archivo .xlsx
+            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onArchivo} className="hidden" />
+          </label>
+          {hojas.length > 0 && (
+            <span className="text-sm text-slate-600">
+              Hoja (año):{' '}
+              <select value={hoja} onChange={(e) => cambiarHoja(e.target.value)} className="border border-slate-300 rounded px-2 py-1 text-sm">
+                {hojas.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </span>
+          )}
+        </div>
         {error && <p className="text-sm text-rose-600 mt-2">{error}</p>}
       </div>
 

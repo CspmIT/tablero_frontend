@@ -69,7 +69,7 @@ export default function CardModal({ open, card, proyectos, initialColumn, onClos
         <label className="block text-xs text-slate-500 mb-1 mt-3">Descripción</label>
         <textarea value={form.descripcion} onChange={(e) => upd('descripcion', e.target.value)} rows={2} className={field} />
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Proyecto</label>
             <select value={form.proyectoId} onChange={(e) => upd('proyectoId', e.target.value)} className={field}>
@@ -85,7 +85,7 @@ export default function CardModal({ open, card, proyectos, initialColumn, onClos
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Prioridad</label>
             <select value={form.prioridad} onChange={(e) => upd('prioridad', e.target.value)} className={field}>
@@ -102,7 +102,7 @@ export default function CardModal({ open, card, proyectos, initialColumn, onClos
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Inicio (plan)</label>
             <input type="date" value={form.fechaInicio} onChange={(e) => upd('fechaInicio', e.target.value)} className={field} />

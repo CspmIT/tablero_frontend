@@ -116,12 +116,12 @@ function ClientesManager({ nombres, usage, onAdd, onRename, onDelete, onMerge })
         <h4 className="text-sm font-semibold text-slate-700">Fusionar dos clientes</h4>
         <p className="text-xs text-slate-500 mt-0.5 mb-3">Los proyectos del primer cliente se reasignan al segundo, y el primero se elimina del catálogo.</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          <select value={mergeFrom} onChange={(e) => setMergeFrom(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-full sm:w-auto">
             <option value="">— Origen —</option>
             {nombres.map((c) => <option key={c} value={c}>{c} ({usage[c] || 0})</option>)}
           </select>
           <span className="text-slate-400">→</span>
-          <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          <select value={mergeTo} onChange={(e) => setMergeTo(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-full sm:w-auto">
             <option value="">— Destino —</option>
             {nombres.filter((c) => c !== mergeFrom).map((c) => <option key={c} value={c}>{c} ({usage[c] || 0})</option>)}
           </select>
@@ -261,7 +261,7 @@ export default function Kanban() {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => setSubtab('tablero')} className={`text-sm px-3 py-1.5 rounded-lg ${subtab === 'tablero' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Tablero <span className="opacity-70">{visibles.length}</span></button>
         <button onClick={() => setSubtab('proyectos')} className={`text-sm px-3 py-1.5 rounded-lg ${subtab === 'proyectos' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Proyectos <span className="opacity-70">{proyectos.length}</span></button>
         <button onClick={() => setSubtab('plantillas')} className={`text-sm px-3 py-1.5 rounded-lg ${subtab === 'plantillas' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Plantillas</button>
@@ -276,11 +276,11 @@ export default function Kanban() {
       {(subtab === 'tablero' || subtab === 'cliente') && (
         <div className="flex flex-wrap gap-2 mb-4">
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por título, tag o proyecto…" className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-48" />
-          <select value={fOwner} onChange={(e) => setFOwner(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          <select value={fOwner} onChange={(e) => setFOwner(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-full sm:w-auto">
             <option value="">Todos los responsables</option>
             {responsables.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
-          <select value={fProyecto} onChange={(e) => setFProyecto(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+          <select value={fProyecto} onChange={(e) => setFProyecto(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-full sm:w-auto">
             <option value="">Todos los proyectos</option>
             {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
@@ -290,11 +290,11 @@ export default function Kanban() {
       {cargando ? (
         <p className="text-slate-500">Cargando…</p>
       ) : subtab === 'tablero' ? (
-        <div className="flex gap-3 overflow-x-auto pb-2">
+        <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
           {COLUMNS.map((col) => {
             const cards = visibles.filter((c) => c.kanbanCol === col.id);
             return (
-              <div key={col.id} className="bg-slate-50 rounded-xl p-2 w-72 shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.id)}>
+              <div key={col.id} className="bg-slate-50 rounded-xl p-2 w-72 shrink-0 snap-start" onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.id)}>
                 <div className="flex items-center justify-between px-1 py-1 mb-1">
                   <span className="text-sm font-semibold text-slate-600">{col.label}</span>
                   <span className="text-xs text-slate-400">{cards.length}</span>
@@ -328,7 +328,7 @@ export default function Kanban() {
                     <span>{nCards} tareas</span>
                   </div>
                 </div>
-                <div className="w-28">
+                <div className="w-20 sm:w-28 shrink-0">
                   <div className="text-right text-xs font-mono text-slate-500">{pct == null ? '—' : pct + '%'}</div>
                   <div className="h-1.5 bg-slate-100 rounded mt-0.5 overflow-hidden"><div className="h-full bg-coop-azul" style={{ width: `${pct || 0}%` }} /></div>
                 </div>
@@ -345,12 +345,12 @@ export default function Kanban() {
           ) : cardsByCliente.map(([cli, cs]) => (
             <div key={cli}>
               <h3 className="text-sm font-semibold text-slate-700 mb-2">{cli} <span className="text-slate-400 font-normal">· {cs.length} tarea{cs.length === 1 ? '' : 's'}</span></h3>
-              <div className="flex gap-3 overflow-x-auto pb-2">
+              <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
                 {COLUMNS.map((col) => {
                   const colCs = cs.filter((c) => c.kanbanCol === col.id);
                   if (colCs.length === 0) return null;
                   return (
-                    <div key={col.id} className="bg-slate-50 rounded-xl p-2 w-72 shrink-0">
+                    <div key={col.id} className="bg-slate-50 rounded-xl p-2 w-72 shrink-0 snap-start">
                       <div className="flex items-center justify-between px-1 py-1 mb-1">
                         <span className="text-sm font-semibold text-slate-600">{col.label}</span>
                         <span className="text-xs text-slate-400">{colCs.length}</span>
