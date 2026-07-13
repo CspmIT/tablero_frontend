@@ -66,7 +66,7 @@ export default function Guardias() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className="text-xl font-semibold text-coop-negro">Guardias <span className="text-sm font-normal text-slate-400">rotación {anio}</span></h2>
         <div className="flex items-center gap-2 text-sm">
           <button onClick={() => setAnio(anio - 1)} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
@@ -85,7 +85,7 @@ export default function Guardias() {
         <p className="text-sm text-slate-400">No hay colaboradores que hagan guardia. Activá "Participa de la rotación de guardias" en Equipo.</p>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-          <table className="text-sm w-full border-collapse">
+          <table className="text-sm w-full min-w-[640px] border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-500">
                 <th className="border border-slate-200 px-2 py-2 font-medium text-[11px] uppercase tracking-wide w-12">Sem</th>

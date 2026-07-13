@@ -65,7 +65,7 @@ export default function FechasEspeciales() {
   return (
     <div>
       {/* Feriados */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className="text-xl font-semibold text-coop-negro">
           Feriados y días no laborables <span className="text-sm font-normal text-slate-400">aplican a todo el área</span>
         </h2>
@@ -83,10 +83,10 @@ export default function FechasEspeciales() {
           {feriados.map((f) => {
             const { dmy, dow } = fmtFeriadoDate(f.fecha);
             return (
-              <div key={f.id} className="flex items-center gap-3 px-4 py-2.5">
+              <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
                 <div className="font-mono text-sm text-slate-700 w-24">{dmy}</div>
                 <div className="text-xs text-slate-400 w-20">{dow}</div>
-                <div className="flex-1 text-slate-800">{f.nombre}</div>
+                <div className="flex-1 min-w-[140px] text-slate-800">{f.nombre}</div>
                 <button onClick={() => setFeriadoCtx({ feriado: f })} className="text-coop-azul hover:underline text-sm mr-2">Editar</button>
                 <button onClick={() => borrarFeriado(f)} className="text-red-500 hover:underline text-sm">Borrar</button>
               </div>

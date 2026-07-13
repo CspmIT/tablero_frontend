@@ -78,7 +78,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <SwitchVista vista={vista} setVista={setVista} />
         <div className="flex items-center gap-2 text-sm">
           <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
@@ -92,7 +92,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
         <p className="text-slate-500">Cargando…</p>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-          <table className="w-full text-sm border-collapse table-fixed">
+          <table className="w-full min-w-[860px] text-sm border-collapse table-fixed">
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-left">
                 <th className="px-3 py-2 font-medium sticky left-0 bg-slate-50 w-32 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.12)]">Colaborador</th>

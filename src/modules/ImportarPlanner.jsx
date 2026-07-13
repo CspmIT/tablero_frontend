@@ -72,7 +72,7 @@ export default function ImportarPlanner({ open, clientes, onClose, onDone }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={(e) => e.target === e.currentTarget && !importando && onClose()}>
-      <div className="bg-white rounded-2xl w-full max-w-lg p-5">
+      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5">
         <h3 className="text-lg font-semibold text-coop-negro mb-2">Importar de Microsoft Planner</h3>
         <p className="text-sm text-slate-500 mb-4">Subí el export <b>.xlsx</b> de Planner. Cada tarea se convierte en tarjeta; el depósito se usa como cliente y el título "Proyecto: Tarea" separa el proyecto.</p>
 

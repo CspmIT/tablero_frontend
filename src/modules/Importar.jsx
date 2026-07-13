@@ -92,8 +92,8 @@ export default function Importar() {
           <li>Abrí el archivo standalone (<span className="font-mono text-xs">Tablero_de_mando_standalone…html</span>) en el navegador.</li>
           <li>Abrí la consola (F12 → pestaña «Console»).</li>
           <li>Pegá esto y presioná Enter (copia los datos al portapapeles):
-            <div className="mt-1 flex items-center gap-2">
-              <code className="bg-slate-100 rounded px-2 py-1 text-xs font-mono">{SNIPPET}</code>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <code className="bg-slate-100 rounded px-2 py-1 text-xs font-mono break-all">{SNIPPET}</code>
               <button onClick={() => navigator.clipboard?.writeText(SNIPPET)} className="text-xs text-coop-azul hover:underline">copiar</button>
             </div>
           </li>
@@ -112,7 +112,7 @@ export default function Importar() {
         <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={6}
           placeholder='Pegá acá el JSON exportado…'
           className="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono text-xs" />
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <button onClick={importar} disabled={!texto.trim() || estado === 'corriendo'}
             className="bg-coop-azul text-white text-sm rounded-lg px-4 py-2 disabled:opacity-40">
             {estado === 'corriendo' ? 'Importando…' : 'Importar'}
@@ -127,17 +127,19 @@ export default function Importar() {
             Resultado · <span className="text-emerald-600">{resultado.totalCreados} creados</span>
             {resultado.totalErrores > 0 && <span className="text-rose-500"> · {resultado.totalErrores} con error</span>}
           </div>
-          <table className="w-full text-sm">
-            <tbody className="divide-y divide-slate-100">
-              {Object.entries(resultado.detalle || {}).map(([k, v]) => (
-                <tr key={k}>
-                  <td className="py-1.5 text-slate-600">{LABELS[k] || k}</td>
-                  <td className="py-1.5 text-right font-mono text-emerald-600">{v.creados}</td>
-                  <td className="py-1.5 text-right font-mono text-rose-400 w-20">{v.errores.length > 0 ? `${v.errores.length} err` : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-slate-100">
+                {Object.entries(resultado.detalle || {}).map(([k, v]) => (
+                  <tr key={k}>
+                    <td className="py-1.5 text-slate-600">{LABELS[k] || k}</td>
+                    <td className="py-1.5 text-right font-mono text-emerald-600">{v.creados}</td>
+                    <td className="py-1.5 text-right font-mono text-rose-400 w-20">{v.errores.length > 0 ? `${v.errores.length} err` : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {Object.entries(resultado.detalle || {}).some(([, v]) => v.errores.length > 0) && (
             <details className="mt-3">
               <summary className="text-xs text-slate-500 cursor-pointer">Ver errores</summary>

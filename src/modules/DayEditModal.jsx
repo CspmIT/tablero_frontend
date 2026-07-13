@@ -156,7 +156,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
         {status === 'present' && (
           <div className="mb-3">
             <label className="block text-sm text-slate-600 mb-1">Horario flexible de ingreso</label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {ENTRY_TIMES.map((t) => (
                 <button
                   key={t}
@@ -231,7 +231,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
             Cargar horas extra
           </label>
           {hsExtraOn && (
-            <div className="flex items-end gap-3 mt-2">
+            <div className="flex flex-wrap items-end gap-3 mt-2">
               <div>
                 <label className="block text-xs text-slate-500 mb-0.5">Ingreso</label>
                 <input type="time" value={hsIng} onChange={(e) => setHsIng(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />

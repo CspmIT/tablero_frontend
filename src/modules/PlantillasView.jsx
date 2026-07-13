@@ -40,7 +40,7 @@ function Editor({ base, plantillas, colaboradores, onClose, onSave }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5">
         <h3 className="text-lg font-semibold text-coop-negro mb-4">{isNew ? 'Nueva plantilla' : `Editar ${base.nombre}`}</h3>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="col-span-1">
             <label className="block text-xs text-slate-500 mb-1">Nombre</label>
             <input value={nombre} onChange={(e) => setNombre(e.target.value)} className={field} />
@@ -66,9 +66,9 @@ function Editor({ base, plantillas, colaboradores, onClose, onSave }) {
           {etapas.length === 0 && <p className="text-sm text-slate-400">Sin etapas. Agregá la primera.</p>}
           {etapas.map((e, i) => (
             <div key={i} className="border border-slate-200 rounded-lg p-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-xs text-slate-400">{i + 1}</span>
-                <input value={e.titulo} onChange={(ev) => updEtapa(i, 'titulo', ev.target.value)} placeholder="Título de la etapa" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm flex-1" />
+                <input value={e.titulo} onChange={(ev) => updEtapa(i, 'titulo', ev.target.value)} placeholder="Título de la etapa" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm flex-1 min-w-40" />
                 <select value={e.tipo} onChange={(ev) => updEtapa(i, 'tipo', ev.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
                   {TIPOS_ETAPA.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
                 </select>

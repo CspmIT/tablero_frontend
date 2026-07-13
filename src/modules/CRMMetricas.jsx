@@ -83,7 +83,7 @@ export default function CRMMetricas({ open, leads, periodo, onClose }) {
         <div className="p-4 flex flex-col gap-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Conversión del embudo</div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Kpi label="Leads → Oportunidad" value={pct(m.conv1)} hint={`${m.oportunidad} de ${m.total}`} />
               <Kpi label="Oportunidad → Propuesta" value={pct(m.conv2)} hint={`${m.propuesta} de ${m.oportunidad}`} />
               <Kpi label="Propuesta → Ganado" value={pct(m.conv3)} hint={`${m.ganadoN} de ${m.propuesta}`} />
@@ -110,7 +110,7 @@ export default function CRMMetricas({ open, leads, periodo, onClose }) {
               <div className="flex flex-col gap-1.5">
                 {m.fuentes.map((f) => (
                   <div key={f.fuente} className="flex items-center gap-2">
-                    <div className="w-32 shrink-0 text-xs text-slate-600 truncate text-right">{f.fuente}</div>
+                    <div className="w-24 sm:w-32 shrink-0 text-xs text-slate-600 truncate text-right">{f.fuente}</div>
                     <div className="flex-1 bg-slate-100 rounded h-5 overflow-hidden">
                       <div className="h-full bg-coop-azul rounded" style={{ width: `${(f.count / m.maxFuente) * 100}%` }} />
                     </div>

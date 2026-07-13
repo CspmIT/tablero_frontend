@@ -153,22 +153,22 @@ export default function Francos() {
       <h3 className="text-lg font-semibold text-coop-negro mb-3">Francos especiales <span className="text-sm font-normal text-slate-400">asignados manualmente</span></h3>
 
       <div className="bg-white rounded-xl border border-slate-200 p-3 mb-3 flex flex-wrap items-end gap-2">
-        <div>
+        <div className="w-full sm:w-auto">
           <label className="block text-xs text-slate-500 mb-0.5">Colaborador</label>
-          <select value={nuevo.colaboradorId} onChange={(e) => setNuevo({ ...nuevo, colaboradorId: e.target.value })} className={inputCls}>
+          <select value={nuevo.colaboradorId} onChange={(e) => setNuevo({ ...nuevo, colaboradorId: e.target.value })} className={`${inputCls} w-full sm:w-auto`}>
             <option value="">—</option>
             {equipo.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </div>
-        <div>
+        <div className="w-full sm:w-auto">
           <label className="block text-xs text-slate-500 mb-0.5">Fecha</label>
-          <input type="date" value={nuevo.fecha} onChange={(e) => setNuevo({ ...nuevo, fecha: e.target.value })} className={inputCls} />
+          <input type="date" value={nuevo.fecha} onChange={(e) => setNuevo({ ...nuevo, fecha: e.target.value })} className={`${inputCls} w-full sm:w-auto`} />
         </div>
         <div className="flex-1 min-w-40">
           <label className="block text-xs text-slate-500 mb-0.5">Motivo</label>
           <input value={nuevo.motivo} onChange={(e) => setNuevo({ ...nuevo, motivo: e.target.value })} placeholder="Ej: viaje de instalación +24 hs" className={`${inputCls} w-full`} />
         </div>
-        <button onClick={agregarEspecial} className="bg-coop-azul text-white text-sm px-3 py-1.5 rounded-lg hover:opacity-90">Agregar</button>
+        <button onClick={agregarEspecial} className="w-full sm:w-auto bg-coop-azul text-white text-sm px-3 py-1.5 rounded-lg hover:opacity-90">Agregar</button>
       </div>
 
       {especiales.length === 0 ? (
@@ -176,10 +176,10 @@ export default function Francos() {
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
           {especiales.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+            <div key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm">
               <div className="font-mono text-slate-600 w-24">{fmtFeriadoDate(f.fecha).dmy}</div>
               <div className="w-40 text-slate-800">{nombreDe(f.colaboradorId)}</div>
-              <div className="flex-1 text-slate-500">{f.motivo || '—'}</div>
+              <div className="flex-1 min-w-[140px] text-slate-500">{f.motivo || '—'}</div>
               <button onClick={() => borrarEspecial(f.id)} className="text-red-500 hover:underline">Borrar</button>
             </div>
           ))}

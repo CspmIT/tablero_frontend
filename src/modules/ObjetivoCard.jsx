@@ -26,7 +26,7 @@ export default function ObjetivoCard({ obj, collaborators, canEdit, proyectos, t
       style={{ borderLeft: `4px solid ${enf.color}` }}
     >
       {/* Zona 1: código + peso + enfoque */}
-      <div className="flex flex-col items-center justify-center text-center gap-2 p-3 bg-slate-50/70 md:border-r border-slate-200">
+      <div className="flex flex-row md:flex-col items-center justify-center text-center gap-2 p-3 bg-slate-50/70 md:border-r border-slate-200">
         <span className="font-mono font-bold text-[15px] text-slate-800 tracking-wide">{obj.codigo}</span>
         <span className="font-mono font-bold text-[11px] px-2 py-0.5 bg-white border border-slate-200 text-slate-600">{Math.round(Number(obj.peso || 0) * 100)}%</span>
         <span className="text-[9px] font-bold tracking-wide uppercase leading-tight" style={{ color: enf.color }}>{enf.label}</span>
