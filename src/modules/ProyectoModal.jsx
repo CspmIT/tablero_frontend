@@ -50,7 +50,7 @@ export default function ProyectoModal({ open, proyecto, objetivos, clientes, onC
         <label className="block text-xs text-slate-500 mb-1">Nombre *</label>
         <input value={form.nombre} onChange={(e) => upd('nombre', e.target.value)} className={field} />
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Cliente</label>
             <input value={form.cliente} onChange={(e) => upd('cliente', e.target.value)} className={field} list="clientes-list" />
@@ -64,7 +64,7 @@ export default function ProyectoModal({ open, proyecto, objetivos, clientes, onC
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Objetivo</label>
             <select value={form.objetivoId} onChange={(e) => upd('objetivoId', e.target.value)} className={field}>
@@ -84,7 +84,7 @@ export default function ProyectoModal({ open, proyecto, objetivos, clientes, onC
         <label className="block text-xs text-slate-500 mb-1 mt-3">Descripción</label>
         <textarea value={form.descripcion} onChange={(e) => upd('descripcion', e.target.value)} rows={2} className={field} />
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Inicio (plan)</label>
             <input type="date" value={form.fechaInicio} onChange={(e) => upd('fechaInicio', e.target.value)} className={field} />

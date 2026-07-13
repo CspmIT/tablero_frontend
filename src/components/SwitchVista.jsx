@@ -4,7 +4,7 @@ export default function SwitchVista({ vista, setVista }) {
   const tab = (id, label) => (
     <button
       onClick={() => setVista && setVista(id)}
-      className={`text-base font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+      className={`text-sm sm:text-base font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors ${
         vista === id ? 'bg-coop-azul text-white' : 'text-slate-500 hover:bg-white'
       }`}
     >

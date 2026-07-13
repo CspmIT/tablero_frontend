@@ -202,7 +202,7 @@ export default function CRM() {
           <h2 className="text-xl font-semibold text-coop-negro">CRM · Embudo comercial</h2>
           <p className="text-sm text-slate-500">Pipeline activo: <span className="font-mono text-emerald-700">{fmtUSD(pipeline)}</span></p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select value={filtroOwner} onChange={(e) => setFiltroOwner(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
             <option value="">Todos</option>
             {responsables.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
@@ -223,7 +223,7 @@ export default function CRM() {
             <button key={y} onClick={() => setPeriodo(y)} className={`text-sm px-3 py-1.5 rounded-lg border ${periodo === y ? 'bg-coop-negro text-white border-coop-negro' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{y}</button>
           ))}
         </div>
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex flex-wrap items-center gap-2 ml-auto">
           {periodo !== 'acumulado' && sinFechaCount > 0 && <span className="text-xs text-slate-400">{sinFechaCount} sin fecha</span>}
           <span className="text-xs text-slate-500">Por fecha de</span>
           <select value={dimFecha} onChange={(e) => setDimFecha(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
@@ -234,11 +234,11 @@ export default function CRM() {
         </div>
       </div>
 
-      <div className="flex gap-3 overflow-x-auto pb-3">
+      <div className="flex gap-3 overflow-x-auto pb-3 snap-x snap-mandatory">
         {ETAPAS.filter((et) => et.id !== 'perdido' || mostrarPerdidos).map((et) => {
           const items = visibles(et.id);
           return (
-            <div key={et.id} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (arrastrando) mover(arrastrando, et.id); setArrastrando(null); }} className={`${colColor(et.id)} rounded-xl p-2 flex-1 min-w-[170px] min-h-[200px]`}>
+            <div key={et.id} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (arrastrando) mover(arrastrando, et.id); setArrastrando(null); }} className={`${colColor(et.id)} rounded-xl p-2 flex-1 min-w-[170px] min-h-[200px] snap-start`}>
               <div className="flex items-center justify-between px-2 py-1.5">
                 <span className="text-sm font-medium text-slate-700">{et.label}</span>
                 <span className="text-xs text-slate-400">{items.length}</span>
@@ -288,11 +288,11 @@ export default function CRM() {
             </div>
             <div className="space-y-3">
               <Campo label="Organización"><Inp v={form.organizacion} on={(v) => up(setForm, 'organizacion', v)} /></Campo>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Campo label="Contacto"><Inp v={form.contactoNombre} on={(v) => up(setForm, 'contactoNombre', v)} /></Campo>
                 <Campo label="Teléfono"><Inp v={form.telefono} on={(v) => up(setForm, 'telefono', v)} /></Campo>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Campo label="Email"><Inp v={form.email} on={(v) => up(setForm, 'email', v)} /></Campo>
                 <Campo label="Ciudad"><Inp v={form.ciudad} on={(v) => up(setForm, 'ciudad', v)} /></Campo>
                 <Campo label="1er contacto"><Inp type="date" v={form.fechaPrimerContacto} on={(v) => up(setForm, 'fechaPrimerContacto', v)} /></Campo>
@@ -304,7 +304,7 @@ export default function CRM() {
                   ))}
                 </div>
               </Campo>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Campo label="Valor (US$)"><Inp type="number" v={form.valorEstimadoUsd} on={(v) => up(setForm, 'valorEstimadoUsd', v)} /></Campo>
                 <Campo label="Equipos"><Inp type="number" v={form.cantidadEquipos} on={(v) => up(setForm, 'cantidadEquipos', v)} /></Campo>
                 <Campo label="Etapa">
@@ -318,7 +318,7 @@ export default function CRM() {
                 <input type="checkbox" checked={!!form.esEvento} onChange={(e) => up(setForm, 'esEvento', e.target.checked)} className="rounded border-slate-300 text-coop-azul focus:ring-coop-azul" />
                 Es un evento <span className="text-xs text-slate-400">(presentación; suma al objetivo de visibilidad de marca)</span>
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Campo label="Fuente">
                   <select value={form.fuente} onChange={(e) => up(setForm, 'fuente', e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
                     <option value="">—</option>{FUENTES.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -331,7 +331,7 @@ export default function CRM() {
                   </select>
                 </Campo>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Campo label="Próxima acción"><Inp v={form.proximaAccion} on={(v) => up(setForm, 'proximaAccion', v)} /></Campo>
                 <Campo label="Fecha próxima acción"><Inp type="date" v={form.proximaAccionFecha} on={(v) => up(setForm, 'proximaAccionFecha', v)} /></Campo>
               </div>
@@ -361,7 +361,7 @@ export default function CRM() {
                     </div>
                   );
                 })()}
-                <div className="grid grid-cols-2 gap-3 mt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                   <Campo label="Presupuesto enviado"><Inp type="date" v={form.presupuestoEnviadoFecha} on={(v) => up(setForm, 'presupuestoEnviadoFecha', v)} /></Campo>
                   <Campo label="Presupuesto aprobado"><Inp type="date" v={form.presupuestoAprobadoFecha} on={(v) => up(setForm, 'presupuestoAprobadoFecha', v)} /></Campo>
                   <Campo label="Link del presupuesto"><Inp v={form.presupuestoLink} on={(v) => up(setForm, 'presupuestoLink', v)} /></Campo>

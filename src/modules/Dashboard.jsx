@@ -137,7 +137,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h2 className="text-xl font-semibold text-coop-negro">Dashboard <span className="text-sm font-normal text-slate-400">gerencial · {anio}</span></h2>
         <div className="flex items-center gap-2 text-sm">
           <button onClick={() => setAnio(anio - 1)} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
@@ -146,7 +146,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 my-4">
+      <div className="flex flex-wrap items-center gap-2 my-4">
         <button onClick={() => setPeriodMode('month')} className={`text-sm px-3 py-1.5 rounded-lg ${periodMode === 'month' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Mes</button>
         <button onClick={() => setPeriodMode('year')} className={`text-sm px-3 py-1.5 rounded-lg ${periodMode === 'year' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Año</button>
         {periodMode === 'month' && (
@@ -173,10 +173,10 @@ export default function Dashboard() {
                   <div key={o.id} className="flex items-center gap-3">
                     <span className="text-xs font-mono text-slate-400 w-12 shrink-0">{o.codigo}</span>
                     <span className="text-sm text-slate-700 flex-1 truncate">{o.titulo}</span>
-                    <span className="text-[11px] text-slate-400 w-24 text-right shrink-0">
+                    <span className="hidden sm:block text-[11px] text-slate-400 w-24 text-right shrink-0">
                       {o.source === 'manual' ? 'manual' : o.source === 'auto' ? 'por proyectos' : o.source === 'leads' ? 'por leads' : o.source === 'monto' ? 'por monto' : 'sin datos'}
                     </span>
-                    <div className="w-28 h-2 bg-slate-100 rounded-full overflow-hidden shrink-0">
+                    <div className="w-16 sm:w-28 h-2 bg-slate-100 rounded-full overflow-hidden shrink-0">
                       <div className="h-full bg-coop-azul" style={{ width: `${Math.min(100, o.pct)}%` }} />
                     </div>
                     <span className="font-mono text-sm text-slate-700 w-10 text-right shrink-0">{o.pct}%</span>
@@ -189,7 +189,7 @@ export default function Dashboard() {
           )}
 
           <div className="bg-white rounded-xl border border-slate-200 p-4 mt-4">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-1 mb-3">
               <span className="text-sm font-semibold text-slate-600">Composición del costo · {anio}</span>
               <span className="text-xs text-slate-400"><span style={{ color: '#F28F20' }}>● operación Coopmorteros</span> · <span style={{ color: '#243E91' }}>● Cooptech</span></span>
             </div>
@@ -199,7 +199,8 @@ export default function Dashboard() {
               const xStep = (W - padX * 2) / 12, barW = xStep * 0.6;
               return (
                 <>
-                  <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 340 }}>
+                  <div className="overflow-x-auto">
+                  <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[560px]" style={{ maxHeight: 340 }}>
                     {comp.meses.map((m, i) => {
                       const x = padX + i * xStep + (xStep - barW) / 2, cx = x + barW / 2;
                       const hCoop = (m.coopUsd / comp.maxTotal) * areaH;
@@ -217,6 +218,7 @@ export default function Dashboard() {
                     })}
                     <line x1={padX} y1={yBase} x2={W - padX} y2={yBase} stroke="#e2e8f0" strokeWidth="1" />
                   </svg>
+                  </div>
                   <p className="text-xs text-slate-400 mt-2">Total {anio}: <span className="font-mono text-slate-600">{fmtUSD(comp.totalAnioUsd)}</span> <span className="text-slate-400">· {fmtARS(comp.totalAnioArs)}</span></p>
                 </>
               );

@@ -152,7 +152,7 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <SwitchVista vista={vista} setVista={setVista} />
         <div className="flex items-center gap-2 text-sm">
           <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
@@ -163,13 +163,13 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
       </div>
 
       {/* Banner WIP de la semana */}
-      <div className="bg-coop-azul/5 border border-coop-azul/15 rounded-xl px-4 py-3 mb-3 flex items-center justify-between gap-3">
+      <div className="bg-coop-azul/5 border border-coop-azul/15 rounded-xl px-4 py-3 mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs text-slate-500">WIP de la semana</div>
           {wipText ? <div className="text-slate-700">{wipText}</div> : <div className="text-slate-400 italic">aún no asignado por el manager</div>}
         </div>
         {stats.wipPctAvg !== null && (
-          <div className="text-right shrink-0">
+          <div className="text-left sm:text-right shrink-0">
             <div className="text-xs text-slate-500">Tu dedicación a la fecha</div>
             <div className="font-mono text-coop-azul">{Math.round(dedicacionSemanalPct(stats) * 100)}% · {stats.workedDays}d · {fmtWipHours(stats)}</div>
           </div>
@@ -219,10 +219,10 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
               <button
                 key={i}
                 onClick={() => setDayCtx({ collab: yo, date: d })}
-                className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 hover:bg-slate-50 flex items-start gap-4"
+                className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 hover:bg-slate-50 flex items-start gap-3 sm:gap-4"
               >
-                <div className="w-24 shrink-0">
-                  <div className="font-medium text-slate-700">{DAYS_ES[i]}</div>
+                <div className="w-20 sm:w-24 shrink-0">
+                  <div className="font-medium text-slate-700 text-sm sm:text-base">{DAYS_ES[i]}</div>
                   <div className="text-xs text-slate-400">{fmtDDMM(d)}</div>
                 </div>
                 <div className="min-w-0 flex-1">

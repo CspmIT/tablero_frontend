@@ -104,7 +104,7 @@ export default function TeamView({ collaborators, onAddNew, onEdit, onToggleActi
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h2 className="text-xl font-semibold text-coop-negro">Equipo</h2>
         <button onClick={onAddNew} className="bg-coop-naranja text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
           + Agregar persona

@@ -24,7 +24,7 @@ export default function DesktopDownloadModal({ open, onClose }) {
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       {/* Card */}
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 p-6 text-slate-800">
+      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-xl border border-slate-200 p-6 text-slate-800">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">

@@ -68,7 +68,7 @@ export default function ObjetivoModal({ open, onClose, objetivo, collaborators, 
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5">
         <h3 className="text-lg font-semibold text-coop-negro mb-4">{isNew ? 'Nuevo objetivo' : `Editar ${objetivo.codigo}`}</h3>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Código</label>
             <input value={form.codigo} disabled={!isNew} onChange={(e) => upd('codigo', e.target.value)} className={`${field} ${!isNew ? 'bg-slate-50 text-slate-400' : ''}`} />
@@ -90,7 +90,7 @@ export default function ObjetivoModal({ open, onClose, objetivo, collaborators, 
           <textarea value={form.descripcion} onChange={(e) => upd('descripcion', e.target.value)} rows={2} className={field} />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Indicador (KPI)</label>
             <input value={form.indicador} onChange={(e) => upd('indicador', e.target.value)} className={field} />
@@ -101,7 +101,7 @@ export default function ObjetivoModal({ open, onClose, objetivo, collaborators, 
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Año</label>
             <input type="number" min="2000" max="2100" value={form.anio} onChange={(e) => upd('anio', e.target.value)} className={field} />
@@ -120,7 +120,7 @@ export default function ObjetivoModal({ open, onClose, objetivo, collaborators, 
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Cálculo de avance</label>
             <select value={form.calculo} onChange={(e) => upd('calculo', e.target.value)} className={field}>
@@ -154,12 +154,12 @@ export default function ObjetivoModal({ open, onClose, objetivo, collaborators, 
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Externos (separados por coma)</label>
             <input value={externosDraft} onChange={(e) => setExternosDraft(e.target.value)} className={field} placeholder="LV Redes, ..." />
           </div>
-          <div className="flex items-end gap-4 pb-1">
+          <div className="flex flex-wrap items-end gap-4 pb-1">
             <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={form.asignadosTodos} onChange={(e) => upd('asignadosTodos', e.target.checked)} /> Todo el equipo</label>
             <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={form.depIt} onChange={(e) => upd('depIt', e.target.checked)} /> Depende de IT</label>
           </div>

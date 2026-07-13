@@ -216,7 +216,7 @@ export default function Costos() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h2 className="text-xl font-semibold text-coop-negro">Costos <span className="text-sm font-normal text-slate-400">{anio}</span></h2>
         <div className="flex items-center gap-2 text-sm">
           <button onClick={() => setAnio(anio - 1)} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
@@ -225,7 +225,7 @@ export default function Costos() {
         </div>
       </div>
 
-      <div className="flex gap-2 my-4">
+      <div className="flex flex-wrap gap-2 my-4">
         <button onClick={() => setSubtab('capacidad')} className={`text-sm px-3 py-1.5 rounded-lg ${subtab === 'capacidad' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Capacidad</button>
         <button onClick={() => setSubtab('distribucion')} className={`text-sm px-3 py-1.5 rounded-lg ${subtab === 'distribucion' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Distribución por unidad</button>
         <button onClick={() => setSubtab('consolidado')} className={`text-sm px-3 py-1.5 rounded-lg ${subtab === 'consolidado' ? 'bg-coop-azul text-white' : 'text-slate-600 hover:bg-slate-100'}`}>Resumen mensual</button>
@@ -241,22 +241,22 @@ export default function Costos() {
           </div>
           <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6">
             <div className="text-sm font-semibold text-slate-600 mb-2">Ociosidad</div>
-            <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
               <div><div className="text-[11px] text-slate-400">Anticipada (estructural)</div><div className="font-mono text-lg text-slate-700">{fmtN(r.ociosidadAnticipada)}</div><div className="text-[11px] text-slate-400">findes + feriados</div></div>
               <div><div className="text-[11px] text-slate-400">Operativa (gestionable)</div><div className="font-mono text-lg text-slate-700">{fmtN(r.ociosidadOperativa)}</div><div className="text-[11px] text-slate-400">francos + licencias</div></div>
               <div><div className="text-[11px] text-slate-400">Total</div><div className="font-mono text-lg text-coop-naranja">{fmtN(r.ociosidadTotal)}</div><div className="text-[11px] text-slate-400">{r.ociosidadPct}% de la CMP</div></div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2">
             <h3 className="text-sm font-semibold text-slate-600">Insumos mensuales</h3>
             <div className="text-xs text-slate-500">
               Costo laboral {anio}: <span className="font-mono">{fmtARS(totalLaboralAnio)}</span>
               {r.nar > 0 && totalLaboralAnio > 0 && <> · costo por día activo (NAR): <span className="font-mono">{fmtARS(costoDiaActivoARS)}</span>{cotizPromedio > 0 && <> ≈ US$ {fmtN(costoDiaActivoARS / cotizPromedio)}</>}</>}
             </div>
           </div>
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm">
               <thead><tr className="bg-slate-50 text-slate-500 text-left"><th className="px-3 py-2 font-medium">Mes</th><th className="px-3 py-2 font-medium text-right">Costo laboral (ARS)</th><th className="px-3 py-2 font-medium text-right">Cotización USD</th><th className="px-3 py-2 font-medium text-right">Costo USD</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {meses.map((mes, m) => {
@@ -279,7 +279,7 @@ export default function Costos() {
       ) : subtab === 'consolidado' ? (
         <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
-            <select value={mesDist} onChange={(e) => { setMesDist(e.target.value); setSemanaIdx(0); }} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+            <select value={mesDist} onChange={(e) => { setMesDist(e.target.value); setSemanaIdx(0); }} className="w-full sm:w-auto border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
               {meses.map((mes, m) => <option key={mes} value={mes}>{MONTHS_ES[m]} {anio}</option>)}
             </select>
             <button onClick={() => setShowSettings(true)} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
@@ -420,10 +420,10 @@ export default function Costos() {
       ) : (
         <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
-            <select value={mesDist} onChange={(e) => { setMesDist(e.target.value); setSemanaIdx(0); }} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+            <select value={mesDist} onChange={(e) => { setMesDist(e.target.value); setSemanaIdx(0); }} className="w-full sm:w-auto border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
               {meses.map((mes, m) => <option key={mes} value={mes}>{MONTHS_ES[m]} {anio}</option>)}
             </select>
-            <select value={colActual?.id ?? ''} onChange={(e) => setColSel(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+            <select value={colActual?.id ?? ''} onChange={(e) => setColSel(e.target.value)} className="w-full sm:w-auto border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
               {internosMes.map((c) => {
                 const cargado = (costos[mesDist]?.asignaciones?.[c.id]?.weeks || []).some((wk) => wk?.summary && wk.summary.trim());
                 return <option key={c.id} value={c.id}>{cargado ? '✓ ' : ''}{c.nombre}</option>;
@@ -451,7 +451,7 @@ export default function Costos() {
                 const tareas = tareasDeSemana(colActual.id, w.monday);
                 return (
                   <div key={wi} className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
                       <span className="text-sm font-semibold text-slate-700">Semana {w.num} <span className="font-normal text-slate-400">({rangoSemana(w)}) · peso {pct(pesoSemana)}% del mes</span></span>
                       <span className="text-xs font-mono text-coop-azul">Cooptech: {pct(cooptechPctUnidades(semUnidades, pesoSemana))}%</span>
                     </div>
@@ -515,12 +515,12 @@ export default function Costos() {
                 const costoIndiv = clMes * pesoCol;
                 return (
                   <div className="rounded-xl border-2 border-coop-azul bg-coop-azul/5 p-4 mb-3">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex flex-wrap items-center justify-between gap-1 mb-3">
                       <span className="text-sm font-bold text-coop-azul uppercase tracking-wide">Resumen del mes · {colActual.nombre}</span>
                       <span className={`text-xs font-mono ${pct(totalPct) === 100 ? 'text-slate-500' : 'text-rose-500'}`}>Total: {pct(totalPct)}%</span>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
+                      <table className="w-full min-w-[560px] text-xs">
                         <thead>
                           <tr className="text-slate-400 border-b border-coop-azul/20">
                             {UNIDADES.map((u) => <th key={u.id} className="px-2 py-1 text-center font-medium" title={u.full}>{u.label}</th>)}
@@ -604,7 +604,7 @@ function SettingsMesModal({ mesLabel, internos, valores, onGuardar, onClose }) {
         <h3 className="text-lg font-semibold text-coop-negro mb-1">Settings del mes</h3>
         <p className="text-sm text-slate-400 mb-4">{mesLabel}</p>
 
-        <div className="grid grid-cols-2 gap-3 mb-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
           <label className="text-sm">
             <span className="block text-slate-500 mb-1">Costo laboral total (ARS)</span>
             <input type="number" value={cl} onChange={(e) => setCl(e.target.value)} className="w-full border border-slate-200 rounded px-2 py-1.5 font-mono text-sm" placeholder="—" />
@@ -616,7 +616,7 @@ function SettingsMesModal({ mesLabel, internos, valores, onGuardar, onClose }) {
         </div>
         <div className="text-xs text-slate-400 mb-4">{usd != null ? <>Equivale a <span className="font-mono text-slate-600">US$ {fmt(usd)}</span> al tipo de cambio cargado.</> : 'Cargá costo y cotización para ver el equivalente en dólares.'}</div>
 
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
           <span className="text-sm font-semibold text-slate-600">Peso del costo laboral por colaborador</span>
           <span className={`text-xs font-mono ${Math.abs(totalPesos - 100) < 0.01 ? 'text-emerald-600' : 'text-rose-500'}`}>Total: {totalPesos.toFixed(2)}%</span>
         </div>
