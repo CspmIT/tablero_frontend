@@ -3,6 +3,7 @@ import { useData } from '../data/DataContext.jsx';
 import { MONTHS_ES } from './fechasUtils.js';
 import { calcMonthlyTrends } from './costosUtils.js';
 import { resolveObjetivoPct } from './objetivosUtils.js';
+import { useMetricasCRM } from './CRMMetricas.jsx';
 import ObjetivoDetalleModal from './ObjetivoDetalleModal.jsx';
 import { Eye } from 'lucide-react';
 
@@ -107,6 +108,13 @@ export default function Dashboard() {
       ...resolveObjetivoPct(o, proyectos, tareas, leads), // { pct, source, detalle }
     })), [objetivos, proyectos, tareas, leads, anio]);
 
+  // Comercial: leads iniciados en el año seleccionado (primer contacto o alta).
+  const leadsAnio = useMemo(() => (leads || []).filter((l) => {
+    const f = l.fechaPrimerContacto || l.createdAt;
+    return f && new Date(f).getFullYear() === anio;
+  }), [leads, anio]);
+  const crm = useMetricasCRM(leadsAnio);
+
   const objetivosAvance = useMemo(() => {
     if (!objetivosDetalle.length) return null;
     // Para el promedio general cada objetivo aporta como máximo 100% (el excedente no infla el total).
@@ -159,10 +167,11 @@ export default function Dashboard() {
       {cargando ? <p className="text-slate-500">Cargando…</p> : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-            <Kpi titulo={`Costo laboral ${periodMode === 'month' ? 'del mes' : 'del año'}`} valor={fmtARS(costoLab).replace('$ ', '$')} sub={cotiz > 0 ? `≈ ${fmtUSD(costoLab / cotiz)}` : null} badge={aBadge(varCosto, true)} />
-            <Kpi titulo="Horas activables (Cooptech)" valor={`${fmtN(horasAct)} h`} sub="tiempo propio facturable" badge={aBadge(varHoras)} />
-            <Kpi titulo="Ocupación productiva" valor={`${Math.round(ocupacion * 100)}%`} sub={`${fmtN(diasProd)} / ${fmtN(diasPotencial)} días`} badge={aBadge(varOcup)} />
+            {/* Orden del relato gerencial: objetivos → operación → costos */}
             <Kpi titulo={`Avance objetivos ${anio}`} valor={objetivosAvance != null ? `${objetivosAvance}%` : '—'} sub="promedio ponderado por peso" />
+            <Kpi titulo="Ocupación productiva" valor={`${Math.round(ocupacion * 100)}%`} sub={`${fmtN(diasProd)} / ${fmtN(diasPotencial)} días`} badge={aBadge(varOcup)} />
+            <Kpi titulo="Horas activables (Cooptech)" valor={`${fmtN(horasAct)} h`} sub="tiempo propio facturable" badge={aBadge(varHoras)} />
+            <Kpi titulo={`Costo laboral ${periodMode === 'month' ? 'del mes' : 'del año'}`} valor={fmtARS(costoLab).replace('$ ', '$')} sub={cotiz > 0 ? `≈ ${fmtUSD(costoLab / cotiz)}` : null} badge={aBadge(varCosto, true)} />
           </div>
 
           {objetivosDetalle.length > 0 && (
@@ -187,6 +196,23 @@ export default function Dashboard() {
               <p className="text-xs text-slate-400 mt-3">El avance sale del modo de cálculo de cada objetivo (manual, proyectos vinculados, leads/eventos o monto ganado). El ojo abre los comentarios y fotos de seguimiento.</p>
             </div>
           )}
+
+          {/* Comercial (ingresos) entre objetivos y costos: el panorama completo
+              del área queda avance → ingresos → costos. Mismo cálculo que las
+              métricas del CRM (hook compartido), sobre los leads del año. */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4 mt-4">
+            <div className="flex flex-wrap items-center justify-between gap-1 mb-3">
+              <span className="text-sm font-semibold text-slate-600">Comercial · {anio}</span>
+              <span className="text-xs text-slate-400">{leadsAnio.length} lead{leadsAnio.length === 1 ? '' : 's'} iniciados en {anio}</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Kpi titulo="Monto ganado" valor={'US$ ' + Math.round(crm.montoGanado).toLocaleString('es-AR')} sub={`${crm.ganadosCount} lead${crm.ganadosCount === 1 ? '' : 's'} ganado${crm.ganadosCount === 1 ? '' : 's'}`} />
+              <Kpi titulo="Pipeline activo" valor={'US$ ' + Math.round(crm.pipeline).toLocaleString('es-AR')} sub="en juego, sin cerrar" />
+              <Kpi titulo="Conversión global" valor={crm.convGlobal == null ? '—' : `${Math.round(crm.convGlobal * 100)}%`} sub={`${crm.ganadosCount} de ${crm.total} leads`} />
+              <Kpi titulo="Ticket promedio" valor={'US$ ' + Math.round(crm.ticket).toLocaleString('es-AR')} sub="por lead ganado" />
+            </div>
+            <p className="text-xs text-slate-400 mt-3">Mismos indicadores que las métricas del CRM; el detalle completo (embudo, fuentes, tiempos) vive en esa solapa.</p>
+          </div>
 
           <div className="bg-white rounded-xl border border-slate-200 p-4 mt-4">
             <div className="flex flex-wrap items-center justify-between gap-1 mb-3">
