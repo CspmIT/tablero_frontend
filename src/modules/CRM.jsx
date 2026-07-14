@@ -48,13 +48,16 @@ const coincideBusqueda = (l, q) => {
 };
 
 export default function CRM() {
-  const { api, colaboradores } = useData();
+  const { api, colaboradores, me } = useData();
   const [leads, setLeads] = useState([]);
   const [importOpen, setImportOpen] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);
   const [actividades, setActividades] = useState([]);
+  const [tareasLead, setTareasLead] = useState([]);
+  const [nuevaTarea, setNuevaTarea] = useState({ texto: '', fechaLimite: '' });
+  const [completando, setCompletando] = useState(null); // { tareaId, resultado }
   const [actForm, setActForm] = useState({ tipo: 'visita', fecha: hoy(), notas: '' });
   const [arrastrando, setArrastrando] = useState(null);
   const [ganarCtx, setGanarCtx] = useState(null);
@@ -234,7 +237,40 @@ export default function CRM() {
     });
     setActividades([]); setActForm({ tipo: 'visita', fecha: hoy(), notas: '' });
     cargarFacturacion(l.id);
-    if (l.id) { try { const a = await api.leads.actividades(l.id); setActividades(a.data || a || []); } catch { /* ignore */ } }
+    setTareasLead([]); setNuevaTarea({ texto: '', fechaLimite: '' }); setCompletando(null);
+    if (l.id) {
+      try { const a = await api.leads.actividades(l.id); setActividades(a.data || a || []); } catch { /* ignore */ }
+      try { const t = await api.leads.tareas(l.id); setTareasLead(t.tareas || []); } catch { /* ignore */ }
+    }
+  };
+
+  const recargarTareasLead = async () => {
+    try { const t = await api.leads.tareas(form.id); setTareasLead(t.tareas || []); } catch { /* ignore */ }
+  };
+  const agregarTarea = async () => {
+    const texto = nuevaTarea.texto.trim();
+    if (!texto || !form?.id) return;
+    try {
+      await api.leads.addTarea(form.id, { texto, fechaLimite: nuevaTarea.fechaLimite || null });
+      setNuevaTarea({ texto: '', fechaLimite: '' });
+      await recargarTareasLead();
+    } catch (e) { alert('No se pudo agregar: ' + (e.message || '')); }
+  };
+  const completarTarea = async (tareaId, resultado) => {
+    try {
+      await api.leads.setTarea(form.id, tareaId, { done: true, resultado: resultado?.trim() || null });
+      setCompletando(null);
+      await recargarTareasLead();
+    } catch (e) { alert('No se pudo completar: ' + (e.message || '')); }
+  };
+  const reabrirTarea = async (tareaId) => {
+    try { await api.leads.setTarea(form.id, tareaId, { done: false }); await recargarTareasLead(); }
+    catch (e) { alert('No se pudo reabrir: ' + (e.message || '')); }
+  };
+  const borrarTarea = async (tareaId) => {
+    if (!window.confirm('¿Eliminar esta tarea?')) return;
+    try { await api.leads.delTarea(form.id, tareaId); await recargarTareasLead(); }
+    catch (e) { alert('No se pudo eliminar: ' + (e.message || '')); }
   };
 
   const abrirVideollamada = () => {
@@ -356,6 +392,19 @@ export default function CRM() {
                         {leadIsOverdue(l) ? '⚠ ' : ''}{l.proximaAccion}{l.proximaAccionFecha ? ` · ${dstr(l.proximaAccionFecha)}` : ''}
                       </p>
                     )}
+                    {(() => {
+                      const pend = l.tareasSeguimiento || [];
+                      if (!pend.length) return null;
+                      const h = hoy();
+                      const vencidas = pend.filter((t) => t.fechaLimite && String(t.fechaLimite).slice(0, 10) < h).length;
+                      return (
+                        <p className={`text-[11px] mt-1 ${vencidas ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
+                          ⏱ {vencidas
+                            ? `${vencidas} tarea${vencidas > 1 ? 's' : ''} vencida${vencidas > 1 ? 's' : ''}`
+                            : `${pend.length} tarea${pend.length > 1 ? 's' : ''} pendiente${pend.length > 1 ? 's' : ''}`}
+                        </p>
+                      );
+                    })()}
                     <div className="flex items-center justify-between mt-2">
                       {l.valorEstimadoUsd ? <span className="text-xs font-medium text-emerald-700">{fmtUSD(l.valorEstimadoUsd)}</span> : <span />}
                       {l.ownerId && <span className="text-[10px] text-slate-400">{ownerNombre(l.ownerId)}</span>}
@@ -513,6 +562,69 @@ export default function CRM() {
 
               {form.id && (
                 <div className="border-t border-slate-100 pt-3">
+                  {form.id && (
+                    <div className="mb-4">
+                      <label className="block text-sm text-slate-600 mb-2">Tareas de seguimiento</label>
+                      <div className="space-y-1.5">
+                        {tareasLead.map((t) => {
+                          const hoyISO = new Date().toISOString().slice(0, 10);
+                          const fl = t.fechaLimite ? String(t.fechaLimite).slice(0, 10) : null;
+                          const vencida = !t.done && fl && fl < hoyISO;
+                          const diasVencida = vencida ? Math.round((new Date(hoyISO) - new Date(fl)) / 86400000) : 0;
+                          return (
+                            <div key={t.id} className={`rounded-lg border px-3 py-2 text-sm ${
+                              t.done ? 'border-slate-100 bg-slate-50' : vencida ? 'border-red-300 bg-red-50/50' : 'border-slate-200 bg-white'
+                            }`}>
+                              <div className="flex items-start gap-2">
+                                <button type="button"
+                                  onClick={() => t.done ? reabrirTarea(t.id) : setCompletando({ tareaId: t.id, resultado: '' })}
+                                  title={t.done ? 'Reabrir' : 'Completar'}
+                                  className={`mt-0.5 w-4 h-4 shrink-0 rounded-full border-2 flex items-center justify-center text-[10px] leading-none ${
+                                    t.done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 hover:border-emerald-500 text-transparent hover:text-emerald-500'
+                                  }`}>✓</button>
+                                <div className="flex-1 min-w-0">
+                                  <span className={`break-words ${t.done ? 'line-through text-slate-400' : 'text-slate-700'}`}>{t.texto}</span>
+                                  <span className="ml-2 text-xs whitespace-nowrap">
+                                    {fl && !t.done && (
+                                      <span className={vencida ? 'text-red-600 font-medium' : 'text-slate-400'}>
+                                        {fl.split('-').reverse().join('/')}{vencida ? ` (${diasVencida} día${diasVencida > 1 ? 's' : ''})` : ''}
+                                      </span>
+                                    )}
+                                  </span>
+                                  {t.done && t.resultado && <p className="text-xs text-slate-500 mt-0.5">{t.resultado}</p>}
+                                </div>
+                                <button type="button" onClick={() => borrarTarea(t.id)}
+                                  className="text-slate-300 hover:text-red-500 shrink-0">×</button>
+                              </div>
+                              {completando?.tareaId === t.id && !t.done && (
+                                <div className="flex gap-2 mt-2 ml-6">
+                                  <input autoFocus value={completando.resultado}
+                                    onChange={(e) => setCompletando({ ...completando, resultado: e.target.value })}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') completarTarea(t.id, completando.resultado); if (e.key === 'Escape') setCompletando(null); }}
+                                    placeholder="Agregar resultado (opcional)"
+                                    className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1 text-xs" />
+                                  <button type="button" onClick={() => completarTarea(t.id, completando.resultado)}
+                                    className="text-xs bg-emerald-600 text-white px-3 py-1 rounded-lg hover:opacity-90">Completar</button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <input value={nuevaTarea.texto}
+                          onChange={(e) => setNuevaTarea({ ...nuevaTarea, texto: e.target.value })}
+                          onKeyDown={(e) => { if (e.key === 'Enter') agregarTarea(); }}
+                          placeholder="Nueva tarea (ej. Seguimiento: pasar relevamiento…)"
+                          className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                        <input type="date" value={nuevaTarea.fechaLimite}
+                          onChange={(e) => setNuevaTarea({ ...nuevaTarea, fechaLimite: e.target.value })}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                        <button type="button" onClick={agregarTarea} disabled={!nuevaTarea.texto.trim()}
+                          className="text-sm bg-coop-azul text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-40">Agregar</button>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-sm text-slate-600">Actividad reciente</label>
                     <button onClick={abrirVideollamada}
@@ -543,7 +655,9 @@ export default function CRM() {
               )}
             </div>
             <div className="flex items-center justify-between gap-2 mt-5">
-              {form.id ? <button onClick={() => eliminar(form)} className="text-sm text-red-500 hover:underline">Eliminar</button> : <span />}
+              {form.id && me?.tipo === 'manager'
+                ? <button onClick={() => eliminar(form)} className="text-sm text-red-500 hover:underline">Eliminar</button>
+                : <span />}
               <div className="flex gap-2">
                 <button onClick={() => setForm(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
                 <button onClick={guardar} className="px-4 py-2 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90">Guardar</button>

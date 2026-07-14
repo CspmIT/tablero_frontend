@@ -75,8 +75,21 @@ function TagChips({ tags, onAdd, onRemove, catalogo = [] }) {
 }
 
 export default function DayEditModal({ open, onClose, collaborator, date, entry, weeklyWipText, feriadoName, onSave }) {
-  const { tags: tagsRegistro } = useData();
-  const catalogoTags = useMemo(() => (tagsRegistro || []).map((t) => t.nombre), [tagsRegistro]);
+  const { api, tags: tagsRegistro } = useData();
+  // Catálogo para autocompletar: registro Tag + todas las etiquetas en uso en la
+  // grilla (el endpoint las trae por frecuencia). Fallback: solo registro.
+  const [sugerenciasFull, setSugerenciasFull] = useState(null);
+  useEffect(() => {
+    if (!open || sugerenciasFull) return;
+    api.etiquetas.sugerencias()
+      .then((r) => setSugerenciasFull(r?.sugerencias || []))
+      .catch(() => setSugerenciasFull([]));
+  }, [open, api, sugerenciasFull]);
+  const catalogoTags = useMemo(() => {
+    const delRegistro = (tagsRegistro || []).map((t) => t.nombre);
+    const todas = [...(sugerenciasFull || []), ...delRegistro];
+    return [...new Set(todas)];
+  }, [tagsRegistro, sugerenciasFull]);
   const [status, setStatus] = useState('present');
   const [entryTime, setEntryTime] = useState('08:00');
   const [viajeLabel, setViajeLabel] = useState('');
