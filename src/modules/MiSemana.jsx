@@ -5,7 +5,7 @@ import DayEditModal from './DayEditModal.jsx';
 import SwitchVista from '../components/SwitchVista.jsx';
 import {
   getMonday, addDays, fmtISO, fmtDDMM, getWeekKey, DAYS_ES,
-  computeWeeklyWipStats, fmtWipHours, dedicacionSemanalPct, buildEntriesMap, buildWipsMap,
+  computeWeeklyWipStats, fmtWipHours, dedicacionSemanalPct, buildEntriesMap, buildWipsMap, isWorkingDay,
 } from './grillaUtils.js';
 
 export default function MiSemana({ vista = 'misemana', setVista }) {
@@ -215,12 +215,18 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
             const entry = entries[`${yo.id}:${fmtISO(d)}`];
             const its = (entry?.items || []).filter((it) => it && it.text && it.text.trim());
             const feriadoName = feriadosMap[fmtISO(d)];
+            const sinTags = entry && isWorkingDay(entry.status) && its.length > 0
+              && its.filter((it) => !(Array.isArray(it.tags) && it.tags.length)).length;
             return (
               <button
                 key={i}
                 onClick={() => setDayCtx({ collab: yo, date: d })}
-                className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 hover:bg-slate-50 flex items-start gap-3 sm:gap-4"
+                className="relative w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 hover:bg-slate-50 flex items-start gap-3 sm:gap-4"
               >
+                {sinTags ? (
+                  <span title={`${sinTags} actividad${sinTags > 1 ? 'es' : ''} sin etiqueta (no suma a horas por proyecto)`}
+                    className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-amber-100 text-amber-600 text-[10px] font-bold leading-4 text-center select-none">!</span>
+                ) : null}
                 <div className="w-20 sm:w-24 shrink-0">
                   <div className="font-medium text-slate-700 text-sm sm:text-base">{DAYS_ES[i]}</div>
                   <div className="text-xs text-slate-400">{fmtDDMM(d)}</div>
