@@ -49,6 +49,10 @@ export const api = {
     facturacion: (id) => http.get(`/leads/${id}/facturacion`),
     setFacturacion: (id, body) => http.put(`/leads/${id}/facturacion`, body),
     videollamada: (id, body) => http.post(`/leads/${id}/videollamada`, body),
+    tareas: (id) => http.get(`/leads/${id}/tareas`),
+    addTarea: (id, body) => http.post(`/leads/${id}/tareas`, body),
+    setTarea: (id, tareaId, body) => http.patch(`/leads/${id}/tareas/${tareaId}`, body),
+    delTarea: (id, tareaId) => http.del(`/leads/${id}/tareas/${tareaId}`),
   },
 
   archivos: {
@@ -89,6 +93,7 @@ export const api = {
     horasExtra: (mes) => http.get('/analisis/horas-extra', { mes }),
   },
   etiquetas: {
+    sugerencias: () => http.get('/etiquetas/sugerencias'),
     uso: () => http.get('/etiquetas/uso'),
     unificar: (variantes, canonico) => http.post('/etiquetas/unificar', { variantes, canonico }),
   },

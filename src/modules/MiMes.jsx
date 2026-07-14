@@ -81,10 +81,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xl font-semibold text-coop-negro">Grilla de actividad</h2>
-          <SwitchVista vista={vista} setVista={setVista} />
-        </div>
+        <SwitchVista vista={vista} setVista={setVista} />
         <div className="flex items-center gap-2">
           <select value={colabId ?? ''} onChange={(e) => setColabId(Number(e.target.value))}
             className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">

@@ -18,8 +18,10 @@ function Kpi({ label, value, hint }) {
   );
 }
 
-export default function CRMMetricas({ open, leads, periodo, onClose }) {
-  const m = useMemo(() => {
+// Cálculo reutilizable de métricas comerciales (lo usan el modal del CRM y el
+// Dashboard gerencial): conversión del embudo, resultados en USD y fuentes.
+export function useMetricasCRM(leads) {
+  return useMemo(() => {
     const ls = leads || [];
     const total = ls.length;
     const noPerdidos = ls.filter((l) => l.etapa !== 'perdido');
@@ -66,7 +68,10 @@ export default function CRMMetricas({ open, leads, periodo, onClose }) {
       fuentes, maxFuente,
     };
   }, [leads]);
+}
 
+export default function CRMMetricas({ open, leads, periodo, onClose }) {
+  const m = useMetricasCRM(leads);
   if (!open) return null;
 
   return (
