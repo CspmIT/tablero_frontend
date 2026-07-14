@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BarChart3, ChevronDown, ChevronRight, Clock } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronRight, Clock, Tags } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 
 // Solapa "Análisis". Primer reporte: horas extra por colaborador y mes.
@@ -9,7 +9,7 @@ import { useData } from '../data/DataContext.jsx';
 const mesActual = () => new Date().toISOString().slice(0, 7);
 
 export default function Analisis() {
-  const { api } = useData();
+  const { api, me, recargarTags } = useData();
   const [mes, setMes] = useState(mesActual);
   const [datos, setDatos] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -89,6 +89,104 @@ export default function Analisis() {
             </table>
           </div>
         )
+      )}
+
+      {me?.tipo === 'manager' && <SeccionEtiquetas api={api} recargarTags={recargarTags} />}
+    </div>
+  );
+}
+
+// Limpieza de etiquetas: muestra el uso real (grilla + kanban) agrupado por
+// escritura normalizada, resalta los racimos de variantes y permite unificarlos
+// bajo un nombre canónico. Un solo uso deja los datos históricos consistentes.
+function SeccionEtiquetas({ api, recargarTags }) {
+  const [datos, setDatos] = useState(null);
+  const [sel, setSel] = useState({});      // nombre exacto -> bool
+  const [canonico, setCanonico] = useState('');
+  const [trabajando, setTrabajando] = useState(false);
+  const [msj, setMsj] = useState(null);
+
+  const cargar = useCallback(async () => {
+    try { setDatos(await api.etiquetas.uso()); } catch { setDatos({ etiquetas: [] }); }
+  }, [api]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const etiquetas = datos?.etiquetas || [];
+  // Agrupar por clave normalizada; los grupos con más de una forma van primero.
+  const grupos = [];
+  const porNormal = {};
+  for (const e of etiquetas) {
+    if (!porNormal[e.normal]) { porNormal[e.normal] = []; grupos.push(porNormal[e.normal]); }
+    porNormal[e.normal].push(e);
+  }
+  grupos.sort((a, b) => b.length - a.length || (b[0].total - a[0].total));
+
+  const seleccionadas = etiquetas.filter((e) => sel[e.tag]).map((e) => e.tag);
+  const toggle = (tag) => {
+    setSel((s) => {
+      const n = { ...s, [tag]: !s[tag] };
+      const marcadas = etiquetas.filter((e) => n[e.tag]);
+      if (marcadas.length && !canonico) {
+        setCanonico(marcadas.sort((a, b) => b.total - a.total)[0].tag);
+      }
+      return n;
+    });
+  };
+
+  const unificar = async () => {
+    const variantes = seleccionadas.filter((t) => t !== canonico.trim());
+    if (!canonico.trim() || !variantes.length) return;
+    if (!confirm(`¿Unificar ${variantes.join(', ')} → "${canonico.trim()}"? Se remapean la grilla y el kanban.`)) return;
+    setTrabajando(true); setMsj(null);
+    try {
+      const r = await api.etiquetas.unificar(variantes, canonico.trim());
+      setMsj({ tipo: 'ok', texto: `Listo: ${r.diasTocados} días de grilla y ${r.puentesMovidos} vínculos de kanban/objetivos remapeados.` });
+      setSel({}); setCanonico('');
+      await cargar();
+      recargarTags?.();
+    } catch (e) {
+      setMsj({ tipo: 'error', texto: e.message || 'No se pudo unificar' });
+    } finally { setTrabajando(false); }
+  };
+
+  return (
+    <div className="mt-8 max-w-3xl">
+      <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2 mb-1">
+        <Tags size={18} className="text-coop-naranja" /> Etiquetas — calidad de datos
+      </h2>
+      <p className="text-sm text-slate-500 mb-3">
+        Variantes de escritura ("+Agua", "masagua"…) fragmentan las horas por proyecto.
+        Marcá las que son lo mismo, elegí el nombre correcto y unificá.
+      </p>
+      {msj && (
+        <p className={`text-sm mb-3 rounded-lg p-2 ${msj.tipo === 'ok' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{msj.texto}</p>
+      )}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 max-h-80 overflow-y-auto">
+        {grupos.map((g, i) => (
+          <div key={i} className={`flex flex-wrap gap-2 py-1.5 ${i > 0 ? 'border-t border-slate-100' : ''}`}>
+            {g.length > 1 && <span className="text-[10px] self-center px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">variantes</span>}
+            {g.map((e) => (
+              <label key={e.tag} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs cursor-pointer select-none ${sel[e.tag] ? 'border-coop-azul bg-coop-azul/10 text-coop-azul' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                <input type="checkbox" className="hidden" checked={!!sel[e.tag]} onChange={() => toggle(e.tag)} />
+                {e.tag}
+                <span className="text-slate-400">{e.grilla}g{e.kanban ? ` · ${e.kanban}k` : ''}</span>
+              </label>
+            ))}
+          </div>
+        ))}
+        {!etiquetas.length && <p className="text-sm text-slate-400">Sin etiquetas registradas todavía.</p>}
+      </div>
+      {seleccionadas.length > 1 && (
+        <div className="flex items-center gap-2 mt-3">
+          <span className="text-sm text-slate-600">Unificar {seleccionadas.length} como</span>
+          <input value={canonico} onChange={(e) => setCanonico(e.target.value)}
+            className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-44
+                       focus:outline-none focus:ring-2 focus:ring-coop-azul/40 focus:border-coop-azul" />
+          <button onClick={unificar} disabled={trabajando || !canonico.trim()}
+            className="px-4 py-1.5 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40">
+            {trabajando ? 'Unificando…' : 'Unificar'}
+          </button>
+        </div>
       )}
     </div>
   );

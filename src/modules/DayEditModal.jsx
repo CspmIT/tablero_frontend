@@ -1,38 +1,82 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   STATUS_TYPES, ENTRY_TIMES, isWorkingDay, hoursBetween, fmtDDMM,
 } from './grillaUtils.js';
+import { useData } from '../data/DataContext.jsx';
 
 const FULL_DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const inputCls = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm';
 
-function TagChips({ tags, onAdd, onRemove }) {
+// Normalización para sugerir sin importar mayúsculas/acentos/símbolos
+// ("mas agua" encuentra "+Agua" si comparten raíz, "MASAGUA" encuentra "masagua").
+const normTag = (s) => String(s || '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function TagChips({ tags, onAdd, onRemove, catalogo = [] }) {
   const [val, setVal] = useState('');
-  const add = () => {
-    const t = val.trim();
-    if (t && !tags.includes(t)) onAdd(t);
+  const [foco, setFoco] = useState(false);
+
+  // Sugerencias: primero las que EMPIEZAN igual, después las que contienen.
+  const sugerencias = useMemo(() => {
+    const q = normTag(val);
+    if (!q) return [];
+    const usadas = new Set(tags.map(normTag));
+    const cand = catalogo.filter((n) => !usadas.has(normTag(n)));
+    const empieza = cand.filter((n) => normTag(n).startsWith(q));
+    const contiene = cand.filter((n) => !normTag(n).startsWith(q) && normTag(n).includes(q));
+    return [...empieza, ...contiene].slice(0, 6);
+  }, [val, tags, catalogo]);
+
+  const agregar = (nombre) => {
+    const t = String(nombre || '').trim();
+    if (!t) return;
+    // Si lo tipeado coincide (normalizado) con uno del catálogo, gana el canónico.
+    const canonico = catalogo.find((n) => normTag(n) === normTag(t));
+    const final = canonico || t;
+    if (!tags.includes(final)) onAdd(final);
     setVal('');
   };
+
   return (
-    <div className="flex flex-wrap items-center gap-1 mt-1">
+    <div className="flex flex-wrap items-center gap-1 mt-1 relative">
       {tags.map((t) => (
         <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-coop-azul/10 text-coop-azul text-xs">
           {t}
           <button type="button" onClick={() => onRemove(t)} className="hover:text-red-500">×</button>
         </span>
       ))}
-      <input
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-        placeholder="+ tag (Enter)"
-        className="text-xs border border-slate-200 rounded px-2 py-0.5 w-28"
-      />
+      <span className="relative">
+        <input
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onFocus={() => setFoco(true)}
+          onBlur={() => setTimeout(() => setFoco(false), 150)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); agregar(val); }
+            if (e.key === 'Escape') setFoco(false);
+          }}
+          placeholder="+ tag (Enter)"
+          className="text-xs border border-slate-200 rounded px-2 py-0.5 w-28"
+        />
+        {foco && sugerencias.length > 0 && (
+          <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[140px]">
+            {sugerencias.map((sug) => (
+              <button key={sug} type="button" onMouseDown={(e) => { e.preventDefault(); agregar(sug); }}
+                className="block w-full text-left px-3 py-1 text-xs text-slate-700 hover:bg-coop-azul/10">
+                {sug}
+              </button>
+            ))}
+          </div>
+        )}
+      </span>
     </div>
   );
 }
 
 export default function DayEditModal({ open, onClose, collaborator, date, entry, weeklyWipText, feriadoName, onSave }) {
+  const { tags: tagsRegistro } = useData();
+  const catalogoTags = useMemo(() => (tagsRegistro || []).map((t) => t.nombre), [tagsRegistro]);
   const [status, setStatus] = useState('present');
   const [entryTime, setEntryTime] = useState('08:00');
   const [viajeLabel, setViajeLabel] = useState('');
@@ -209,7 +253,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
                       <button type="button" onClick={() => removeItem(idx)} title="Quitar" className="text-slate-400 hover:text-red-500">×</button>
                     )}
                   </div>
-                  <TagChips tags={it.tags} onAdd={(t) => addTag(idx, t)} onRemove={(t) => removeTag(idx, t)} />
+                  <TagChips tags={it.tags} onAdd={(t) => addTag(idx, t)} onRemove={(t) => removeTag(idx, t)} catalogo={catalogoTags} />
                 </div>
               ))}
             </div>
