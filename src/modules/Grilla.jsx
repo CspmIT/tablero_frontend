@@ -128,8 +128,19 @@ export default function Grilla({ vista = 'grilla', setVista }) {
                       const entry = entries[`${c.id}:${fmtISO(d)}`];
                       const its = (entry?.items || []).filter((it) => it && it.text && it.text.trim());
                       const feriadoName = feriadosMap[fmtISO(d)];
+                      // Sin etiqueta = no contabiliza en horas por proyecto: marcar
+                      // los días trabajados con actividades a las que les falta tag.
+                      const sinTags = entry && isWorkingDay(entry.status) && its.length > 0
+                        && its.filter((it) => !(Array.isArray(it.tags) && it.tags.length)).length;
                       return (
-                        <td key={i} onClick={() => setDayCtx({ collab: c, date: d })} className={`px-2 py-2 align-top cursor-pointer hover:bg-slate-50 ${feriadoName ? 'bg-slate-100' : ''}`}>
+                        <td key={i} onClick={() => setDayCtx({ collab: c, date: d })} className={`relative px-2 py-2 align-top cursor-pointer hover:bg-slate-50 ${feriadoName ? 'bg-slate-100' : ''}`}>
+                          {sinTags ? (
+                            <span
+                              title={`${sinTags} actividad${sinTags > 1 ? 'es' : ''} sin etiqueta (no suma a horas por proyecto)`}
+                              className="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-100 text-amber-600 text-[10px] font-bold leading-4 text-center select-none">
+                              !
+                            </span>
+                          ) : null}
                           <div className="text-left">
                             {entry ? (
                               <div className="space-y-1">

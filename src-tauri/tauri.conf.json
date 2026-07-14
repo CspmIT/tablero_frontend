@@ -1,6 +1,6 @@
 {
 	"productName": "Tablero",
-	"version": "1.0.4",
+	"version": "1.1.2",
 	"identifier": "com.cooptech.tablero",
 	"build": {
 		"beforeDevCommand": "npm run dev",
@@ -21,7 +21,8 @@
 				"width": 1024,
 				"height": 768,
 				"resizable": true,
-				"maximized": true
+				"maximized": true,
+				"dragDropEnabled": false
 			}
 		],
 		"security": {

@@ -88,4 +88,8 @@ export const api = {
   analisis: {
     horasExtra: (mes) => http.get('/analisis/horas-extra', { mes }),
   },
+  etiquetas: {
+    uso: () => http.get('/etiquetas/uso'),
+    unificar: (variantes, canonico) => http.post('/etiquetas/unificar', { variantes, canonico }),
+  },
 };
