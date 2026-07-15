@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { Settings } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { buildVideollamadaICS, descargarICS, mailtoVideollamada } from './videollamadaUtils.js';
 import { isActiveCollab } from './grillaUtils.js';
@@ -58,6 +59,12 @@ export default function CRM() {
   const [tareasLead, setTareasLead] = useState([]);
   const [nuevaTarea, setNuevaTarea] = useState({ texto: '', fechaLimite: '' });
   const [completando, setCompletando] = useState(null); // { tareaId, resultado }
+  const [graphOpen, setGraphOpen] = useState(false);
+  const [graphEstado, setGraphEstado] = useState(null);
+  useEffect(() => {
+    if (me?.tipo !== 'manager') return;
+    api.integraciones.graphEstado().then(setGraphEstado).catch(() => setGraphEstado(null));
+  }, [api, me]);
   const [actForm, setActForm] = useState({ tipo: 'visita', fecha: hoy(), notas: '' });
   const [arrastrando, setArrastrando] = useState(null);
   const [ganarCtx, setGanarCtx] = useState(null);
@@ -299,7 +306,7 @@ export default function CRM() {
         organizacion: form.organizacion, fecha: c.fecha, horaInicio: c.horaInicio,
         horaFin: c.horaFin, notas: c.notas, emailLead: form.email, emailsColaboradores,
       });
-      setVcCtx({ ...c, paso: 'listo', ics, modo: r.modo, joinUrl: r.joinUrl, graphError: r.graphError });
+      setVcCtx({ ...c, paso: 'listo', ics, modo: r.modo, joinUrl: r.joinUrl, graphError: r.graphError, avisoVencimiento: r.avisoVencimiento });
       // Refrescar el panel de actividades del lead
       try { const a = await api.leads.actividades(form.id); setActividades(a.data || a || []); } catch { /* ignore */ }
     } catch (e) { alert('No se pudo agendar: ' + (e.message || '')); }
@@ -346,6 +353,15 @@ export default function CRM() {
           </button>
           <button onClick={() => setImportOpen(true)} className="border border-slate-200 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg hover:bg-slate-50">Importar de Kommo</button>
           <button onClick={() => setForm({ ...leadVacio })} className="bg-coop-naranja text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">+ Lead</button>
+          {me?.tipo === 'manager' && (
+            <button onClick={() => setGraphOpen(true)} title="Integración Outlook/Teams"
+              className="relative p-2 rounded-lg text-slate-400 hover:text-coop-azul hover:bg-slate-100">
+              <Settings size={18} />
+              {graphEstado?.configurado && graphEstado?.diasParaVencer != null && graphEstado.diasParaVencer <= 30 && (
+                <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${graphEstado.diasParaVencer < 0 ? 'bg-red-500' : 'bg-amber-400'}`} />
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -718,6 +734,9 @@ export default function CRM() {
                   </>
                 ) : (
                 <>
+                {vcCtx.avisoVencimiento && (
+                  <p className="text-xs bg-amber-50 border border-amber-200 text-amber-700 rounded-lg p-2 mb-2">⚠ {vcCtx.avisoVencimiento}</p>
+                )}
                 {vcCtx.graphError && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3">
                     No se pudo crear el evento en Outlook ({vcCtx.graphError}). Seguí con el envío manual:
@@ -825,6 +844,114 @@ export default function CRM() {
       />
       <ImportarLeads open={importOpen} onClose={() => setImportOpen(false)} onDone={cargar} />
       <CRMMetricas open={showMetricas} leads={leadsBase} periodo={periodo} onClose={() => setShowMetricas(false)} />
+      {graphOpen && (
+        <GraphConfigModal api={api} estado={graphEstado}
+          onClose={() => {
+            setGraphOpen(false);
+            api.integraciones.graphEstado().then(setGraphEstado).catch(() => {});
+          }} />
+      )}
+    </div>
+  );
+}
+
+function CampoGraph({ label, value, onChange, type = 'text', placeholder }) {
+  return (
+    <div>
+      <label className="block text-xs text-slate-500 mb-0.5">{label}</label>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder} autoComplete="off"
+        className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-mono
+                   focus:outline-none focus:ring-2 focus:ring-coop-azul/40 focus:border-coop-azul" />
+    </div>
+  );
+}
+
+// Configuración de la integración Outlook/Teams (solo manager). Espejo del
+// modal de la clave de Claude: los 5 datos que entrega el administrador se
+// validan EN VIVO (token + acceso a la casilla) antes de guardarse cifrados.
+function GraphConfigModal({ api, estado, onClose }) {
+  const [f, setF] = useState({ tenantId: '', clientId: '', clientSecret: '', casilla: '', vence: '' });
+  const [guardando, setGuardando] = useState(false);
+  const [msj, setMsj] = useState(null);
+
+  const completo = f.tenantId.trim() && f.clientId.trim() && f.clientSecret.trim() && f.casilla.trim();
+
+  const guardar = async () => {
+    if (!completo || guardando) return;
+    setGuardando(true); setMsj(null);
+    try {
+      const r = await api.integraciones.graphGuardar({
+        tenantId: f.tenantId.trim(), clientId: f.clientId.trim(),
+        clientSecret: f.clientSecret.trim(), casilla: f.casilla.trim(),
+        vence: f.vence || null,
+      });
+      setMsj({ tipo: 'ok', texto: `Validado y guardado. Casilla: ${r.casilla}${r.vence ? ` · el secreto vence el ${r.vence.split('-').reverse().join('/')}` : ''}.` });
+      setF({ tenantId: '', clientId: '', clientSecret: '', casilla: '', vence: '' });
+    } catch (e) {
+      setMsj({ tipo: 'error', texto: e.message || 'No se pudo guardar' });
+    } finally { setGuardando(false); }
+  };
+
+  const quitar = async () => {
+    if (!confirm('¿Quitar las credenciales cargadas? Las videollamadas volverán al modo .ics (salvo respaldo en el servidor).')) return;
+    setGuardando(true); setMsj(null);
+    try { await api.integraciones.graphBorrar(); setMsj({ tipo: 'ok', texto: 'Credenciales quitadas.' }); }
+    catch (e) { setMsj({ tipo: 'error', texto: e.message || 'No se pudo quitar' }); }
+    finally { setGuardando(false); }
+  };
+
+  const dv = estado?.diasParaVencer;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <div className="bg-white rounded-xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold mb-1">Integración Outlook / Teams</h3>
+        <div className="text-sm text-slate-500 mb-3">
+          {estado?.configurado ? (
+            <>
+              <p>Configurada {estado.origen === 'db' ? 'desde la app' : 'por variables del servidor'} · casilla <span className="font-mono text-xs">{estado.casilla}</span></p>
+              {estado.vence ? (
+                <p className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full ${
+                  dv < 0 ? 'bg-red-100 text-red-700' : dv <= 30 ? 'bg-amber-100 text-amber-700' : 'bg-green-50 text-green-700'
+                }`}>
+                  {dv < 0 ? `Secreto VENCIDO hace ${Math.abs(dv)} día${Math.abs(dv) === 1 ? '' : 's'} — renovar con el administrador`
+                    : `El secreto vence el ${estado.vence.split('-').reverse().join('/')} (${dv} día${dv === 1 ? '' : 's'})`}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-amber-600">Sin fecha de vencimiento registrada — conviene cargarla para recibir el aviso.</p>
+              )}
+            </>
+          ) : 'Sin configurar: las videollamadas usan el modo manual (.ics + mail).'}
+        </div>
+
+        <div className="space-y-2.5">
+          <CampoGraph label="Tenant ID (Id. de directorio)" value={f.tenantId} onChange={(v) => setF((x) => ({ ...x, tenantId: v }))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <CampoGraph label="Client ID (Id. de aplicación)" value={f.clientId} onChange={(v) => setF((x) => ({ ...x, clientId: v }))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <CampoGraph label="Valor del secreto" type="password" value={f.clientSecret} onChange={(v) => setF((x) => ({ ...x, clientSecret: v }))} placeholder="••••••••" />
+          <CampoGraph label="Casilla comercial" value={f.casilla} onChange={(v) => setF((x) => ({ ...x, casilla: v }))} placeholder="comercial@..." />
+          <CampoGraph label="Vencimiento del secreto (opcional)" type="date" value={f.vence} onChange={(v) => setF((x) => ({ ...x, vence: v }))} />
+        </div>
+        <p className="text-[11px] text-slate-400 mt-2">
+          Al guardar se prueba en vivo (token + acceso al calendario de la casilla): si algo
+          falla, no se guarda nada. Se almacenan cifradas y no vuelven a mostrarse completas.
+        </p>
+        {msj && (
+          <p className={`text-sm mt-3 rounded-lg p-2 ${msj.tipo === 'ok' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{msj.texto}</p>
+        )}
+        <div className="flex justify-between items-center mt-4">
+          {estado?.origen === 'db'
+            ? <button onClick={quitar} disabled={guardando} className="text-sm text-red-500 hover:text-red-700 disabled:opacity-40">Quitar credenciales</button>
+            : <span />}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cerrar</button>
+            <button onClick={guardar} disabled={guardando || !completo}
+              className="px-4 py-2 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40">
+              {guardando ? 'Validando…' : 'Guardar'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

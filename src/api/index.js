@@ -92,9 +92,22 @@ export const api = {
   analisis: {
     horasExtra: (mes) => http.get('/analisis/horas-extra', { mes }),
   },
+  integraciones: {
+    graphEstado: () => http.get('/integraciones/graph'),
+    graphGuardar: (body) => http.put('/integraciones/graph', body),
+    graphBorrar: () => http.del('/integraciones/graph'),
+  },
+  deseos: {
+    list: (todos) => http.get('/deseos', todos ? { todos: 1 } : undefined),
+    create: (body) => http.post('/deseos', body),
+    update: (id, body) => http.patch(`/deseos/${id}`, body),
+    aprobar: (id, body) => http.post(`/deseos/${id}/aprobar`, body),
+    del: (id) => http.del(`/deseos/${id}`),
+  },
   etiquetas: {
     sugerencias: () => http.get('/etiquetas/sugerencias'),
-    uso: () => http.get('/etiquetas/uso'),
+    uso: (anio) => http.get('/etiquetas/uso', anio ? { anio } : undefined),
+    detalle: (tag, anio) => http.get('/etiquetas/detalle', anio ? { tag, anio } : { tag }),
     unificar: (variantes, canonico) => http.post('/etiquetas/unificar', { variantes, canonico }),
   },
 };
