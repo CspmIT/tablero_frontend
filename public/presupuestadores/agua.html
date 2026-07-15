@@ -4592,7 +4592,7 @@ function renderEditor() {
         ${savingHtml}
         <button class="btn btn-sm" data-action="export-current">↓ Exportar JSON</button>
         ${(window.parent && window.parent !== window)
-          ? '<button class="btn btn-sm btn-primary" data-action="finalizar-relevamiento" title="Marca el relevamiento como terminado y vuelve al Tablero de Mando">✓ Finalizar relevamiento</button>'
+          ? '<button class="btn btn-sm" data-action="abrir-criteria" title="Componer el plan propuesta con el criterio de la unidad (catálogo de plantas modelo)" style="border-color:#0b6ea8;color:#0b6ea8">⚡ CriterIA</button><button class="btn btn-sm btn-primary" data-action="finalizar-relevamiento" title="Marca el relevamiento como terminado y vuelve al Tablero de Mando">✓ Finalizar relevamiento</button>'
           : ''}
       </div>
     </div>
@@ -7007,6 +7007,7 @@ async function boot() {
       project: (typeof state !== "undefined" ? (state.project || null) : null),
       presupuesto: (typeof state !== "undefined" ? (state.presupuesto || null) : null),
       view: (typeof state !== "undefined" ? state.view : "home"),
+      criteria: (typeof state !== "undefined" ? (state.criteria || null) : null),
       meta: (window.__coopLeadMeta || null)
     };
   }
@@ -7017,6 +7018,7 @@ async function boot() {
     if (estado && typeof estado === "object") {
       if ("project" in estado) state.project = estado.project || null;
       if ("presupuesto" in estado) state.presupuesto = estado.presupuesto || null;
+      if ("criteria" in estado) state.criteria = estado.criteria || null;
       if (estado.project && estado.project.id) state.projectId = estado.project.id;
     }
     // Modo de apertura: "relevamiento" -> editor; "presupuesto" -> presupuesto.
@@ -7077,6 +7079,9 @@ async function boot() {
     emitPdfDescargado: function () {
       postToParent("pdf_descargado", { snapshot: snapshot(), totales: coopAguaTotales() });
     },
+    emitSnapshot: function () {
+      postToParent("snapshot", { snapshot: snapshot() });
+    },
     emitFinalizarRelevamiento: function () {
       postToParent("finalizar_relevamiento", { snapshot: snapshot() });
     },
@@ -7129,6 +7134,451 @@ async function boot() {
   } else {
     window.addEventListener("DOMContentLoaded", announce);
   }
+})();
+
+/* ============================================================
+   CriterIA — Wizard de composición del plan propuesta (5 pasos)
+   Autocontenido: overlay propio, no toca render() del +Agua.
+   Habla con el Tablero por el puente __coop (el iframe nunca
+   llama a Claude directo). Pasos:
+   1 Completitud (seis preguntas, local) → 2 Fotos → 3 Preguntas
+   de CriterIA (1 ronda, salteable) → 4 Generación → 5 Revisión
+   y validación (metadata {version, relevador, validador}).
+   ============================================================ */
+(function () {
+  "use strict";
+
+  var cw = {
+    abierto: false, paso: 1,
+    fotos: [],            // {id, name, caption, is_sketch, sel, origen}
+    preguntas: null,      // null = sin pedir; [] = pedidas, no hay
+    respuestas: {},       // idx -> texto
+    pidiendo: false, generando: false, error: null,
+    t0: 0, timer: null,
+  };
+
+  function $(sel) { return document.querySelector(sel); }
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  /* ---------- recolección de datos del relevamiento ---------- */
+  function todasLasFotos() {
+    var out = [];
+    var p = (typeof state !== "undefined" && state.project) ? state.project : null;
+    if (!p) return out;
+    function meter(arr, origen) {
+      (arr || []).forEach(function (ph) {
+        if (ph && ph.id) out.push({ id: ph.id, name: ph.name || "", caption: ph.caption || "", is_sketch: !!ph.is_sketch, origen: origen });
+      });
+    }
+    meter(p.photos, "General");
+    (p.fuentes || []).forEach(function (f) { meter(f.photos, "Fuente: " + (f.nombre || f.name || "")); });
+    (p.zonas || []).forEach(function (z) {
+      meter(z.photos, "Zona: " + (z.nombre || z.name || ""));
+      (z.componentes || []).forEach(function (c) { meter(c.photos, (z.nombre || "") + " › " + (c.tipo || c.nombre || "componente")); });
+    });
+    return out;
+  }
+
+  function relevamientoLiviano() {
+    // El project SIN datos binarios: las fotos ya son solo referencias
+    // {id, caption, is_sketch} dentro del árbol, así que viaja tal cual.
+    try { return JSON.parse(JSON.stringify(state.project || {})); }
+    catch (e) { return {}; }
+  }
+
+  /* ---------- seis preguntas: semáforo de 3 estados ----------
+     verde  = hay componentes/fuentes tipados que responden la pregunta
+     amarillo = solo hay menciones en texto libre (necesidades/observaciones)
+     rojo   = nada. Si YA existe un planteo generado, los estados los dicta
+     el propio análisis de CriterIA (cubierta/parcial/sin_datos). */
+  var SEIS = [
+    { k: "cuanto_llega", q: "¿Cuánto llega?", corto: "Llega", tipos: ["caudalimetro", "acueducto", "pozo", "perforacion"], texto: ["caudal", "acueducto", "ingreso", "pozo"] },
+    { k: "cuanto_tengo", q: "¿Cuánto tengo?", corto: "Tengo", tipos: ["cisterna", "tanque"], texto: ["cisterna", "tanque", "reserva"] },
+    { k: "cuanto_entrego", q: "¿Cuánto entrego?", corto: "Entrego", tipos: ["caudalimetro"], texto: ["salida", "red", "entrega", "distribu"] },
+    { k: "con_que_calidad", q: "¿Con qué calidad?", corto: "Calidad", tipos: ["clorador", "dosific"], texto: ["cloro", "dosific"] },
+    { k: "como_entrego", q: "¿Cómo entrego? (bombeo)", corto: "Bombeo", tipos: ["bomba", "sala_de_bombeo", "presion", "presurizad"], texto: ["bomba", "bombeo", "presion", "presión", "presostato"] },
+    { k: "como_esta_la_planta", q: "¿Cómo está la planta? (energía)", corto: "Energía", tipos: ["tablero", "grupo", "energia"], texto: ["tablero", "energ", "grupo", "electr", "ups"] },
+  ];
+  function estadoSeisPreguntas() {
+    // Si hay planteo generado, manda el veredicto de CriterIA.
+    var sp = state.criteria && state.criteria.planteo && state.criteria.planteo.seis_preguntas;
+    if (sp) {
+      var mapa = { cubierta: "verde", parcial: "amarillo", sin_datos: "rojo" };
+      return SEIS.map(function (d) {
+        var r = sp[d.k] || {};
+        return { q: d.q, corto: d.corto, estado: mapa[r.estado] || "rojo", detalle: r.detalle || "", fuente: "CriterIA" };
+      });
+    }
+    // Heurística local sobre el relevamiento en curso.
+    var p = state.project || {};
+    var tiposCargados = [];
+    (p.fuentes || []).forEach(function (f) { tiposCargados.push(String(f.tipo || f.nombre || "").toLowerCase()); });
+    (p.zonas || []).forEach(function (z) {
+      (z.componentes || []).forEach(function (c) { tiposCargados.push(String(c.tipo || c.nombre || "").toLowerCase()); });
+    });
+    var tiposStr = tiposCargados.join(" | ");
+    var textoLibre = "";
+    try {
+      textoLibre = JSON.stringify([p.general, p.necesidades, (p.zonas || []).map(function (z) { return z.observaciones || z.notas || ""; })]).toLowerCase();
+    } catch (e) { textoLibre = ""; }
+    return SEIS.map(function (d) {
+      var verde = d.tipos.some(function (t) { return tiposStr.indexOf(t) >= 0; });
+      var amarillo = !verde && d.texto.some(function (t) { return textoLibre.indexOf(t) >= 0; });
+      return { q: d.q, corto: d.corto, estado: verde ? "verde" : (amarillo ? "amarillo" : "rojo"), detalle: verde ? "componentes cargados" : (amarillo ? "solo menciones en texto: cargá el componente" : "sin datos"), fuente: "relevamiento" };
+    });
+  }
+
+  /* ---------- reescalado en cliente (canvas, sin deps en el server) ---------- */
+  function reescalar(dataUrl, maxLado) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        var w = img.width, h = img.height, k = Math.min(1, maxLado / Math.max(w, h));
+        if (k >= 1) return resolve(dataUrl);
+        var c = document.createElement("canvas");
+        c.width = Math.round(w * k); c.height = Math.round(h * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+
+  async function armarPayload() {
+    var seleccion = cw.fotos.filter(function (f) { return f.sel; });
+    var imagenes = [];
+    for (var i = 0; i < seleccion.length; i++) {
+      var f = seleccion[i];
+      try {
+        var data = await getPhotoData(f.id);
+        if (!data) continue;
+        var chica = await reescalar(data, 1100);
+        if (chica) imagenes.push({ data: chica, caption: f.caption || null, is_sketch: f.is_sketch });
+      } catch (e) { /* foto ilegible: se omite */ }
+    }
+    var epigrafes = cw.fotos
+      .filter(function (f) { return !f.sel && (f.caption || "").trim(); })
+      .map(function (f) { return f.caption.trim(); });
+    var respuestas = (cw.preguntas || []).map(function (p, i) {
+      return { pregunta: p.pregunta, respuesta: (cw.respuestas[i] || "").trim() };
+    }).filter(function (r) { return r.respuesta; });
+    return { relevamiento: relevamientoLiviano(), imagenes: imagenes, epigrafesNoEnviadas: epigrafes, respuestas: respuestas };
+  }
+
+  /* ---------- puente: pedir preguntas / generar ---------- */
+  function post(type, payload) {
+    try { window.parent.postMessage({ __coop: true, type: type, payload: payload }, "*"); } catch (e) { /* */ }
+  }
+
+  window.addEventListener("message", function (ev) {
+    var msg = ev.data;
+    if (!msg || msg.__coop !== true) return;
+    if (msg.type === "criteria_preguntas_resultado") {
+      cw.pidiendo = false;
+      if (msg.error) { cw.error = msg.error; }
+      else { cw.preguntas = (msg.resultado && msg.resultado.preguntas) || []; cw.error = null; }
+      pintar();
+    }
+    if (msg.type === "criteria_resultado") {
+      cw.generando = false;
+      if (cw.timer) { clearInterval(cw.timer); cw.timer = null; }
+      if (msg.error) { cw.error = msg.error; pintar(); return; }
+      guardarPlanteo(msg.resultado);
+      cw.paso = 5; cw.error = null; pintar();
+    }
+  });
+
+  function guardarPlanteo(resultado) {
+    var meta = window.__coopLeadMeta || {};
+    var previa = (state.criteria && state.criteria.metadata) || {};
+    state.criteria = {
+      planteo: resultado.planteo || null,
+      consumo: resultado.tokens || null,
+      modelo: resultado.modelo || null,
+      metadata: {
+        version: (previa.version || 0) + 1,
+        relevadorId: meta.userId || previa.relevadorId || null,
+        relevadorNombre: meta.userNombre || previa.relevadorNombre || null,
+        fechaRelevamiento: new Date().toISOString(),
+        validadorId: null, validadorNombre: null, fechaValidacion: null,
+        estado: "borrador",
+      },
+      notasRevision: (state.criteria && state.criteria.notasRevision) || "",
+    };
+    emitirSnapshot();
+  }
+
+  function emitirSnapshot() {
+    try {
+      if (window.__coopBridge && typeof window.__coopBridge.emitSnapshot === "function") window.__coopBridge.emitSnapshot();
+    } catch (e) { /* */ }
+  }
+
+  /* ---------- acciones ---------- */
+  function abrir() {
+    cw.abierto = true; cw.paso = 1; cw.error = null;
+    cw.preguntas = null; cw.respuestas = {};
+    cw.fotos = todasLasFotos().map(function (f) {
+      f.sel = f.is_sketch || !(f.caption || "").trim(); // preselección de diseño
+      return f;
+    });
+    // Si ya hay planteo previo, ofrecer ir directo a revisión.
+    if (state.criteria && state.criteria.planteo) cw.paso = 5;
+    pintar();
+  }
+  function cerrar() { cw.abierto = false; var n = $("#criteria-overlay"); if (n) n.remove(); }
+
+  function pedirPreguntas() {
+    cw.pidiendo = true; cw.error = null; pintar();
+    armarPayload().then(function (pl) { post("criteria_preguntas", pl); });
+  }
+  function generar() {
+    cw.generando = true; cw.error = null; cw.t0 = Date.now(); pintar();
+    cw.timer = setInterval(function () { var n = $("#cw-segs"); if (n) n.textContent = Math.round((Date.now() - cw.t0) / 1000) + " s"; }, 500);
+    armarPayload().then(function (pl) { post("criteria_generar", pl); });
+  }
+  function validar() {
+    if (!state.criteria) return;
+    var meta = window.__coopLeadMeta || {};
+    state.criteria.metadata.validadorId = meta.userId || null;
+    state.criteria.metadata.validadorNombre = meta.userNombre || null;
+    state.criteria.metadata.fechaValidacion = new Date().toISOString();
+    state.criteria.metadata.estado = "validado";
+    emitirSnapshot(); pintar();
+  }
+
+  /* ---------- render del overlay ---------- */
+  function estilos() {
+    if ($("#criteria-css")) return;
+    var css = document.createElement("style"); css.id = "criteria-css";
+    css.textContent = "#criteria-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px}" +
+      "#criteria-box{background:#fff;border-radius:14px;width:min(860px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}" +
+      ".cw-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #e2e8f0}" +
+      ".cw-title{font-weight:700;color:#0f172a}.cw-title small{font-weight:400;color:#94a3b8;margin-left:8px}" +
+      ".cw-body{padding:16px 18px;overflow-y:auto}" +
+      ".cw-foot{display:flex;justify-content:space-between;gap:8px;padding:12px 18px;border-top:1px solid #e2e8f0}" +
+      ".cw-btn{border:1px solid #cbd5e1;background:#fff;border-radius:9px;padding:8px 14px;cursor:pointer;font-size:13px}" +
+      ".cw-btn:disabled{opacity:.45;cursor:default}.cw-btn.pri{background:#0b6ea8;border-color:#0b6ea8;color:#fff}.cw-btn.ok{background:#059669;border-color:#059669;color:#fff}" +
+      ".cw-pasos{display:flex;gap:6px;margin:0 0 12px}.cw-paso{flex:1;height:5px;border-radius:3px;background:#e2e8f0}.cw-paso.on{background:#0b6ea8}" +
+      ".cw-sem{display:flex;flex-direction:column;gap:6px}.cw-sem div{display:flex;gap:8px;align-items:center}" +
+      ".cw-foto{display:flex;gap:10px;align-items:center;border:1px solid #e2e8f0;border-radius:9px;padding:6px 10px;margin-bottom:6px}" +
+      ".cw-foto img{width:52px;height:52px;object-fit:cover;border-radius:6px;background:#f1f5f9}" +
+      ".cw-preg{border:1px solid #e2e8f0;border-radius:9px;padding:10px;margin-bottom:8px}" +
+      ".cw-preg textarea{width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font-size:13px;margin-top:6px}" +
+      ".cw-tag{font-size:11px;padding:1px 7px;border-radius:99px;background:#f1f5f9;color:#64748b}" +
+      ".cw-err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:9px;padding:8px 10px;margin-bottom:10px}" +
+      ".cw-tabla{width:100%;border-collapse:collapse;font-size:13px}.cw-tabla th,.cw-tabla td{border-bottom:1px solid #f1f5f9;padding:5px 6px;text-align:left;vertical-align:top}" +
+      ".cw-sec{margin:14px 0 6px;font-weight:700;color:#0f172a}.cw-rev{background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:10px;margin-top:10px}" +
+      ".cw-meta{font-size:12px;color:#64748b}" +
+      ".cw-scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}.cw-scrollx .cw-tabla{min-width:480px}" +
+      "#cw-rail{position:fixed;right:8px;top:50%;transform:translateY(-50%);z-index:8500}" +
+      "#cw-rail-dots{display:flex;flex-direction:column;gap:7px;background:rgba(255,255,255,.92);border:1px solid #e2e8f0;border-radius:99px;padding:9px 7px;box-shadow:0 2px 10px rgba(15,23,42,.12);cursor:pointer}" +
+      ".cw-dot{width:11px;height:11px;border-radius:50%;display:block}" +
+      ".cw-dot.verde{background:#10b981}.cw-dot.amarillo{background:#f59e0b}.cw-dot.rojo{background:#ef4444}" +
+      "#cw-rail-panel{position:absolute;right:34px;top:50%;transform:translateY(-50%);width:min(300px,80vw);background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;box-shadow:0 8px 28px rgba(15,23,42,.2);font-size:13px}" +
+      ".cw-rail-fila{display:flex;gap:8px;align-items:flex-start;padding:4px 0;border-bottom:1px solid #f8fafc}.cw-rail-fila small{color:#64748b}" +
+      "@media (max-width:640px){" +
+        "#criteria-overlay{padding:0}" +
+        "#criteria-box{width:100vw;height:100vh;max-height:100vh;border-radius:0}" +
+        ".cw-body{padding:12px}" +
+        ".cw-btn{padding:11px 14px;font-size:14px;min-height:44px}" +
+        ".cw-foot{flex-wrap:wrap}.cw-foot>div{display:flex;gap:8px;flex:1}.cw-foot .cw-btn{flex:1;min-width:120px}" +
+        ".cw-foto{padding:10px}.cw-foto input[type=checkbox]{width:20px;height:20px;flex-shrink:0}.cw-foto img{width:60px;height:60px}" +
+        ".cw-preg textarea, [data-cwnotas]{font-size:16px}" +
+        "#cw-rail{right:5px}" +
+      "}";
+    document.head.appendChild(css);
+  }
+
+  function barra() {
+    var h = "";
+    for (var i = 1; i <= 5; i++) h += '<div class="cw-paso' + (i <= cw.paso ? " on" : "") + '"></div>';
+    return '<div class="cw-pasos">' + h + "</div>";
+  }
+
+  function cuerpoPaso() {
+    if (cw.paso === 1) {
+      var ico = { verde: "🟢", amarillo: "🟡", rojo: "🔴" };
+      var filas = estadoSeisPreguntas().map(function (r) {
+        return "<div><span>" + ico[r.estado] + "</span><span>" + esc(r.q) + "</span><span class='cw-tag'>" + esc(r.detalle) + "</span></div>";
+      }).join("");
+      return "<p style='color:#475569;margin:0 0 10px'>Chequeo del relevamiento contra las <b>seis preguntas canónicas</b> (orientativo, sin IA). Lo rojo probablemente termine en la sección A REVISAR — si podés, relevalo antes de generar. Los mismos puntitos te acompañan en el costado mientras relevás.</p><div class='cw-sem'>" + filas + "</div>";
+    }
+    if (cw.paso === 2) {
+      if (!cw.fotos.length) return "<p style='color:#64748b'>El relevamiento no tiene fotos. Se puede generar igual (solo con los datos estructurados).</p>";
+      var sel = cw.fotos.filter(function (f) { return f.sel; }).length;
+      var lista = cw.fotos.map(function (f, i) {
+        return "<label class='cw-foto'><input type='checkbox' data-cwfoto='" + i + "'" + (f.sel ? " checked" : "") + "/>" +
+          "<img data-cwthumb='" + esc(f.id) + "' alt=''/>" +
+          "<span style='flex:1;min-width:0'><b>" + esc(f.name || f.id) + "</b>" + (f.is_sketch ? " <span class='cw-tag'>✎ boceto</span>" : "") +
+          "<br><small style='color:#64748b'>" + esc(f.origen) + (f.caption ? " · “" + esc(f.caption) + "”" : " · sin epígrafe") + "</small></span></label>";
+      }).join("");
+      return "<p style='color:#475569;margin:0 0 10px'>Elegí qué imágenes analiza CriterIA (<b>" + sel + "</b> seleccionadas). Preselección: bocetos y fotos <i>sin epígrafe</i>. Las fotos con buen epígrafe no hace falta procesarlas: su texto viaja igual y quedan como referencia para tu validación.</p>" + lista;
+    }
+    if (cw.paso === 3) {
+      var h = "<p style='color:#475569;margin:0 0 10px'>Ronda única y opcional: CriterIA revisa lo cargado y hace hasta <b>5 preguntas</b> respondibles acá mismo, en campo. Podés saltearla — lo no respondido cae a la sección A REVISAR.</p>";
+      if (cw.pidiendo) return h + "<p>⏳ CriterIA está revisando el relevamiento…</p>";
+      if (cw.preguntas === null) return h + "<button class='cw-btn pri' data-cwact='preguntas'>Pedir preguntas a CriterIA</button>";
+      if (!cw.preguntas.length) return h + "<p style='color:#059669'>✓ CriterIA no encontró nada crítico que preguntar. Adelante.</p>";
+      return h + cw.preguntas.map(function (p, i) {
+        return "<div class='cw-preg'><b>" + (i + 1) + ". " + esc(p.pregunta) + "</b>" +
+          "<div class='cw-meta'>" + esc(p.por_que_importa || "") + (p.como_responderla ? " · <i>" + esc(p.como_responderla) + "</i>" : "") + "</div>" +
+          "<textarea rows='2' data-cwresp='" + i + "' placeholder='Respuesta (texto; podés dejarla vacía)'>" + esc(cw.respuestas[i] || "") + "</textarea></div>";
+      }).join("");
+    }
+    if (cw.paso === 4) {
+      if (cw.generando) return "<p>⚙️ CriterIA está componiendo el planteo… <b id='cw-segs'>0 s</b></p><p class='cw-meta'>Aplica el catálogo de plantas modelo a los datos + " + cw.fotos.filter(function (f) { return f.sel; }).length + " imágenes. Suele demorar 1-3 minutos.</p>";
+      return "<p style='color:#475569'>Todo listo. CriterIA va a componer el borrador del planteo: plantas modelo, lista de materiales con las reglas aplicadas, asignación de recursos por Multivac, advertencias, etapas y la sección A REVISAR.</p><button class='cw-btn pri' data-cwact='generar'>⚡ Generar planteo</button>";
+    }
+    // paso 5 — revisión
+    var c = state.criteria || {}; var p = c.planteo || {}; var m = c.metadata || {};
+    if (!c.planteo) return "<p style='color:#64748b'>Todavía no hay planteo generado.</p>";
+    var h5 = "<div class='cw-meta'>Versión " + (m.version || 1) + " · generado " + (m.fechaRelevamiento || "").slice(0, 10) + (m.relevadorNombre ? " por " + esc(m.relevadorNombre) : "") +
+      (m.estado === "validado" ? " · <b style='color:#059669'>VALIDADO</b> por " + esc(m.validadorNombre || "") + " el " + (m.fechaValidacion || "").slice(0, 10) : " · <b style='color:#d97706'>borrador sin validar</b>") + "</div>";
+    h5 += "<div class='cw-sec'>Resumen</div><p style='margin:0'>" + esc(p.resumen_analisis || "") + "</p>";
+    if (p.plantas_modelo && p.plantas_modelo.length) {
+      h5 += "<div class='cw-sec'>Plantas modelo / nodos</div><ul style='margin:4px 0 0;padding-left:18px'>" + p.plantas_modelo.map(function (x) { return "<li><b>" + esc(x.nombre) + "</b>: " + esc(x.descripcion) + "</li>"; }).join("") + "</ul>";
+    }
+    if (p.equipamiento && p.equipamiento.length) {
+      h5 += "<div class='cw-sec'>Lista de materiales</div><div class='cw-scrollx'><table class='cw-tabla'><tr><th>Cant.</th><th>Ítem</th><th>Regla</th></tr>" +
+        p.equipamiento.map(function (e) { return "<tr><td>" + esc(e.cantidad) + "</td><td>" + esc(e.item) + (e.notas ? "<br><small style='color:#64748b'>" + esc(e.notas) + "</small>" : "") + "</td><td><small>" + esc(e.regla_aplicada || "") + "</small></td></tr>"; }).join("") + "</table></div>";
+    }
+    if (p.asignacion_recursos && p.asignacion_recursos.length) {
+      h5 += "<div class='cw-sec'>Asignación de recursos</div>" + p.asignacion_recursos.map(function (mrec) {
+        var det = [].concat(mrec.entradas_analogicas || [], mrec.buses_modbus || []).map(esc).join("<br>");
+        return "<p style='margin:4px 0'><b>" + esc(mrec.equipo) + "</b> — " + esc(mrec.ubicacion || "") + "<br><small style='color:#475569'>" + det + "</small></p>";
+      }).join("");
+    }
+    if (p.advertencias && p.advertencias.length) h5 += "<div class='cw-sec'>Advertencias</div><ul style='margin:4px 0 0;padding-left:18px'>" + p.advertencias.map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("") + "</ul>";
+    if (p.etapas && p.etapas.length) h5 += "<div class='cw-sec'>Etapas</div><ul style='margin:4px 0 0;padding-left:18px'>" + p.etapas.map(function (e) { return "<li><b>Etapa " + esc(e.numero) + ":</b> " + esc(e.alcance) + "</li>"; }).join("") + "</ul>";
+    if (p.notas_a_terceros && p.notas_a_terceros.length) {
+      h5 += "<div class='cw-sec'>Notas a terceros (borrador editable — firma el cliente)</div>" + p.notas_a_terceros.map(function (n) {
+        return "<div class='cw-preg'><b>" + esc(n.destinatario_organismo || "") + "</b> — " + esc(n.destinatario_persona_o_area || "") + "<br><i>" + esc(n.asunto || "") + "</i><br><small style='white-space:pre-wrap'>" + esc(n.cuerpo || "") + "</small></div>";
+      }).join("");
+    }
+    if (p.a_revisar && p.a_revisar.length) {
+      h5 += "<div class='cw-rev'><b>A REVISAR — CON LA INFORMACIÓN PROPORCIONADA NO ES POSIBLE GENERAR UN PLAN</b><ul style='margin:6px 0 0;padding-left:18px'>" +
+        p.a_revisar.map(function (a) { return "<li><b>" + esc(a.aspecto) + "</b>: " + esc(a.que_falta) + " — " + esc(a.por_que_bloquea) + "</li>"; }).join("") + "</ul></div>";
+    }
+    h5 += "<div class='cw-sec'>Notas de revisión (tuyas)</div><textarea rows='3' data-cwnotas style='width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font-size:13px'>" + esc(c.notasRevision || "") + "</textarea>";
+    return h5;
+  }
+
+  function botonera() {
+    var izq = "", der = "";
+    if (cw.paso > 1 && cw.paso < 5) izq = "<button class='cw-btn' data-cwact='atras'>← Atrás</button>";
+    if (cw.paso === 5 && state.criteria && state.criteria.planteo) izq = "<button class='cw-btn' data-cwact='regenerar'>↻ Regenerar (nueva versión)</button>";
+    if (cw.paso === 1) der = "<button class='cw-btn pri' data-cwact='sig'>Siguiente →</button>";
+    if (cw.paso === 2) der = "<button class='cw-btn pri' data-cwact='sig'>Siguiente →</button>";
+    if (cw.paso === 3) der = "<button class='cw-btn pri' data-cwact='sig'>" + (cw.preguntas === null ? "Generar igual →" : "Continuar →") + "</button>";
+    if (cw.paso === 5) {
+      var validado = state.criteria && state.criteria.metadata && state.criteria.metadata.estado === "validado";
+      der = "<button class='cw-btn' data-cwact='guardar'>Guardar</button>" +
+        (validado ? "" : "<button class='cw-btn ok' data-cwact='validar'>✓ Validar planteo</button>");
+    }
+    return "<div>" + izq + "</div><div style='display:flex;gap:8px'>" + der + "</div>";
+  }
+
+  function pintar() {
+    if (!cw.abierto) return;
+    estilos();
+    var ov = $("#criteria-overlay");
+    if (!ov) {
+      ov = document.createElement("div"); ov.id = "criteria-overlay";
+      document.body.appendChild(ov);
+      ov.addEventListener("click", function (e) { if (e.target === ov && !cw.generando) cerrar(); });
+    }
+    var titulos = { 1: "Completitud del relevamiento", 2: "Selección de fotos y bocetos", 3: "Preguntas de CriterIA", 4: "Generación", 5: "Revisión y validación" };
+    ov.innerHTML = "<div id='criteria-box'>" +
+      "<div class='cw-head'><span class='cw-title'>CriterIA <small>paso " + cw.paso + " de 5 · " + titulos[cw.paso] + "</small></span>" +
+      "<button class='cw-btn' data-cwact='cerrar'>✕</button></div>" +
+      "<div class='cw-body'>" + barra() + (cw.error ? "<div class='cw-err'>" + esc(cw.error) + " <button class='cw-btn' data-cwact='reintentar' style='margin-left:8px'>Reintentar</button></div>" : "") + cuerpoPaso() + "</div>" +
+      "<div class='cw-foot'>" + botonera() + "</div></div>";
+    cargarThumbs();
+  }
+
+  function cargarThumbs() {
+    var imgs = document.querySelectorAll("img[data-cwthumb]");
+    imgs.forEach(function (el) {
+      var id = el.getAttribute("data-cwthumb");
+      getPhotoData(id).then(function (d) { if (d) el.src = d; }).catch(function () { /* */ });
+    });
+  }
+
+  /* ---------- rail flotante: los puntitos durante el relevamiento ---------- */
+  var railPanelAbierto = false;
+
+  function pintarRail() {
+    var debeVerse = false;
+    try { debeVerse = (typeof state !== "undefined") && state.view === "editor" && !!state.project; } catch (e) { debeVerse = false; }
+    var rail = document.getElementById("cw-rail");
+    if (!debeVerse) { if (rail) rail.remove(); railPanelAbierto = false; return; }
+    var estados = estadoSeisPreguntas();
+    if (!rail) {
+      rail = document.createElement("div"); rail.id = "cw-rail";
+      document.body.appendChild(rail);
+    }
+    var dots = estados.map(function (r, i) {
+      return "<span class='cw-dot " + r.estado + "' title='" + esc(r.q) + "'></span>";
+    }).join("");
+    var panel = "";
+    if (railPanelAbierto) {
+      var ico = { verde: "🟢", amarillo: "🟡", rojo: "🔴" };
+      panel = "<div id='cw-rail-panel'>" +
+        "<div style='font-weight:700;margin-bottom:6px'>Las seis preguntas <small style='font-weight:400;color:#94a3b8'>(" + esc(estados[0].fuente) + ")</small></div>" +
+        estados.map(function (r) {
+          return "<div class='cw-rail-fila'><span>" + ico[r.estado] + "</span><span><b>" + esc(r.corto) + "</b> — " + esc(r.q) + "<br><small>" + esc(r.detalle) + "</small></span></div>";
+        }).join("") +
+        "<button class='cw-btn pri' data-action='abrir-criteria' style='width:100%;margin-top:8px'>⚡ Abrir CriterIA</button></div>";
+    }
+    rail.innerHTML = "<div id='cw-rail-dots' title='Completitud del relevamiento (tocar para ver)'>" + dots + "</div>" + panel;
+  }
+
+  var railTimer = null;
+  function programarRail() { clearTimeout(railTimer); railTimer = setTimeout(pintarRail, 600); }
+  document.addEventListener("input", programarRail);
+  document.addEventListener("change", programarRail);
+  document.addEventListener("click", function () { setTimeout(pintarRail, 250); });
+  setInterval(pintarRail, 4000);
+  document.addEventListener("click", function (e) {
+    var d = e.target.closest ? e.target.closest("#cw-rail-dots") : null;
+    if (d) { railPanelAbierto = !railPanelAbierto; pintarRail(); }
+    else if (railPanelAbierto && !(e.target.closest && e.target.closest("#cw-rail"))) { railPanelAbierto = false; pintarRail(); }
+  });
+
+  /* ---------- eventos (delegación) ---------- */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("[data-cwact]") : null;
+    var abrirBtn = e.target.closest ? e.target.closest("[data-action='abrir-criteria']") : null;
+    if (abrirBtn) { abrir(); return; }
+    if (!btn) return;
+    var act = btn.getAttribute("data-cwact");
+    if (act === "cerrar") { if (!cw.generando || confirm("Hay una generación en curso, ¿cerrar igual?")) cerrar(); }
+    if (act === "atras") { cw.paso = Math.max(1, cw.paso - 1); pintar(); }
+    if (act === "sig") { cw.paso = Math.min(5, cw.paso + 1); pintar(); }
+    if (act === "preguntas") pedirPreguntas();
+    if (act === "generar") generar();
+    if (act === "reintentar") { cw.error = null; if (cw.paso === 4) generar(); else if (cw.paso === 3) pedirPreguntas(); else pintar(); }
+    if (act === "regenerar") { cw.paso = 1; cw.error = null; cw.preguntas = null; cw.respuestas = {}; pintar(); }
+    if (act === "guardar") { emitirSnapshot(); btn.textContent = "✓ Guardado"; setTimeout(function () { btn.textContent = "Guardar"; }, 1200); }
+    if (act === "validar") { if (confirm("¿Validar el planteo? Queda registrado tu nombre y la fecha, y la versión se congela para el informe.")) validar(); }
+  });
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t && t.hasAttribute && t.hasAttribute("data-cwfoto")) {
+      var i = Number(t.getAttribute("data-cwfoto"));
+      if (cw.fotos[i]) cw.fotos[i].sel = t.checked;
+      var n = document.querySelectorAll("input[data-cwfoto]:checked").length;
+      // refresco liviano del contador sin repintar (no perder scroll)
+      var pEl = $("#criteria-box .cw-body p b"); if (pEl) pEl.textContent = String(n);
+    }
+  });
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (t && t.hasAttribute && t.hasAttribute("data-cwresp")) cw.respuestas[Number(t.getAttribute("data-cwresp"))] = t.value;
+    if (t && t.hasAttribute && t.hasAttribute("data-cwnotas") && state.criteria) state.criteria.notasRevision = t.value;
+  });
 })();
 
 boot();
