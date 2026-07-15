@@ -105,11 +105,23 @@ function SeccionEtiquetas({ api, recargarTags }) {
   const [canonico, setCanonico] = useState('');
   const [trabajando, setTrabajando] = useState(false);
   const [msj, setMsj] = useState(null);
+  const anioActual = new Date().getFullYear();
+  const [anio, setAnio] = useState('todos'); // 'todos' | número
+  const [detalle, setDetalle] = useState(null); // { tag, cargando, datos }
 
   const cargar = useCallback(async () => {
-    try { setDatos(await api.etiquetas.uso()); } catch { setDatos({ etiquetas: [] }); }
-  }, [api]);
+    try { setDatos(await api.etiquetas.uso(anio === 'todos' ? null : Number(anio))); }
+    catch { setDatos({ etiquetas: [] }); }
+  }, [api, anio]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  const verDetalle = async (tag) => {
+    setDetalle({ tag, cargando: true, datos: null });
+    try {
+      const d = await api.etiquetas.detalle(tag, anio === 'todos' ? null : Number(anio));
+      setDetalle({ tag, cargando: false, datos: d });
+    } catch { setDetalle({ tag, cargando: false, datos: { itemsGrilla: [], cards: [] } }); }
+  };
 
   const etiquetas = datos?.etiquetas || [];
   // Agrupar por clave normalizada; los grupos con más de una forma van primero.
@@ -151,12 +163,19 @@ function SeccionEtiquetas({ api, recargarTags }) {
 
   return (
     <div className="mt-8 max-w-3xl">
-      <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2 mb-1">
-        <Tags size={18} className="text-coop-naranja" /> Etiquetas — calidad de datos
-      </h2>
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+          <Tags size={18} className="text-coop-naranja" /> Etiquetas — calidad de datos
+        </h2>
+        <select value={anio} onChange={(e) => setAnio(e.target.value)}
+          className="border border-slate-300 rounded-lg px-2 py-1 text-sm">
+          <option value="todos">Todos los años</option>
+          {[anioActual, anioActual - 1, anioActual - 2].map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+      </div>
       <p className="text-sm text-slate-500 mb-3">
-        Variantes de escritura ("+Agua", "masagua"…) fragmentan las horas por proyecto.
-        Marcá las que son lo mismo, elegí el nombre correcto y unificá.
+        Marcá variantes que son lo mismo y unificalas. Tocá el <b>contador</b> de una
+        etiqueta para ver sus tareas{anio !== 'todos' ? ` de ${anio}` : ''} (g = grilla, k = kanban).
       </p>
       {msj && (
         <p className={`text-sm mb-3 rounded-lg p-2 ${msj.tipo === 'ok' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{msj.texto}</p>
@@ -169,13 +188,65 @@ function SeccionEtiquetas({ api, recargarTags }) {
               <label key={e.tag} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs cursor-pointer select-none ${sel[e.tag] ? 'border-coop-azul bg-coop-azul/10 text-coop-azul' : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                 <input type="checkbox" className="hidden" checked={!!sel[e.tag]} onChange={() => toggle(e.tag)} />
                 {e.tag}
-                <span className="text-slate-400">{e.grilla}g{e.kanban ? ` · ${e.kanban}k` : ''}</span>
+                <button type="button" title={`Ver tareas de "${e.tag}"`}
+                  onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); verDetalle(e.tag); }}
+                  className="text-slate-400 hover:text-coop-azul hover:underline">
+                  {e.grilla}g{e.kanban ? ` · ${e.kanban}k` : ''}
+                </button>
               </label>
             ))}
           </div>
         ))}
         {!etiquetas.length && <p className="text-sm text-slate-400">Sin etiquetas registradas todavía.</p>}
       </div>
+      {detalle && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setDetalle(null)}>
+          <div className="bg-white rounded-xl w-full max-w-lg p-5 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold mb-1">Tareas con "{detalle.tag}"</h3>
+            <p className="text-xs text-slate-400 mb-3">{anio === 'todos' ? 'Todos los años' : `Año ${anio}`} · agrupa variantes de escritura</p>
+            {detalle.cargando ? <p className="text-sm text-slate-400">Cargando…</p> : (
+              <>
+                {detalle.datos.itemsGrilla.length > 0 && (
+                  <>
+                    <p className="text-sm font-medium text-slate-600 mb-1.5">Grilla ({detalle.datos.itemsGrilla.length})</p>
+                    <ul className="space-y-1 mb-4">
+                      {detalle.datos.itemsGrilla.map((it, i) => (
+                        <li key={i} className="text-sm text-slate-700 flex gap-2 border-b border-slate-50 pb-1">
+                          <span className="text-xs text-slate-400 whitespace-nowrap mt-0.5">{it.fecha.split('-').reverse().join('/')}</span>
+                          <span className="text-xs text-coop-azul whitespace-nowrap mt-0.5">{it.colaborador.split(' ')[0]}</span>
+                          <span className="break-words min-w-0 flex-1">{it.texto}</span>
+                          {it.horas ? <span className="text-xs text-slate-400 whitespace-nowrap mt-0.5">{it.horas} hs</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {detalle.datos.cards.length > 0 && (
+                  <>
+                    <p className="text-sm font-medium text-slate-600 mb-1.5">Kanban ({detalle.datos.cards.length})</p>
+                    <ul className="space-y-1">
+                      {detalle.datos.cards.map((c, i) => (
+                        <li key={i} className="text-sm text-slate-700 flex gap-2">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{c.columna}</span>
+                          <span className="break-words min-w-0">{c.titulo}</span>
+                          {c.proyecto && <span className="text-xs text-slate-400">({c.proyecto})</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {!detalle.datos.itemsGrilla.length && !detalle.datos.cards.length && (
+                  <p className="text-sm text-slate-400">Sin tareas en el período.</p>
+                )}
+              </>
+            )}
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setDetalle(null)} className="px-4 py-2 text-sm bg-coop-negro text-white rounded-lg hover:opacity-90">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {seleccionadas.length > 1 && (
         <div className="flex items-center gap-2 mt-3">
           <span className="text-sm text-slate-600">Unificar {seleccionadas.length} como</span>
