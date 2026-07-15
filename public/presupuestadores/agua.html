@@ -7221,10 +7221,12 @@ async function boot() {
     try {
       textoLibre = JSON.stringify([p.general, p.necesidades, (p.zonas || []).map(function (z) { return z.observaciones || z.notas || ""; })]).toLowerCase();
     } catch (e) { textoLibre = ""; }
+    var zonas = p.zonas || [];
     return SEIS.map(function (d) {
-      var verde = d.tipos.some(function (t) { return tiposStr.indexOf(t) >= 0; });
+      var declarado = zonas.length > 0 && zonas.every(function (z) { return z.cuestionario && z.cuestionario[d.k]; });
+      var verde = declarado || d.tipos.some(function (t) { return tiposStr.indexOf(t) >= 0; });
       var amarillo = !verde && d.texto.some(function (t) { return textoLibre.indexOf(t) >= 0; });
-      return { q: d.q, corto: d.corto, estado: verde ? "verde" : (amarillo ? "amarillo" : "rojo"), detalle: verde ? "componentes cargados" : (amarillo ? "solo menciones en texto: cargá el componente" : "sin datos"), fuente: "relevamiento" };
+      return { q: d.q, corto: d.corto, estado: verde ? "verde" : (amarillo ? "amarillo" : "rojo"), detalle: declarado ? "respondido en el cuestionario" : (verde ? "componentes cargados" : (amarillo ? "solo menciones en texto: cargá el componente" : "sin datos")), fuente: "relevamiento" };
     });
   }
 
@@ -7352,7 +7354,7 @@ async function boot() {
   function estilos() {
     if ($("#criteria-css")) return;
     var css = document.createElement("style"); css.id = "criteria-css";
-    css.textContent = "#criteria-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px}" +
+    css.textContent = "#criteria-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px}" +
       "#criteria-box{background:#fff;border-radius:14px;width:min(860px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;font-size:14px}" +
       ".cw-head{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #e2e8f0}" +
       ".cw-title{font-weight:700;color:#0f172a}.cw-title small{font-weight:400;color:#94a3b8;margin-left:8px}" +
@@ -7372,7 +7374,14 @@ async function boot() {
       ".cw-sec{margin:14px 0 6px;font-weight:700;color:#0f172a}.cw-rev{background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:10px;margin-top:10px}" +
       ".cw-meta{font-size:12px;color:#64748b}" +
       ".cw-scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}.cw-scrollx .cw-tabla{min-width:480px}" +
-      "#cw-rail{position:fixed;right:8px;top:50%;transform:translateY(-50%);z-index:8500}" +
+      "#cw-rail{position:fixed;right:8px;top:50%;transform:translateY(-50%);z-index:99990}" +
+      "#cw-continuar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 8px;padding:12px;border-top:2px dashed #e2e8f0}" +
+      "#cw-ent-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100001;display:flex;align-items:center;justify-content:center;padding:16px}" +
+      "#cw-ent-box{background:#fff;border-radius:14px;width:min(420px,94vw);padding:20px;font-size:14px}" +
+      "@media (max-width:640px){#cw-ent-overlay{align-items:flex-end;padding:0}#cw-ent-box{width:100vw;border-radius:14px 14px 0 0;padding:18px 16px 22px}#cw-ent-box .cw-btn{min-height:46px}}" +
+      ".cw-cont-pos{font-size:12px;color:#94a3b8;white-space:nowrap}" +
+      "#cw-continuar .cw-btn{min-height:44px}" +
+      "@media (max-width:640px){#cw-continuar{position:sticky;bottom:0;background:rgba(255,255,255,.96);border-top:1px solid #e2e8f0;margin:18px -12px 0;padding:10px 12px}#cw-continuar .cw-btn{flex:1}}" +
       "#cw-rail-dots{display:flex;flex-direction:column;gap:7px;background:rgba(255,255,255,.92);border:1px solid #e2e8f0;border-radius:99px;padding:9px 7px;box-shadow:0 2px 10px rgba(15,23,42,.12);cursor:pointer}" +
       ".cw-dot{width:11px;height:11px;border-radius:50%;display:block}" +
       ".cw-dot.verde{background:#10b981}.cw-dot.amarillo{background:#f59e0b}.cw-dot.rojo{background:#ef4444}" +
@@ -7506,7 +7515,316 @@ async function boot() {
     });
   }
 
-  /* ---------- rail flotante: los puntitos durante el relevamiento ---------- */
+  /* ---------- flujo guiado: barra "Continuar" al pie de cada sección ----------
+     Recorre el relevamiento en orden (datos generales → fuentes → zonas y sus
+     componentes → necesidades → etapas → vista previa) sin depender del menú
+     lateral: pensado para completar el relevamiento con una mano, en el celu.
+     Al final, ofrece directamente Generar con CriterIA. */
+  function ordenDeNodos() {
+    var p = state.project || {};
+    var orden = [{ id: "general", label: "Datos generales" }];
+    (p.fuentes || []).forEach(function (f) { orden.push({ id: "fuente:" + f.id, label: "Fuente: " + (f.nombre || f.name || "fuente") }); });
+    (p.zonas || []).forEach(function (z) {
+      orden.push({ id: "zona:" + z.id, label: "Zona: " + (z.nombre || z.name || "zona") });
+      (z.componentes || []).forEach(function (c) { orden.push({ id: "comp:" + c.id, label: (c.tipo || c.nombre || "componente") }); });
+    });
+    orden.push({ id: "necesidades", label: "Necesidades del cliente" });
+    orden.push({ id: "etapas", label: "Etapas del proyecto" });
+    orden.push({ id: "preview", label: "Vista previa del informe" });
+    return orden;
+  }
+
+  function pintarContinuar() {
+    var viejo = document.getElementById("cw-continuar");
+    var main = document.querySelector(".main");
+    var enEditor = false;
+    try { enEditor = (typeof state !== "undefined") && state.view === "editor" && !!state.project; } catch (e) { enEditor = false; }
+    if (!enEditor || !main) { if (viejo) viejo.remove(); return; }
+    var html;
+    if (ent.activa) {
+      // Barra de la ENTREVISTA: progreso del loop actual + Siguiente
+      var pos = "", btn = "";
+      if (ent.fase === "fuentes_carga") {
+        pos = "💧 Fuente " + (ent.idx + 1) + " de " + ent.cant.fuentes;
+        btn = (ent.idx + 1 < ent.cant.fuentes) ? "Siguiente fuente →" : "Terminé las fuentes ✓";
+      } else if (ent.fase === "zonas_carga") {
+        pos = "🏭 Planta " + (ent.idx + 1) + " de " + ent.cant.zonas;
+        btn = (ent.idx + 1 < ent.cant.zonas) ? "Siguiente planta →" : "Terminé las plantas ✓";
+      } else if (ent.fase === "necesidades") { pos = "🗒 Necesidades del cliente"; btn = "Siguiente →"; }
+      else if (ent.fase === "etapas") { pos = "🧩 Etapas del proyecto"; btn = "Siguiente →"; }
+      else if (ent.fase === "preview") { pos = "👁 Vista previa"; btn = "Terminar →"; }
+      if (btn) {
+        html = "<span class='cw-cont-pos'>" + pos + "</span>" +
+          "<span style='display:flex;gap:8px;flex:1;justify-content:flex-end'>" +
+          "<button class='cw-btn pri' data-cwent='ent-sig'>" + btn + "</button>" +
+          "<button class='cw-btn' data-cwent='salir' title='Salir del modo guiado' style='flex:0 0 auto;min-width:44px'>✕</button></span>";
+      } else { if (viejo) viejo.remove(); return; }
+    } else {
+    var orden = ordenDeNodos();
+    var actual = state.selectedNodeId || "general";
+    var idx = -1;
+    for (var i = 0; i < orden.length; i++) if (orden[i].id === actual) { idx = i; break; }
+    if (idx >= 0 && idx < orden.length - 1) {
+      var sig = orden[idx + 1];
+      html = "<span class='cw-cont-pos'>" + (idx + 1) + " de " + orden.length + "</span>" +
+        "<span style='display:flex;gap:8px;flex:1;justify-content:flex-end'>" +
+        "<button class='cw-btn' data-cwent='abrir' title='Relevamiento guiado' style='flex:0 0 auto'>🎤</button>" +
+        "<button class='cw-btn pri' data-cwgoto='" + esc(sig.id) + "'>Continuar: " + esc(sig.label) + " →</button></span>";
+    } else if (idx === orden.length - 1 || actual === "preview") {
+      html = "<span class='cw-cont-pos'>Relevamiento recorrido ✓</span>" +
+        "<button class='cw-btn pri' data-action='abrir-criteria'>⚡ Generar con CriterIA</button>";
+    } else {
+      if (viejo) viejo.remove(); return;
+    }
+    }
+    if (!viejo) {
+      viejo = document.createElement("div"); viejo.id = "cw-continuar";
+      main.appendChild(viejo);
+    } else if (viejo.parentNode !== main) {
+      main.appendChild(viejo);
+    }
+    viejo.innerHTML = html;
+  }
+
+  document.addEventListener("click", function (e) {
+    var g = e.target.closest ? e.target.closest("[data-cwgoto]") : null;
+    if (!g) return;
+    e.preventDefault(); e.stopPropagation();
+    try {
+      state.selectedNodeId = g.getAttribute("data-cwgoto");
+      state.drawerOpen = false;
+      if (typeof render === "function") render();
+      var m = document.querySelector(".main"); if (m) m.scrollTop = 0;
+      window.scrollTo(0, 0);
+    } catch (err) { /* */ }
+    setTimeout(pintarContinuar, 50);
+  }, true);
+
+  /* ---------- MODO ENTREVISTA (pedido 15/07): el relevamiento como
+     interrogatorio guiado. Pregunta CANTIDADES ("¿cuántas fuentes tiene el
+     servicio?"), crea cada nodo y lleva al FORMULARIO REAL (fotos/GPS/bocetos
+     ya existentes) con barra de progreso "Fuente 1 de N"; al completar el
+     número declarado, confirma ("¿todas cargadas?") con salida para corregir
+     la cantidad (el cliente se acordó de otra). La cantidad declarada queda
+     además como verificación cruzada para CriterIA (previene el clásico
+     "13 declarados / 12 relevados" de Castelli). No duplica formularios:
+     coreografía sobre lo que ya existe. ---------- */
+  var ent = { activa: false, fase: null, idx: 0, cant: { fuentes: 1, zonas: 1 }, ofrecida: false, q: 0, sub: false };
+
+  /* Cuestionario por planta: las seis preguntas como encuesta de toques.
+     Un "No" explícito es un DATO (CriterIA no supone ni manda a A REVISAR);
+     las respuestas viajan en zona.cuestionario dentro del JSON del proyecto. */
+  var TIPOS_SALIDA = [
+    { v: "modbus", label: "Telelectura Modbus" },
+    { v: "4_20", label: "4-20 mA" },
+    { v: "pulsos", label: "Pulsos" },
+    { v: "no_se", label: "No sé / verificar" },
+  ];
+  var SI_NO = [{ v: "si", label: "Sí" }, { v: "no", label: "No" }];
+  var SI_NO_NS = [{ v: "si", label: "Sí" }, { v: "no", label: "No" }, { v: "no_se", label: "No sé / verificar" }];
+  var TRONCAL = [{ v: "unica", label: "Única" }, { v: "varias", label: "Varias (no unificadas)" }, { v: "no_se", label: "No sé / verificar" }];
+  function resp(z, k) { return (z.cuestionario && z.cuestionario[k] && z.cuestionario[k].respuesta) || null; }
+
+  // Pasos planos; `cond(z)` decide si el paso aplica según respuestas previas.
+  // `tipo:"texto"` = campo libre opcional (no bloqueante).
+  var CUESTIONARIO = [
+    { k: "cuanto_llega", titulo: "¿Cuánto llega?", campo: "respuesta", pregunta: "¿Tiene caudalímetro de INGRESO?", opciones: SI_NO },
+    { k: "cuanto_llega", titulo: "¿Cuánto llega?", campo: "tipo", pregunta: "¿Qué salida tiene el caudalímetro de ingreso?", opciones: TIPOS_SALIDA, cond: function (z) { return resp(z, "cuanto_llega") === "si"; } },
+    { k: "cuanto_llega", titulo: "¿Cuánto llega?", campo: "troncal", pregunta: "¿El ingreso al tanque/cisterna es por una ÚNICA troncal, o por varias?", opciones: TRONCAL },
+    { k: "cuanto_tengo", titulo: "¿Cuánto tengo?", campo: "respuesta", pregunta: "¿Hay cisterna o tanque en esta planta?", opciones: [{ v: "cisterna", label: "Cisterna" }, { v: "tanque", label: "Tanque elevado" }, { v: "ambos", label: "Ambos" }, { v: "no", label: "No" }] },
+    { k: "cuanto_entrego", titulo: "¿Cuánto entrego?", campo: "respuesta", pregunta: "¿Tiene caudalímetro de SALIDA?", opciones: SI_NO },
+    { k: "cuanto_entrego", titulo: "¿Cuánto entrego?", campo: "tipo", pregunta: "¿Qué salida tiene el caudalímetro de salida?", opciones: TIPOS_SALIDA, cond: function (z) { return resp(z, "cuanto_entrego") === "si"; } },
+    { k: "cuanto_entrego", titulo: "¿Cuánto entrego?", campo: "troncal", pregunta: "¿La entrega es por una ÚNICA troncal, o por varias?", opciones: TRONCAL },
+    { k: "presion", titulo: "Presión", campo: "respuesta", pregunta: "¿Hay sensores/transductores de presión instalados?", opciones: SI_NO },
+    { k: "presion", titulo: "Presión", campo: "lazo_compartido", pregunta: "¿Lo usa algún automatismo existente (lazo compartido)? Preavisa cómo configurar la Multivac.", opciones: SI_NO_NS, cond: function (z) { return resp(z, "presion") === "si"; } },
+    { k: "presion", titulo: "Presión", campo: "rango", tipo: "texto", pregunta: "Rango del sensor (opcional, ej: 0-10 bar)", cond: function (z) { return resp(z, "presion") === "si"; } },
+    { k: "con_que_calidad", titulo: "¿Con qué calidad?", campo: "respuesta", pregunta: "¿Hay dosificación de cloro en esta planta?", opciones: SI_NO },
+    { k: "con_que_calidad", titulo: "¿Con qué calidad?", campo: "pulsos", pregunta: "¿El dosificador tiene salida de pulsos?", opciones: SI_NO_NS, cond: function (z) { return resp(z, "con_que_calidad") === "si"; } },
+    { k: "como_entrego", titulo: "¿Cómo entrego?", campo: "respuesta", pregunta: "¿Hay bombas en esta planta?", opciones: [{ v: "trifasica", label: "Trifásica" }, { v: "monofasica", label: "Monofásica" }, { v: "varias", label: "Varias" }, { v: "no", label: "No" }] },
+    { k: "como_esta_la_planta", titulo: "¿Cómo está la planta?", campo: "respuesta", pregunta: "¿Hay tablero eléctrico donde instalar el analizador de red?", opciones: SI_NO_NS },
+  ];
+  function pasosAplicables(z) {
+    return CUESTIONARIO.filter(function (p) { return !p.cond || p.cond(z); });
+  }
+  function zonaActual() { return (state.project.zonas || [])[ent.idx] || null; }
+
+  function entNavegar(nodeId) {
+    try {
+      state.selectedNodeId = nodeId; state.drawerOpen = false;
+      if (typeof render === "function") render();
+      var m = document.querySelector(".main"); if (m) m.scrollTop = 0;
+      window.scrollTo(0, 0);
+    } catch (e) { /* */ }
+  }
+  function entFuente(i) { // navega a la fuente i; la crea si no existe
+    var fs = state.project.fuentes || (state.project.fuentes = []);
+    while (fs.length <= i) {
+      var f = newFuente(); fs.push(f);
+      state.expanded.fuentes = true;
+      if (typeof scheduleSave === "function") scheduleSave();
+    }
+    ent.idx = i; entNavegar("fuente:" + fs[i].id);
+  }
+  function entZona(i) {
+    var zs = state.project.zonas || (state.project.zonas = []);
+    while (zs.length <= i) {
+      var z = newZona(); zs.push(z);
+      state.expanded.zonas = true; state.expanded["zon:" + z.id] = true;
+      if (typeof scheduleSave === "function") scheduleSave();
+    }
+    ent.idx = i; entNavegar("zona:" + zs[i].id);
+    if (!zs[i].cuestionario) { zs[i].cuestionario = {}; ent.fase = "zona_pregunta"; ent.q = 0; ent.sub = false; }
+  }
+
+  function entOverlayHtml() {
+    var f = ent.fase;
+    if (f === "fuentes_cant" || f === "zonas_cant") {
+      var esF = f === "fuentes_cant";
+      var val = esF ? ent.cant.fuentes : ent.cant.zonas;
+      return "<h3 style='margin:0 0 4px'>" + (esF ? "💧 Fuentes de agua" : "🏭 Plantas / predios") + "</h3>" +
+        "<p style='color:#475569;margin:0 0 14px'>" + (esF
+          ? "¿Cuántas <b>fuentes</b> tiene el servicio? (acueducto, pozo, surgente…)"
+          : "¿Cuántas <b>plantas o predios</b> (zonas) tiene el servicio?") + "</p>" +
+        "<div style='display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:16px'>" +
+        "<button class='cw-btn' data-cwent='menos' style='font-size:20px;width:52px'>−</button>" +
+        "<span id='cw-ent-num' style='font-size:34px;font-weight:700;min-width:56px;text-align:center'>" + val + "</span>" +
+        "<button class='cw-btn' data-cwent='mas' style='font-size:20px;width:52px'>+</button></div>" +
+        "<button class='cw-btn pri' data-cwent='cant-ok' style='width:100%'>Continuar →</button>";
+    }
+    if (f === "fuentes_confirm" || f === "zonas_confirm") {
+      var esFC = f === "fuentes_confirm";
+      var n = esFC ? ent.cant.fuentes : ent.cant.zonas;
+      return "<h3 style='margin:0 0 4px'>" + (esFC ? "💧 Fuentes: ¿listas?" : "🏭 Plantas: ¿listas?") + "</h3>" +
+        "<p style='color:#475569;margin:0 0 14px'>Según lo indicado, " + (esFC ? "las <b>" + n + " fuente" + (n > 1 ? "s" : "") + "</b> ya están cargadas" : "las <b>" + n + " planta" + (n > 1 ? "s" : "") + "</b> ya están cargadas") + ". ¿Continuamos con " + (esFC ? "las plantas" : "las necesidades del cliente") + "?</p>" +
+        "<div style='display:flex;flex-direction:column;gap:8px'>" +
+        "<button class='cw-btn pri' data-cwent='confirm-si'>Sí, continuar →</button>" +
+        "<button class='cw-btn' data-cwent='confirm-otra'>El cliente recordó otra: cargar una más</button>" +
+        "<button class='cw-btn' data-cwent='confirm-corregir'>Corregir la cantidad</button></div>";
+    }
+    if (f === "fin") {
+      return "<h3 style='margin:0 0 4px'>✓ Relevamiento recorrido</h3>" +
+        "<p style='color:#475569;margin:0 0 14px'>Pasaste por todas las secciones. Podés repasar lo que quieras con el menú, o generar el planteo ahora.</p>" +
+        "<div style='display:flex;flex-direction:column;gap:8px'>" +
+        "<button class='cw-btn pri' data-cwent='fin-criteria'>⚡ Generar con CriterIA</button>" +
+        "<button class='cw-btn' data-cwent='salir'>Cerrar el modo guiado</button></div>";
+    }
+    if (f === "zona_pregunta") {
+      var z = zonaActual(); if (!z) return "";
+      var pasos = pasosAplicables(z);
+      var def = pasos[ent.q]; if (!def) return "";
+      var cuerpo;
+      if (def.tipo === "texto") {
+        cuerpo = "<input id='cw-q-texto' type='text' placeholder='" + esc(def.pregunta) + "' style='width:100%;border:1px solid #cbd5e1;border-radius:9px;padding:11px;font-size:16px;margin-bottom:8px'/>" +
+          "<button class='cw-btn pri' data-cwq='__texto__' style='width:100%'>Continuar →</button>";
+      } else {
+        cuerpo = "<div style='display:flex;flex-direction:column;gap:8px'>" + def.opciones.map(function (o) {
+          return "<button class='cw-btn' data-cwq='" + esc(o.v) + "' style='width:100%;text-align:left'>" + esc(o.label) + "</button>";
+        }).join("") + "</div>";
+      }
+      return "<div class='cw-meta' style='margin-bottom:2px'>🏭 Planta " + (ent.idx + 1) + " de " + ent.cant.zonas + (z.nombre ? " · " + esc(z.nombre) : "") + " — pregunta " + (ent.q + 1) + " de " + pasos.length + "</div>" +
+        "<h3 style='margin:0 0 2px'>" + esc(def.titulo) + "</h3>" +
+        "<p style='color:#475569;margin:0 0 12px'>" + esc(def.pregunta) + "</p>" + cuerpo +
+        "<button class='cw-btn' data-cwent='q-saltear' style='width:100%;margin-top:10px;border-style:dashed;color:#94a3b8'>Saltear cuestionario (responder después)</button>";
+    }
+    if (f === "bienvenida") {
+      return "<h3 style='margin:0 0 4px'>🎤 Relevamiento guiado</h3>" +
+        "<p style='color:#475569;margin:0 0 14px'>Te llevo paso a paso: fuentes → plantas → necesidades → etapas, preguntándote las cantidades para que no quede nada sin cargar. ¿Arrancamos?</p>" +
+        "<div style='display:flex;flex-direction:column;gap:8px'>" +
+        "<button class='cw-btn pri' data-cwent='arrancar'>Sí, guiame</button>" +
+        "<button class='cw-btn' data-cwent='salir'>Prefiero el modo libre</button></div>";
+    }
+    return "";
+  }
+
+  function pintarEnt() {
+    var ov = document.getElementById("cw-ent-overlay");
+    var conOverlay = ["bienvenida", "fuentes_cant", "zonas_cant", "fuentes_confirm", "zonas_confirm", "zona_pregunta", "fin"].indexOf(ent.fase) >= 0;
+    if (!ent.activa || !conOverlay) { if (ov) ov.remove(); pintarContinuar(); return; }
+    estilos();
+    if (!ov) {
+      ov = document.createElement("div"); ov.id = "cw-ent-overlay";
+      document.body.appendChild(ov);
+    }
+    ov.innerHTML = "<div id='cw-ent-box'>" + entOverlayHtml() + "</div>";
+  }
+
+  function entSiguiente() { // avanza desde la barra de progreso
+    if (ent.fase === "fuentes_carga") {
+      if (ent.idx + 1 < ent.cant.fuentes) entFuente(ent.idx + 1);
+      else { ent.fase = "fuentes_confirm"; }
+    } else if (ent.fase === "zonas_carga") {
+      if (ent.idx + 1 < ent.cant.zonas) entZona(ent.idx + 1);
+      else { ent.fase = "zonas_confirm"; }
+    } else if (ent.fase === "necesidades") { ent.fase = "etapas"; entNavegar("etapas"); }
+    else if (ent.fase === "etapas") { ent.fase = "preview"; entNavegar("preview"); }
+    else if (ent.fase === "preview") { ent.fase = "fin"; }
+    pintarEnt();
+  }
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-cwent]") : null;
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var a = b.getAttribute("data-cwent");
+    var esF = ent.fase && ent.fase.indexOf("fuentes") === 0;
+    if (a === "abrir") { ent.activa = true; ent.fase = "bienvenida"; }
+    if (a === "arrancar") { ent.fase = "fuentes_cant"; entNavegar("general"); }
+    if (a === "salir") { ent.activa = false; ent.fase = null; }
+    if (a === "menos" || a === "mas") {
+      var k = esF ? "fuentes" : "zonas";
+      ent.cant[k] = Math.max(1, ent.cant[k] + (a === "mas" ? 1 : -1));
+      var n = document.getElementById("cw-ent-num"); if (n) n.textContent = ent.cant[k];
+      return; // sin repintar todo
+    }
+    if (a === "cant-ok") {
+      if (esF) { ent.fase = "fuentes_carga"; entFuente(0); }
+      else { ent.fase = "zonas_carga"; entZona(0); }
+    }
+    if (a === "confirm-si") {
+      if (esF) { ent.fase = "zonas_cant"; }
+      else { ent.fase = "necesidades"; entNavegar("necesidades"); }
+    }
+    if (a === "confirm-otra") {
+      var kk = esF ? "fuentes" : "zonas";
+      ent.cant[kk] += 1;
+      if (esF) { ent.fase = "fuentes_carga"; entFuente(ent.cant.fuentes - 1); }
+      else { ent.fase = "zonas_carga"; entZona(ent.cant.zonas - 1); }
+    }
+    if (a === "confirm-corregir") { ent.fase = esF ? "fuentes_cant" : "zonas_cant"; }
+    if (a === "fin-criteria") { ent.activa = false; ent.fase = null; pintarEnt(); abrir(); return; }
+    if (a === "ent-sig") { entSiguiente(); return; }
+    if (a === "q-saltear") { ent.fase = "zonas_carga"; }
+    pintarEnt();
+  }, true);
+
+  // Respuestas del cuestionario por planta
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-cwq]") : null;
+    if (!b || ent.fase !== "zona_pregunta") return;
+    e.preventDefault(); e.stopPropagation();
+    var z = zonaActual(); if (!z) return;
+    var pasos = pasosAplicables(z);
+    var def = pasos[ent.q]; if (!def) return;
+    var v = b.getAttribute("data-cwq");
+    z.cuestionario = z.cuestionario || {};
+    z.cuestionario[def.k] = z.cuestionario[def.k] || {};
+    if (v === "__texto__") {
+      var inp = document.getElementById("cw-q-texto");
+      var txt = inp ? inp.value.trim() : "";
+      if (txt) z.cuestionario[def.k][def.campo] = txt; // opcional: vacío no guarda
+    } else {
+      z.cuestionario[def.k][def.campo] = v;
+    }
+    if (typeof scheduleSave === "function") scheduleSave();
+    // Recalcular aplicables (la respuesta puede habilitar/deshabilitar pasos)
+    var pasosNuevos = pasosAplicables(z);
+    var idxActual = pasosNuevos.indexOf(def);
+    ent.q = (idxActual >= 0 ? idxActual : ent.q) + 1;
+    if (ent.q >= pasosNuevos.length) { ent.fase = "zonas_carga"; }
+    pintarEnt();
+  }, true);
+
+  /* ---------- rail flotante  /* ---------- rail flotante: los puntitos durante el relevamiento ---------- */
   var railPanelAbierto = false;
 
   function pintarRail() {
@@ -7535,12 +7853,23 @@ async function boot() {
     rail.innerHTML = "<div id='cw-rail-dots' title='Completitud del relevamiento (tocar para ver)'>" + dots + "</div>" + panel;
   }
 
+  function ofrecerEntrevista() {
+    if (ent.ofrecida || ent.activa) return;
+    var enEditor = false;
+    try { enEditor = (typeof state !== "undefined") && state.view === "editor" && !!state.project; } catch (e) { return; }
+    if (!enEditor) return;
+    var vacio = !(state.project.fuentes || []).length && !(state.project.zonas || []).length;
+    if (!vacio) { ent.ofrecida = true; return; } // relevamiento ya empezado: no molestar
+    ent.ofrecida = true; ent.activa = true; ent.fase = "bienvenida";
+    pintarEnt();
+  }
+
   var railTimer = null;
-  function programarRail() { clearTimeout(railTimer); railTimer = setTimeout(pintarRail, 600); }
+  function programarRail() { clearTimeout(railTimer); railTimer = setTimeout(function () { pintarRail(); pintarContinuar(); }, 600); }
   document.addEventListener("input", programarRail);
   document.addEventListener("change", programarRail);
-  document.addEventListener("click", function () { setTimeout(pintarRail, 250); });
-  setInterval(pintarRail, 4000);
+  document.addEventListener("click", function () { setTimeout(function () { pintarRail(); pintarContinuar(); }, 250); });
+  setInterval(function () { pintarRail(); pintarContinuar(); ofrecerEntrevista(); }, 1500);
   document.addEventListener("click", function (e) {
     var d = e.target.closest ? e.target.closest("#cw-rail-dots") : null;
     if (d) { railPanelAbierto = !railPanelAbierto; pintarRail(); }
@@ -7548,10 +7877,13 @@ async function boot() {
   });
 
   /* ---------- eventos (delegación) ---------- */
+  // Captura (tercer argumento true): corre ANTES que los manejadores de la app
+  // y ningún stopPropagation puede silenciarla — el botón CriterIA responde
+  // SIEMPRE (bug de campo 15/07: en el celu el tap se perdía).
   document.addEventListener("click", function (e) {
     var btn = e.target.closest ? e.target.closest("[data-cwact]") : null;
     var abrirBtn = e.target.closest ? e.target.closest("[data-action='abrir-criteria']") : null;
-    if (abrirBtn) { abrir(); return; }
+    if (abrirBtn) { e.preventDefault(); e.stopPropagation(); abrir(); return; }
     if (!btn) return;
     var act = btn.getAttribute("data-cwact");
     if (act === "cerrar") { if (!cw.generando || confirm("Hay una generación en curso, ¿cerrar igual?")) cerrar(); }
@@ -7563,7 +7895,7 @@ async function boot() {
     if (act === "regenerar") { cw.paso = 1; cw.error = null; cw.preguntas = null; cw.respuestas = {}; pintar(); }
     if (act === "guardar") { emitirSnapshot(); btn.textContent = "✓ Guardado"; setTimeout(function () { btn.textContent = "Guardar"; }, 1200); }
     if (act === "validar") { if (confirm("¿Validar el planteo? Queda registrado tu nombre y la fecha, y la versión se congela para el informe.")) validar(); }
-  });
+  }, true);
   document.addEventListener("change", function (e) {
     var t = e.target;
     if (t && t.hasAttribute && t.hasAttribute("data-cwfoto")) {
