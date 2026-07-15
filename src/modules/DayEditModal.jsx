@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useData } from '../data/DataContext.jsx';
 import {
   STATUS_TYPES, ENTRY_TIMES, isWorkingDay, hoursBetween, fmtDDMM,
 } from './grillaUtils.js';
-import { useData } from '../data/DataContext.jsx';
 
 const FULL_DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const inputCls = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm';
@@ -16,6 +16,7 @@ const normTag = (s) => String(s || '')
 function TagChips({ tags, onAdd, onRemove, catalogo = [] }) {
   const [val, setVal] = useState('');
   const [foco, setFoco] = useState(false);
+  const [selIdx, setSelIdx] = useState(-1); // resaltado con flechas; -1 = nada
 
   // Sugerencias: primero las que EMPIEZAN igual, después las que contienen.
   const sugerencias = useMemo(() => {
@@ -49,21 +50,29 @@ function TagChips({ tags, onAdd, onRemove, catalogo = [] }) {
       <span className="relative">
         <input
           value={val}
-          onChange={(e) => setVal(e.target.value)}
+          onChange={(e) => { setVal(e.target.value); setSelIdx(-1); }}
           onFocus={() => setFoco(true)}
           onBlur={() => setTimeout(() => setFoco(false), 150)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); agregar(val); }
-            if (e.key === 'Escape') setFoco(false);
+            if (e.key === 'ArrowDown' && sugerencias.length) {
+              e.preventDefault(); setSelIdx((i) => (i + 1) % sugerencias.length);
+            } else if (e.key === 'ArrowUp' && sugerencias.length) {
+              e.preventDefault(); setSelIdx((i) => (i <= 0 ? sugerencias.length - 1 : i - 1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              agregar(selIdx >= 0 && sugerencias[selIdx] ? sugerencias[selIdx] : val);
+              setSelIdx(-1);
+            } else if (e.key === 'Escape') { setFoco(false); setSelIdx(-1); }
           }}
           placeholder="+ tag (Enter)"
           className="text-xs border border-slate-200 rounded px-2 py-0.5 w-28"
         />
         {foco && sugerencias.length > 0 && (
           <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[140px]">
-            {sugerencias.map((sug) => (
-              <button key={sug} type="button" onMouseDown={(e) => { e.preventDefault(); agregar(sug); }}
-                className="block w-full text-left px-3 py-1 text-xs text-slate-700 hover:bg-coop-azul/10">
+            {sugerencias.map((sug, i) => (
+              <button key={sug} type="button" onMouseDown={(e) => { e.preventDefault(); agregar(sug); setSelIdx(-1); }}
+                onMouseEnter={() => setSelIdx(i)}
+                className={`block w-full text-left px-3 py-1 text-xs text-slate-700 ${i === selIdx ? 'bg-coop-azul/15' : 'hover:bg-coop-azul/10'}`}>
                 {sug}
               </button>
             ))}
@@ -93,7 +102,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
   const [status, setStatus] = useState('present');
   const [entryTime, setEntryTime] = useState('08:00');
   const [viajeLabel, setViajeLabel] = useState('');
-  const [items, setItems] = useState([{ text: '', wip: false, tags: [] }]);
+  const [items, setItems] = useState([{ text: '', wip: false, tags: [], horas: null }]);
   const [hsExtraOn, setHsExtraOn] = useState(false);
   const [hsIng, setHsIng] = useState('18:00');
   const [hsSal, setHsSal] = useState('20:00');
@@ -106,9 +115,9 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
       setViajeLabel(entry.viaje_label || '');
       const its = entry.items && entry.items.length
         ? entry.items.map((it) => (typeof it === 'string'
-            ? { text: it, wip: false, tags: [] }
-            : { text: it?.text || '', wip: !!it?.wip, tags: Array.isArray(it?.tags) ? [...it.tags] : [] }))
-        : [{ text: '', wip: false, tags: [] }];
+            ? { text: it, wip: false, tags: [], horas: null }
+            : { text: it?.text || '', wip: !!it?.wip, tags: Array.isArray(it?.tags) ? [...it.tags] : [], horas: (Number(it?.horas) > 0 ? Number(it.horas) : null) }))
+        : [{ text: '', wip: false, tags: [], horas: null }];
       setItems(its);
       const hx = entry.horas_extra;
       setHsExtraOn(!!hx);
@@ -119,12 +128,22 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
       setStatus(feriadoName ? 'feriado' : 'present');
       setEntryTime('08:00');
       setViajeLabel('');
-      setItems(weeklyWipText ? [{ text: weeklyWipText, wip: true, tags: [] }] : [{ text: '', wip: false, tags: [] }]);
+      setItems(weeklyWipText ? [{ text: weeklyWipText, wip: true, tags: [], horas: null }] : [{ text: '', wip: false, tags: [], horas: null }]);
       setHsExtraOn(false);
       setHsIng('18:00');
       setHsSal('20:00');
     }
   }, [open, entry, weeklyWipText, feriadoName]);
+
+  // Reparto del día (8 hs): los ítems con horas explícitas las usan; el resto
+  // del día se divide entre los que no especifican. Igual criterio que las
+  // estadísticas de horas por proyecto.
+  const itemsValidos = items.filter((it) => it.text && it.text.trim());
+  const sumExpl = itemsValidos.reduce((a, it) => a + (Number(it.horas) > 0 ? Number(it.horas) : 0), 0);
+  const sinEspecificar = itemsValidos.filter((it) => !(Number(it.horas) > 0)).length;
+  const restoDia = Math.max(0, 8 - sumExpl);
+  const horasAuto = sinEspecificar ? Math.round((restoDia / sinEspecificar) * 10) / 10 : 0;
+  const excedido = sumExpl > 8;
 
   if (!open || !collaborator || !date) return null;
 
@@ -135,7 +154,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
   const showCumpleOption = !!(collaborator?.cumpleMes && collaborator?.cumpleDia) && dt.getMonth() >= (collaborator.cumpleMes - 1);
 
   const setItem = (i, patch) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
-  const addItem = () => setItems((arr) => [...arr, { text: '', wip: false, tags: [] }]);
+  const addItem = () => setItems((arr) => [...arr, { text: '', wip: false, tags: [], horas: null }]);
   const removeItem = (i) => setItems((arr) => arr.filter((_, idx) => idx !== i));
   const toggleWip = (i) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, wip: !it.wip } : it)));
   const addTag = (i, t) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, tags: [...it.tags, t] } : it)));
@@ -146,6 +165,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
     text: it?.text || '',
     wip: !!it?.wip,
     tags: Array.isArray(it?.tags) ? it.tags.filter((t) => typeof t === 'string' && t.trim()) : [],
+    horas: Number(it?.horas) > 0 ? Number(it.horas) : null,
   }));
   const validItems = cleanItems.filter((it) => it.text.trim());
   const wipItemCount = validItems.filter((it) => it.wip).length;
@@ -254,6 +274,16 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
                       placeholder={idx === 0 ? 'Tarea principal del día' : 'Otra cosa que hice…'}
                       className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
                     />
+                    <span className="relative shrink-0" title="Horas dedicadas (vacío = comparte el resto del día)">
+                      <input
+                        type="number" min="0" max="12" step="0.5"
+                        value={it.horas ?? ''}
+                        onChange={(e) => setItem(idx, { horas: e.target.value === '' ? null : Number(e.target.value) })}
+                        placeholder={it.text && it.text.trim() && !(Number(it.horas) > 0) ? String(horasAuto) : ''}
+                        className="w-16 border border-slate-300 rounded-lg pl-2 pr-6 py-1.5 text-sm text-right"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 pointer-events-none">hs</span>
+                    </span>
                     <button
                       type="button"
                       onClick={() => toggleWip(idx)}
@@ -272,8 +302,19 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
             </div>
             <div className="flex gap-3 mt-2 text-sm">
               <button type="button" onClick={addItem} className="text-coop-azul hover:underline">+ Agregar otra cosa</button>
+              {itemsValidos.length > 0 && (
+                <span className={`ml-2 text-[11px] ${excedido ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
+                  {excedido
+                    ? `Especificaste ${sumExpl} hs: supera las 8 del día`
+                    : sinEspecificar > 0 && sumExpl > 0
+                      ? `${sumExpl} hs especificadas · ${restoDia} hs restantes entre ${sinEspecificar} sin especificar (${horasAuto} hs c/u)`
+                      : sinEspecificar > 0
+                        ? `8 hs repartidas entre ${sinEspecificar} tarea${sinEspecificar > 1 ? 's' : ''} (${horasAuto} hs c/u)`
+                        : `${sumExpl} hs especificadas en total`}
+                </span>
+              )}
               {weeklyWipText && !weeklyAlreadyItem && (
-                <button type="button" onClick={() => setItems((arr) => [...arr, { text: weeklyWipText, wip: true, tags: [] }])} className="text-coop-azul hover:underline">
+                <button type="button" onClick={() => setItems((arr) => [...arr, { text: weeklyWipText, wip: true, tags: [], horas: null }])} className="text-coop-azul hover:underline">
                   + Agregar WIP de la semana
                 </button>
               )}

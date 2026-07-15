@@ -200,6 +200,7 @@ function DiaDetalleModal({ ctx, colaborador, onClose }) {
                 <div className="flex items-start gap-1.5">
                   <span className={it.wip ? 'text-emerald-500' : 'text-slate-300'}>•</span>
                   <span className="break-words min-w-0">{it.text}</span>
+                  {Number(it.horas) > 0 && <span className="text-xs text-slate-400 whitespace-nowrap ml-auto">{it.horas} hs</span>}
                 </div>
                 {Array.isArray(it.tags) && it.tags.length > 0 ? (
                   <div className="flex flex-wrap gap-1 mt-1.5 ml-4">
