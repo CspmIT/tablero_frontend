@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, LayoutGrid, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet, Sparkles, BarChart3, Lightbulb, HardHat } from 'lucide-react';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, LayoutGrid, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet, Sparkles, BarChart3, Lightbulb } from 'lucide-react';
 import { DataProvider, useData } from './data/DataContext.jsx';
 import { isAuthenticated, logout } from './api/auth.js';
 import LoginFlow from './modules/Login/LoginFlow.jsx';
@@ -22,6 +22,7 @@ import Asistente from './modules/Asistente.jsx';
 import Analisis from './modules/Analisis.jsx';
 import Deseos from './modules/Deseos.jsx';
 import VisitasTecnicas from './modules/VisitasTecnicas.jsx';
+import IconoTecnico from './components/IconoTecnico.jsx';
 import MiMes from './modules/MiMes.jsx';
 
 // Navegación principal.
@@ -36,7 +37,7 @@ const MODULOS = [
   { id: 'asistente', label: 'Asistente IA', icon: Sparkles, listo: true },
   { id: 'analisis', label: 'Análisis', icon: BarChart3, listo: true, roles: ['manager', 'gerencial', 'externo'] },
   { id: 'deseos', label: 'Mis deseos', icon: Lightbulb, listo: true },
-  { id: 'visitas', label: 'Visitas técnicas', icon: HardHat, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
+  { id: 'visitas', label: 'Visitas técnicas', icon: IconoTecnico, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
 ];
 
 // Agrupados bajo "Información adicional" (igual que el standalone).

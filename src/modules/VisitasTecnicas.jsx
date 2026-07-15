@@ -4,7 +4,8 @@
 // comercial del lead. Desde acá se abre el relevamiento +Agua (y CriterIA)
 // directamente: el plan propuesta puede nacer in situ, durante la visita.
 import { useEffect, useState, useCallback } from 'react';
-import { HardHat, MapPin, Phone, RefreshCw } from 'lucide-react';
+import { MapPin, Phone, RefreshCw } from 'lucide-react';
+import IconoTecnico from '../components/IconoTecnico.jsx';
 import { useData } from '../data/DataContext.jsx';
 import AguaModal from './AguaModal.jsx';
 
@@ -41,7 +42,7 @@ export default function VisitasTecnicas() {
     <div className="p-4 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-xl font-semibold text-coop-negro flex items-center gap-2">
-          <HardHat size={20} className="text-coop-naranja" /> Visitas técnicas
+          <IconoTecnico size={20} className="text-coop-naranja" /> Visitas técnicas
         </h2>
         <button onClick={cargar} title="Actualizar" className="p-2 rounded-lg text-slate-400 hover:text-coop-azul hover:bg-slate-100">
           <RefreshCw size={16} />

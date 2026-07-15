@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useData } from '../data/DataContext.jsx';
 import StatusBadge from './StatusBadge.jsx';
 import SwitchVista from '../components/SwitchVista.jsx';
-import { fmtISO, buildEntriesMap, isActiveCollab, isWorkingDay } from './grillaUtils.js';
+import { fmtISO, buildEntriesMap, isActiveCollab, isWorkingDay, STATUS_TYPES } from './grillaUtils.js';
 
 // Vista "Mi mes" (pedido Carola, 07/07): calendario mensual de SOLO LECTURA por
 // colaborador. Panorama completo de estados e ítems del mes; la edición sigue
@@ -19,7 +19,8 @@ export default function MiMes({ vista = 'mimes', setVista }) {
   const [entries, setEntries] = useState({});
   const [feriadosMap, setFeriadosMap] = useState({});
   const [cargando, setCargando] = useState(true);
-  const [diaAbierto, setDiaAbierto] = useState(null); // { fecha, dia, entry, feriado }
+  const [diaAbierto, setDiaAbierto] = useState(null); // { fecha, dia, entry, feriado } (modal escritorio)
+  const [selDia, setSelDia] = useState(() => fmtISO(new Date())); // día elegido en la vista móvil
 
   const activos = colaboradores.filter(isActiveCollab);
   // Por defecto, el usuario logueado; si no está en la lista (p.ej. gerencial externo), el primero.
@@ -76,6 +77,15 @@ export default function MiMes({ vista = 'mimes', setVista }) {
     setMes(`${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`);
   };
 
+  const irAHoy = () => {
+    setMes(mesActualStr());
+    setSelDia(fmtISO(new Date()));
+    // en el celu, deslizar hasta el detalle del día
+    setTimeout(() => {
+      document.getElementById('mimes-detalle')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  };
+
   const colab = activos.find((c) => c.id === colabId);
 
   return (
@@ -94,6 +104,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
             </span>
             <button onClick={() => cambiarMes(1)} className="px-2.5 py-1 rounded-lg text-slate-500 hover:bg-white">›</button>
           </div>
+          <button onClick={irAHoy} className="px-3 py-1.5 rounded-lg text-sm border border-coop-azul text-coop-azul hover:bg-coop-azul/5">Hoy</button>
         </div>
       </div>
 
@@ -102,8 +113,94 @@ export default function MiMes({ vista = 'mimes', setVista }) {
         Para editar un día, usá la grilla semanal.
       </p>
 
-      {cargando ? <p className="text-slate-500 text-sm">Cargando…</p> : (
-        <div className="overflow-x-auto">
+      {cargando ? <p className="text-slate-500 text-sm">Cargando…</p> : (<>
+        {/* ============ Vista móvil (estilo app Calendar): mes completo de un
+            vistazo, días pintados con los colores de la grilla, y detalle del
+            día seleccionado debajo. ============ */}
+        <div className="sm:hidden">
+          <div className="grid grid-cols-5 gap-1 mb-1">
+            {['L', 'M', 'X', 'J', 'V'].map((d) => (
+              <span key={d} className="text-center text-[11px] font-medium text-slate-400">{d}</span>
+            ))}
+          </div>
+          {semanas.map((fila, i) => (
+            <div key={i} className="grid grid-cols-5 gap-1 mb-1">
+              {fila.map((dia) => {
+                const iso = fmtISO(dia);
+                const delMes = dia.getMonth() === mesNum - 1;
+                const entry = colabId ? entries[`${colabId}:${iso}`] : null;
+                const feriado = feriadosMap[iso];
+                const st = entry ? STATUS_TYPES[entry.status] : (feriado ? STATUS_TYPES.feriado : null);
+                const esHoy = iso === fmtISO(new Date());
+                const sel = iso === selDia;
+                return (
+                  <button key={iso} onClick={() => setSelDia(iso)}
+                    className={`h-11 rounded-lg text-sm font-medium flex flex-col items-center justify-center relative ${
+                      !delMes ? 'opacity-35' : ''
+                    } ${sel ? 'ring-2 ring-coop-azul' : esHoy ? 'ring-1 ring-coop-azul/50' : ''}`}
+                    style={st ? { background: st.bg, color: st.color } : { background: '#f8fafc', color: '#94a3b8' }}>
+                    {dia.getDate()}
+                    {entry?.horas_extra?.horas ? <span className="absolute top-0.5 right-1 text-[9px]">+</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+          {/* Leyenda compacta */}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 mb-3">
+            {Object.entries(STATUS_TYPES).map(([k, v]) => (
+              <span key={k} className="flex items-center gap-1 text-[10px] text-slate-500">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: v.color }} /> {v.label}
+              </span>
+            ))}
+          </div>
+          {/* Detalle del día seleccionado */}
+          <div id="mimes-detalle" className="bg-white rounded-xl border border-slate-200 p-4 scroll-mt-4">
+            {(() => {
+              const entry = colabId ? entries[`${colabId}:${selDia}`] : null;
+              const feriado = feriadosMap[selDia];
+              const [ay, am, ad] = selDia.split('-').map(Number);
+              const diaSel = new Date(ay, am - 1, ad);
+              const items = (entry?.items || []).filter((it) => it && String(it.text || '').trim());
+              const nombreDia = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][diaSel.getDay()];
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-slate-800">{nombreDia} {ad} de {MESES_ES[am - 1]}</span>
+                    {entry && <StatusBadge status={entry.status} entryTime={entry.entry_time} viajeLabel={entry.viaje_label} />}
+                  </div>
+                  {feriado && <p className="text-sm text-violet-600 mb-2">🎌 {feriado}</p>}
+                  {items.length > 0 ? (
+                    <ul className="space-y-2">
+                      {items.map((it, j) => (
+                        <li key={j} className="text-sm text-slate-700 border-b border-slate-50 pb-1.5">
+                          <div className="flex items-start gap-1.5">
+                            <span className={it.wip ? 'text-emerald-500' : 'text-slate-300'}>•</span>
+                            <span className="break-words min-w-0 flex-1">{it.text}</span>
+                            {Number(it.horas) > 0 && <span className="text-xs text-slate-400 whitespace-nowrap">{it.horas} hs</span>}
+                          </div>
+                          {Array.isArray(it.tags) && it.tags.length > 0 && (
+                            <div className="flex gap-1 flex-wrap mt-1 ml-4">
+                              {it.tags.map((t, k) => <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">{t}</span>)}
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-slate-400">{entry || feriado ? 'Sin actividades cargadas.' : 'Sin registro este día.'}</p>
+                  )}
+                  {entry?.horas_extra?.horas ? (
+                    <p className="text-sm mt-2 text-coop-naranja font-medium">⏱ Horas extra: +{entry.horas_extra.horas} hs ({entry.horas_extra.ingreso} → {entry.horas_extra.salida})</p>
+                  ) : null}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* ============ Vista escritorio: la tabla de casillas fijas ============ */}
+        <div className="overflow-x-auto hidden sm:block">
           <table className="w-full border-separate" style={{ borderSpacing: 4 }}>
             <thead>
               <tr>
@@ -129,10 +226,13 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                     return (
                       <td key={iso}
                         onClick={() => hayContenido && setDiaAbierto({ fecha: iso, dia, entry, feriado })}
-                        className={`align-top rounded-lg border p-2 overflow-hidden ${
+                        className={`align-top rounded-lg border p-0 ${
                           delMes ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-100 opacity-50'
                         } ${hayContenido ? 'cursor-pointer hover:border-coop-azul/40' : ''}`}
-                        style={{ height: 116, maxHeight: 116, width: '20%' }}>
+                        style={{ width: '20%' }}>
+                        {/* contenedor interno de altura DURA: la td de una tabla estira
+                            con el contenido (height = mínimo), este div no. */}
+                        <div className="p-2 overflow-hidden" style={{ height: 116 }}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs font-semibold text-slate-500">{dia.getDate()}</span>
                           <span className="flex items-center gap-1">
@@ -161,6 +261,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                             +{ocultos} más
                           </span>
                         )}
+                        </div>
                       </td>
                     );
                   })}
@@ -169,7 +270,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
             </tbody>
           </table>
         </div>
-      )}
+      </>)}
 
       {diaAbierto && (
         <DiaDetalleModal ctx={diaAbierto} colaborador={colab} onClose={() => setDiaAbierto(null)} />
