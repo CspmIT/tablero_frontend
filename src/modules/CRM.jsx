@@ -12,7 +12,7 @@ import CRMMetricas from './CRMMetricas.jsx';
 const ETAPAS = [
   { id: 'contacto', label: 'Contacto' },
   { id: 'visita_agendada', label: 'Oportunidad' },
-  { id: 'visita_realizada', label: 'Visita realizada' },
+  { id: 'visita_realizada', label: 'Visita Técnica' },
   { id: 'propuesta', label: 'Propuesta' },
   { id: 'negociacion', label: 'Negociación' },
   { id: 'trial', label: 'Trial' },
