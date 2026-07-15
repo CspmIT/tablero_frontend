@@ -4,7 +4,7 @@ import { useData } from '../data/DataContext.jsx';
 import { parseLeadsFromRows } from './kommoImport.js';
 
 const ETAPA_LABEL = {
-  contacto: 'Contacto', visita_agendada: 'Visita agendada', visita_realizada: 'Visita realizada',
+  contacto: 'Contacto', visita_agendada: 'Visita agendada', visita_realizada: 'Visita Técnica',
   propuesta: 'Propuesta', negociacion: 'Negociación', trial: 'Trial', ganado: 'Ganado', perdido: 'Perdido',
 };
 

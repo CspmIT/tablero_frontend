@@ -49,6 +49,9 @@ export const api = {
     facturacion: (id) => http.get(`/leads/${id}/facturacion`),
     setFacturacion: (id, body) => http.put(`/leads/${id}/facturacion`, body),
     videollamada: (id, body) => http.post(`/leads/${id}/videollamada`, body),
+    visitasTecnicas: () => http.get('/leads/visitas-tecnicas'),
+    relevamientoAgua: (id) => http.get(`/leads/${id}/relevamiento-agua`),
+    guardarRelevamientoAgua: (id, estado) => http.put(`/leads/${id}/relevamiento-agua`, { estado }),
     tareas: (id) => http.get(`/leads/${id}/tareas`),
     addTarea: (id, body) => http.post(`/leads/${id}/tareas`, body),
     setTarea: (id, tareaId, body) => http.patch(`/leads/${id}/tareas/${tareaId}`, body),
@@ -96,6 +99,10 @@ export const api = {
     graphEstado: () => http.get('/integraciones/graph'),
     graphGuardar: (body) => http.put('/integraciones/graph', body),
     graphBorrar: () => http.del('/integraciones/graph'),
+  },
+  criteria: {
+    preguntas: (body) => http.post('/criteria/preguntas', body),
+    generar: (body) => http.post('/criteria/generar', body),
   },
   deseos: {
     list: (todos) => http.get('/deseos', todos ? { todos: 1 } : undefined),
