@@ -7192,12 +7192,12 @@ async function boot() {
      rojo   = nada. Si YA existe un planteo generado, los estados los dicta
      el propio análisis de CriterIA (cubierta/parcial/sin_datos). */
   var SEIS = [
-    { k: "cuanto_llega", q: "¿Cuánto llega?", corto: "Llega", tipos: ["caudalimetro", "acueducto", "pozo", "perforacion"], texto: ["caudal", "acueducto", "ingreso", "pozo"] },
-    { k: "cuanto_tengo", q: "¿Cuánto tengo?", corto: "Tengo", tipos: ["cisterna", "tanque"], texto: ["cisterna", "tanque", "reserva"] },
-    { k: "cuanto_entrego", q: "¿Cuánto entrego?", corto: "Entrego", tipos: ["caudalimetro"], texto: ["salida", "red", "entrega", "distribu"] },
-    { k: "con_que_calidad", q: "¿Con qué calidad?", corto: "Calidad", tipos: ["clorador", "dosific"], texto: ["cloro", "dosific"] },
-    { k: "como_entrego", q: "¿Cómo entrego? (bombeo)", corto: "Bombeo", tipos: ["bomba", "sala_de_bombeo", "presion", "presurizad"], texto: ["bomba", "bombeo", "presion", "presión", "presostato"] },
-    { k: "como_esta_la_planta", q: "¿Cómo está la planta? (energía)", corto: "Energía", tipos: ["tablero", "grupo", "energia"], texto: ["tablero", "energ", "grupo", "electr", "ups"] },
+    { k: "cuanto_llega", q: "Suministro de agua", corto: "Suministro", tipos: ["caudalimetro", "acueducto", "pozo", "perforacion"], texto: ["caudal", "acueducto", "ingreso", "pozo"] },
+    { k: "cuanto_tengo", q: "Disponibilidad", corto: "Disponibilidad", tipos: ["cisterna", "tanque"], texto: ["cisterna", "tanque", "reserva"] },
+    { k: "cuanto_entrego", q: "Distribución", corto: "Distribución", tipos: ["caudalimetro"], texto: ["salida", "red", "entrega", "distribu"] },
+    { k: "con_que_calidad", q: "Calidad", corto: "Calidad", tipos: ["clorador", "dosific"], texto: ["cloro", "dosific"] },
+    { k: "como_entrego", q: "Bombeo", corto: "Bombeo", tipos: ["bomba", "sala_de_bombeo", "presion", "presurizad"], texto: ["bomba", "bombeo", "presion", "presión", "presostato"] },
+    { k: "como_esta_la_planta", q: "Operación", corto: "Operación", tipos: ["tablero", "grupo", "energia"], texto: ["tablero", "energ", "grupo", "electr", "ups"] },
   ];
   function estadoSeisPreguntas() {
     // Si hay planteo generado, manda el veredicto de CriterIA.
@@ -7285,7 +7285,12 @@ async function boot() {
     if (msg.type === "criteria_resultado") {
       cw.generando = false;
       if (cw.timer) { clearInterval(cw.timer); cw.timer = null; }
-      if (msg.error) { cw.error = msg.error; pintar(); return; }
+      if (msg.error) {
+        var segs = cw.t0 ? Math.round((Date.now() - cw.t0) / 1000) : null;
+        cw.error = msg.error + (segs !== null ? " · falló a los " + segs + " s" : "") +
+          ". El relevamiento está guardado: podés reintentar o seguir sin CriterIA.";
+        pintar(); return;
+      }
       guardarPlanteo(msg.resultado);
       cw.paso = 5; cw.error = null; pintar();
     }
@@ -7317,6 +7322,30 @@ async function boot() {
     } catch (e) { /* */ }
   }
 
+  /* AUTOGUARDADO REAL (bug crítico de campo 16/07): el iframe solo emitía el
+     snapshot al finalizar — un relevamiento cerrado sin finalizar SE PERDÍA.
+     Cura: envolver scheduleSave (que el +Agua ya dispara en cada cambio de
+     dato) para además emitir el snapshot al tablero con debounce. Cada
+     respuesta, foto o campo queda persistido en el lead a los ~3 segundos.
+     Refuerzo: emisión al ocultarse la pantalla (cambio de app en el celu). */
+  (function engancharAutoguardado() {
+    if (window.parent === window) return; // standalone: no hay tablero
+    var t = null;
+    function programar() { clearTimeout(t); t = setTimeout(emitirSnapshot, 3000); }
+    var intento = 0;
+    var enganche = setInterval(function () {
+      intento++;
+      if (typeof window.scheduleSave === "function") {
+        var orig = window.scheduleSave;
+        window.scheduleSave = function () { var r = orig.apply(this, arguments); programar(); return r; };
+        clearInterval(enganche);
+      } else if (intento > 20) { clearInterval(enganche); }
+    }, 250);
+    document.addEventListener("visibilitychange", function () { if (document.hidden) emitirSnapshot(); });
+    window.addEventListener("pagehide", emitirSnapshot);
+    setInterval(function () { try { if (state && state.view === "editor") emitirSnapshot(); } catch (e) { /* */ } }, 45000);
+  })();
+
   /* ---------- acciones ---------- */
   function abrir() {
     cw.abierto = true; cw.paso = 1; cw.error = null;
@@ -7336,6 +7365,7 @@ async function boot() {
     armarPayload().then(function (pl) { post("criteria_preguntas", pl); });
   }
   function generar() {
+    emitirSnapshot(); // persistir TODO el relevamiento antes de intentar generar
     cw.generando = true; cw.error = null; cw.t0 = Date.now(); pintar();
     cw.timer = setInterval(function () { var n = $("#cw-segs"); if (n) n.textContent = Math.round((Date.now() - cw.t0) / 1000) + " s"; }, 500);
     armarPayload().then(function (pl) { post("criteria_generar", pl); });
@@ -7412,7 +7442,7 @@ async function boot() {
       var filas = estadoSeisPreguntas().map(function (r) {
         return "<div><span>" + ico[r.estado] + "</span><span>" + esc(r.q) + "</span><span class='cw-tag'>" + esc(r.detalle) + "</span></div>";
       }).join("");
-      return "<p style='color:#475569;margin:0 0 10px'>Chequeo del relevamiento contra las <b>seis preguntas canónicas</b> (orientativo, sin IA). Lo rojo probablemente termine en la sección A REVISAR — si podés, relevalo antes de generar. Los mismos puntitos te acompañan en el costado mientras relevás.</p><div class='cw-sem'>" + filas + "</div>";
+      return "<p style='color:#475569;margin:0 0 10px'>Chequeo del relevamiento contra los <b>seis ejes</b>: suministro, disponibilidad, distribución, calidad, bombeo y operación (orientativo, sin IA). Lo rojo probablemente termine en la sección A REVISAR — si podés, relevalo antes de generar. Los mismos puntitos te acompañan en el costado mientras relevás.</p><div class='cw-sem'>" + filas + "</div>";
     }
     if (cw.paso === 2) {
       if (!cw.fotos.length) return "<p style='color:#64748b'>El relevamiento no tiene fotos. Se puede generar igual (solo con los datos estructurados).</p>";
@@ -7628,20 +7658,20 @@ async function boot() {
   // Pasos planos; `cond(z)` decide si el paso aplica según respuestas previas.
   // `tipo:"texto"` = campo libre opcional (no bloqueante).
   var CUESTIONARIO = [
-    { k: "cuanto_llega", titulo: "¿Cuánto llega?", campo: "respuesta", pregunta: "¿Tiene caudalímetro de INGRESO?", opciones: SI_NO },
-    { k: "cuanto_llega", titulo: "¿Cuánto llega?", campo: "tipo", pregunta: "¿Qué salida tiene el caudalímetro de ingreso?", opciones: TIPOS_SALIDA, cond: function (z) { return resp(z, "cuanto_llega") === "si"; } },
-    { k: "cuanto_llega", titulo: "¿Cuánto llega?", campo: "troncal", pregunta: "¿El ingreso al tanque/cisterna es por una ÚNICA troncal, o por varias?", opciones: TRONCAL },
-    { k: "cuanto_tengo", titulo: "¿Cuánto tengo?", campo: "respuesta", pregunta: "¿Hay cisterna o tanque en esta planta?", opciones: [{ v: "cisterna", label: "Cisterna" }, { v: "tanque", label: "Tanque elevado" }, { v: "ambos", label: "Ambos" }, { v: "no", label: "No" }] },
-    { k: "cuanto_entrego", titulo: "¿Cuánto entrego?", campo: "respuesta", pregunta: "¿Tiene caudalímetro de SALIDA?", opciones: SI_NO },
-    { k: "cuanto_entrego", titulo: "¿Cuánto entrego?", campo: "tipo", pregunta: "¿Qué salida tiene el caudalímetro de salida?", opciones: TIPOS_SALIDA, cond: function (z) { return resp(z, "cuanto_entrego") === "si"; } },
-    { k: "cuanto_entrego", titulo: "¿Cuánto entrego?", campo: "troncal", pregunta: "¿La entrega es por una ÚNICA troncal, o por varias?", opciones: TRONCAL },
+    { k: "cuanto_llega", titulo: "Suministro de agua", campo: "respuesta", pregunta: "¿Tiene caudalímetro de INGRESO?", opciones: SI_NO },
+    { k: "cuanto_llega", titulo: "Suministro de agua", campo: "tipo", pregunta: "¿Qué salida tiene el caudalímetro de ingreso?", opciones: TIPOS_SALIDA, cond: function (z) { return resp(z, "cuanto_llega") === "si"; } },
+    { k: "cuanto_llega", titulo: "Suministro de agua", campo: "troncal", pregunta: "¿El ingreso al tanque/cisterna es por una ÚNICA troncal, o por varias?", opciones: TRONCAL },
+    { k: "cuanto_tengo", titulo: "Disponibilidad", campo: "respuesta", pregunta: "¿Hay cisterna o tanque en esta planta?", opciones: [{ v: "cisterna", label: "Cisterna" }, { v: "tanque", label: "Tanque elevado" }, { v: "ambos", label: "Ambos" }, { v: "no", label: "No" }] },
+    { k: "cuanto_entrego", titulo: "Distribución", campo: "respuesta", pregunta: "¿Tiene caudalímetro de SALIDA?", opciones: SI_NO },
+    { k: "cuanto_entrego", titulo: "Distribución", campo: "tipo", pregunta: "¿Qué salida tiene el caudalímetro de salida?", opciones: TIPOS_SALIDA, cond: function (z) { return resp(z, "cuanto_entrego") === "si"; } },
+    { k: "cuanto_entrego", titulo: "Distribución", campo: "troncal", pregunta: "¿La entrega es por una ÚNICA troncal, o por varias?", opciones: TRONCAL },
     { k: "presion", titulo: "Presión", campo: "respuesta", pregunta: "¿Hay sensores/transductores de presión instalados?", opciones: SI_NO },
     { k: "presion", titulo: "Presión", campo: "lazo_compartido", pregunta: "¿Lo usa algún automatismo existente (lazo compartido)? Preavisa cómo configurar la Multivac.", opciones: SI_NO_NS, cond: function (z) { return resp(z, "presion") === "si"; } },
     { k: "presion", titulo: "Presión", campo: "rango", tipo: "texto", pregunta: "Rango del sensor (opcional, ej: 0-10 bar)", cond: function (z) { return resp(z, "presion") === "si"; } },
-    { k: "con_que_calidad", titulo: "¿Con qué calidad?", campo: "respuesta", pregunta: "¿Hay dosificación de cloro en esta planta?", opciones: SI_NO },
-    { k: "con_que_calidad", titulo: "¿Con qué calidad?", campo: "pulsos", pregunta: "¿El dosificador tiene salida de pulsos?", opciones: SI_NO_NS, cond: function (z) { return resp(z, "con_que_calidad") === "si"; } },
-    { k: "como_entrego", titulo: "¿Cómo entrego?", campo: "respuesta", pregunta: "¿Hay bombas en esta planta?", opciones: [{ v: "trifasica", label: "Trifásica" }, { v: "monofasica", label: "Monofásica" }, { v: "varias", label: "Varias" }, { v: "no", label: "No" }] },
-    { k: "como_esta_la_planta", titulo: "¿Cómo está la planta?", campo: "respuesta", pregunta: "¿Hay tablero eléctrico donde instalar el analizador de red?", opciones: SI_NO_NS },
+    { k: "con_que_calidad", titulo: "Calidad", campo: "respuesta", pregunta: "¿Hay dosificación de cloro en esta planta?", opciones: SI_NO },
+    { k: "con_que_calidad", titulo: "Calidad", campo: "pulsos", pregunta: "¿El dosificador tiene salida de pulsos?", opciones: SI_NO_NS, cond: function (z) { return resp(z, "con_que_calidad") === "si"; } },
+    { k: "como_entrego", titulo: "Bombeo", campo: "respuesta", pregunta: "¿Hay bombas en esta planta?", opciones: [{ v: "trifasica", label: "Trifásica" }, { v: "monofasica", label: "Monofásica" }, { v: "varias", label: "Varias" }, { v: "no", label: "No" }] },
+    { k: "como_esta_la_planta", titulo: "Operación", campo: "respuesta", pregunta: "¿Hay tablero eléctrico donde instalar el analizador de red?", opciones: SI_NO_NS },
   ];
   function pasosAplicables(z) {
     return CUESTIONARIO.filter(function (p) { return !p.cond || p.cond(z); });
@@ -7844,9 +7874,9 @@ async function boot() {
     if (railPanelAbierto) {
       var ico = { verde: "🟢", amarillo: "🟡", rojo: "🔴" };
       panel = "<div id='cw-rail-panel'>" +
-        "<div style='font-weight:700;margin-bottom:6px'>Las seis preguntas <small style='font-weight:400;color:#94a3b8'>(" + esc(estados[0].fuente) + ")</small></div>" +
+        "<div style='font-weight:700;margin-bottom:6px'>Ejes del relevamiento <small style='font-weight:400;color:#94a3b8'>(" + esc(estados[0].fuente) + ")</small></div>" +
         estados.map(function (r) {
-          return "<div class='cw-rail-fila'><span>" + ico[r.estado] + "</span><span><b>" + esc(r.corto) + "</b> — " + esc(r.q) + "<br><small>" + esc(r.detalle) + "</small></span></div>";
+          return "<div class='cw-rail-fila'><span>" + ico[r.estado] + "</span><span><b>" + esc(r.q) + "</b><br><small>" + esc(r.detalle) + "</small></span></div>";
         }).join("") +
         "<button class='cw-btn pri' data-action='abrir-criteria' style='width:100%;margin-top:8px'>⚡ Abrir CriterIA</button></div>";
     }

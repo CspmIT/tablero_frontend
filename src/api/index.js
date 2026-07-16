@@ -100,6 +100,10 @@ export const api = {
     graphGuardar: (body) => http.put('/integraciones/graph', body),
     graphBorrar: () => http.del('/integraciones/graph'),
   },
+  permisos: {
+    get: () => http.get('/permisos'),
+    set: (colaboradorId, extra, ocultas) => http.put('/permisos', { colaboradorId, extra, ocultas }),
+  },
   criteria: {
     preguntas: (body) => http.post('/criteria/preguntas', body),
     generar: (body) => http.post('/criteria/generar', body),

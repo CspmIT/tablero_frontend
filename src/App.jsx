@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, LayoutGrid, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet, Sparkles, BarChart3, Lightbulb } from 'lucide-react';
 import { DataProvider, useData } from './data/DataContext.jsx';
 import { isAuthenticated, logout } from './api/auth.js';
 import LoginFlow from './modules/Login/LoginFlow.jsx';
@@ -21,35 +20,12 @@ import ImportarGrilla from './modules/ImportarGrilla.jsx';
 import Asistente from './modules/Asistente.jsx';
 import Analisis from './modules/Analisis.jsx';
 import Deseos from './modules/Deseos.jsx';
+import Configuracion from './modules/Configuracion.jsx';
+import { MODULOS, INFO, CONFIGURACION } from './nav.js';
 import VisitasTecnicas from './modules/VisitasTecnicas.jsx';
-import IconoTecnico from './components/IconoTecnico.jsx';
 import MiMes from './modules/MiMes.jsx';
 
-// Navegación principal.
-// `roles`: si está, sólo esos tipos de colaborador ven el ítem; si falta, lo ven todos.
-const MODULOS = [
-  { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true, roles: ['manager', 'gerencial'] },
-  { id: 'grilla', label: 'Grilla', icon: CalendarDays, listo: true },
-  { id: 'guardias', label: 'Guardias', icon: Shield, listo: true },
-  { id: 'crm', label: 'CRM', icon: Handshake, listo: true },
-  { id: 'kanban', label: 'Kanban', icon: SquareKanban, listo: true },
-  { id: 'objetivos', label: 'Objetivos', icon: Target, listo: true },
-  { id: 'asistente', label: 'Asistente IA', icon: Sparkles, listo: true },
-  { id: 'analisis', label: 'Análisis', icon: BarChart3, listo: true, roles: ['manager', 'gerencial', 'externo'] },
-  { id: 'deseos', label: 'Mis deseos', icon: Lightbulb, listo: true },
-  { id: 'visitas', label: 'Visitas técnicas', icon: IconoTecnico, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
-];
-
-// Agrupados bajo "Información adicional" (igual que el standalone).
-// El grupo es sólo para manager, salvo Francos que lo ve todo el mundo.
-const INFO = [
-  { id: 'equipo', label: 'Equipo', icon: Users, listo: true, roles: ['manager'] },
-  { id: 'costos', label: 'Costos op.', icon: Wallet, listo: true, roles: ['manager'] },
-  { id: 'francos', label: 'Francos', icon: CalendarMinus, listo: true },
-  { id: 'feriados', label: 'Fechas especiales', icon: CalendarCheck, listo: true, roles: ['manager'] },
-  { id: 'importar', label: 'Importar datos', icon: Upload, listo: true, roles: ['manager'] },
-  { id: 'importar_grilla', label: 'Importar grilla', icon: FileSpreadsheet, listo: true, roles: ['manager'] },
-];
+// Navegación: definida en src/nav.js (compartida con el panel de permisos).
 
 function Contenido({ activo }) {
   const { cargando, error } = useData();
@@ -80,6 +56,7 @@ function Contenido({ activo }) {
   if (activo === 'analisis') return <Analisis />;
   if (activo === 'deseos') return <Deseos />;
   if (activo === 'visitas') return <VisitasTecnicas />;
+  if (activo === 'configuracion') return <Configuracion />;
   if (activo === 'importar') return <Importar />;
   if (activo === 'importar_grilla') return <ImportarGrilla />;
   return <p className="text-slate-400">Este módulo todavía no está migrado.</p>;
@@ -100,7 +77,7 @@ export default function App() {
 
   return (
     <DataProvider>
-      <Layout modulos={MODULOS} infoGrupo={INFO} activo={activo} onSelect={setActivo} onLogout={cerrarSesion}>
+      <Layout modulos={MODULOS} infoGrupo={INFO} configuracion={CONFIGURACION} activo={activo} onSelect={setActivo} onLogout={cerrarSesion}>
         <Contenido activo={activo} />
       </Layout>
       <UpdateManager />
