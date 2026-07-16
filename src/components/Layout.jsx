@@ -9,7 +9,7 @@ import iconUrl from '../assets/cooptech-icon.png';
 // Ítems de navegación compartidos entre el sidebar de escritorio y el drawer móvil.
 // `expandido`: si se muestran las etiquetas. `enMovil`: el grupo "Información
 // adicional" se despliega inline (acordeón) en vez de flyout.
-function NavItems({ modulos, infoGrupo, activo, onSelect, expandido, enMovil }) {
+function NavItems({ modulos, infoGrupo, configuracion, activo, onSelect, expandido, enMovil }) {
   const [infoAbierto, setInfoAbierto] = useState(false);
   const infoBtnRef = useRef(null);
   const [flyPos, setFlyPos] = useState({ top: 0, left: 0 });
@@ -97,11 +97,24 @@ function NavItems({ modulos, infoGrupo, activo, onSelect, expandido, enMovil }) 
           )}
         </div>
       )}
+
+      {configuracion && (() => {
+        const Icono = configuracion.icon;
+        return (
+          <button onClick={() => elegir(configuracion.id)}
+            title={!expandido ? configuracion.label : undefined}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left border-t border-slate-100 mt-1
+              ${activo === configuracion.id ? 'text-coop-azul font-medium bg-coop-azul/5' : 'text-slate-600 hover:bg-slate-100'}`}>
+            <Icono size={20} className="shrink-0" />
+            {expandido && <span className="truncate">{configuracion.label}</span>}
+          </button>
+        );
+      })()}
     </nav>
   );
 }
 
-export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLogout, children }) {
+export default function Layout({ modulos, infoGrupo = [], configuracion = null, activo, onSelect, onLogout, children }) {
   const [abierto, setAbierto] = useState(false); // sidebar escritorio expandido
   const [drawerAbierto, setDrawerAbierto] = useState(false); // drawer móvil
   const [userAbierto, setUserAbierto] = useState(false);
@@ -110,11 +123,17 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
   const yo = colaboradores?.find((c) => String(c.id) === String(me?.colaboradorId));
   const inicial = (me?.nombre || 'U').trim().charAt(0).toUpperCase();
 
-  // Visibilidad por rol: un ítem sin `roles` lo ve todo el mundo; si tiene `roles`,
-  // sólo los tipos listados (según me.tipo).
-  const puedeVer = (item) => !item.roles || item.roles.includes(me?.tipo);
+  // Visibilidad efectiva: rol default + solapas otorgadas − ocultadas desde el
+  // panel de permisos (me.solapas viene del /me).
+  const puedeVer = (item) => {
+    const ov = me?.solapas || { extra: [], ocultas: [] };
+    if (ov.ocultas?.includes(item.id)) return false;
+    if (!item.roles || item.roles.includes(me?.tipo)) return true;
+    return !!ov.extra?.includes(item.id);
+  };
   const modulosVisibles = modulos.filter(puedeVer);
   const infoVisibles = infoGrupo.filter(puedeVer);
+  const configVisible = configuracion && puedeVer(configuracion) ? configuracion : null;
 
   const seleccionar = (id) => {
     setDrawerAbierto(false);
@@ -176,7 +195,7 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
             className="h-12 flex items-center px-5 text-slate-500 hover:text-coop-azul shrink-0">
             <Menu size={20} />
           </button>
-          <NavItems modulos={modulosVisibles} infoGrupo={infoVisibles} activo={activo}
+          <NavItems modulos={modulosVisibles} infoGrupo={infoVisibles} configuracion={configVisible} activo={activo}
             onSelect={seleccionar} expandido={abierto} enMovil={false} />
         </aside>
 
@@ -195,7 +214,7 @@ export default function Layout({ modulos, infoGrupo = [], activo, onSelect, onLo
                   <X size={20} />
                 </button>
               </div>
-              <NavItems modulos={modulosVisibles} infoGrupo={infoVisibles} activo={activo}
+              <NavItems modulos={modulosVisibles} infoGrupo={infoVisibles} configuracion={configVisible} activo={activo}
                 onSelect={seleccionar} expandido={true} enMovil={true} />
             </aside>
           </div>
