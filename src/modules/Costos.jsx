@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
 import { useData } from '../data/DataContext.jsx';
+import { descargarArchivo } from '../api/client.js';
 import { MONTHS_ES } from './fechasUtils.js';
 import { computeCostosAnio, distribucionMes, cooptechPctUnidades, sumUnidades, weeksOfMonth, UNIDADES } from './costosUtils.js';
 import { isInterno, addDays, fmtISO, isActiveCollab, activeDaysInRange } from './grillaUtils.js';
@@ -218,6 +219,13 @@ export default function Costos() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h2 className="text-xl font-semibold text-coop-negro">Costos <span className="text-sm font-normal text-slate-400">{anio}</span></h2>
+        <button
+          onClick={() => descargarArchivo(`/costos/exportar-excel?anio=${anio}`, `Costos_Operacion_Cooptech_${anio}.xlsx`)
+            .catch((e) => alert(e.message || 'No se pudo exportar'))}
+          title="Descarga el anualizado en el formato exacto del Excel de administración: reemplazar y listo. Meses sin datos quedan en blanco."
+          className="text-sm border border-coop-azul text-coop-azul px-3 py-1.5 rounded-lg hover:bg-coop-azul/5">
+          ⬇ Exportar Excel anualizado
+        </button>
         <div className="flex items-center gap-2 text-sm">
           <button onClick={() => setAnio(anio - 1)} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
           <span className="text-slate-600">{anio}</span>
@@ -380,13 +388,17 @@ export default function Costos() {
                 <div key={b.titulo} className="bg-white rounded-lg border border-slate-200 p-3">
                   <div className={`text-xs font-semibold uppercase tracking-wide mb-2 ${b.color}`}>{b.titulo}</div>
                   <dl className="space-y-1.5 text-sm">
+                    {/* Etiquetas corregidas (auditoría Excel↔app con Nadia, 16/07):
+                        horas = promedio simple de horas asignadas; dinero =
+                        horas ponderadas por el peso salarial de cada uno. Los
+                        montos siempre usaron la ponderada (por eso coincidían). */}
                     <div className="flex items-center justify-between gap-3">
-                      <dt className="text-slate-500">Asignación total horas</dt>
-                      <dd className="font-mono text-slate-700">{pct1(b.tot)}%</dd>
+                      <dt className="text-slate-500" title="Suma de horas asignadas dividida por la cantidad de colaboradores">Asignación total horas</dt>
+                      <dd className="font-mono text-slate-700">{pct1(b.prom)}%</dd>
                     </div>
                     <div className="flex items-center justify-between gap-3">
-                      <dt className="text-slate-500" title="Suma de horas asignadas dividida por la cantidad de colaboradores">Asignación en % de dinero</dt>
-                      <dd className="font-mono text-slate-700">{pct1(b.prom)}%</dd>
+                      <dt className="text-slate-500" title="Horas asignadas ponderadas por el peso salarial de cada colaborador">Asignación en % de dinero</dt>
+                      <dd className="font-mono text-slate-700">{pct1(b.tot)}%</dd>
                     </div>
                     <div className="flex items-start justify-between gap-3 pt-1.5 border-t border-slate-100">
                       <dt className="text-slate-500">Costo</dt>

@@ -284,7 +284,11 @@ export default function CRM() {
     if (!form?.id) { alert('Guardá el lead primero'); return; }
     setVcCtx({
       paso: 'form', fecha: hoy(), horaInicio: '10:00', horaFin: '11:00',
-      ids: form.ownerId ? [Number(form.ownerId)] : [], notas: '',
+      // Preselección: el dueño del lead + QUIEN AGENDA (caso de campo 16/07:
+      // el organizador no quedaba en la lista y su grilla no se impactaba).
+      // Ambos destildables: agendar para otros sin participar sigue posible.
+      ids: [...new Set([form.ownerId, me?.colaboradorId].filter(Boolean).map(Number))],
+      notas: '',
     });
   };
   const toggleVcColab = (id) => setVcCtx((c) => ({
@@ -875,7 +879,12 @@ function GraphConfigModal({ api, estado, onClose }) {
   const [guardando, setGuardando] = useState(false);
   const [msj, setMsj] = useState(null);
 
-  const completo = f.tenantId.trim() && f.clientId.trim() && f.clientSecret.trim() && f.casilla.trim();
+  const yaConfigurado = !!estado?.configurado;
+  // Sin credenciales: hacen falta los 4 datos. Ya configurado: alcanza con
+  // completar SOLO lo que cambia (el backend conserva el resto).
+  const completo = yaConfigurado
+    ? (f.tenantId.trim() || f.clientId.trim() || f.clientSecret.trim() || f.casilla.trim() || f.vence)
+    : (f.tenantId.trim() && f.clientId.trim() && f.clientSecret.trim() && f.casilla.trim());
 
   const guardar = async () => {
     if (!completo || guardando) return;
@@ -888,6 +897,8 @@ function GraphConfigModal({ api, estado, onClose }) {
       });
       setMsj({ tipo: 'ok', texto: `Validado y guardado. Casilla: ${r.casilla}${r.vence ? ` · el secreto vence el ${r.vence.split('-').reverse().join('/')}` : ''}.` });
       setF({ tenantId: '', clientId: '', clientSecret: '', casilla: '', vence: '' });
+      // Éxito legible un instante y el modal se cierra solo (detalle de campo 16/07)
+      setTimeout(() => onClose?.(), 1800);
     } catch (e) {
       setMsj({ tipo: 'error', texto: e.message || 'No se pudo guardar' });
     } finally { setGuardando(false); }
