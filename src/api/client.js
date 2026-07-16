@@ -10,6 +10,25 @@ export class ApiError extends Error {
   }
 }
 
+// Descarga autenticada de archivos binarios (p.ej. el Excel anualizado).
+export async function descargarArchivo(path, nombreArchivo) {
+  const headers = {};
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { headers });
+  if (!res.ok) {
+    let msj = 'No se pudo descargar';
+    try { const d = await res.json(); msj = d?.error?.message || d?.message || msj; } catch { /* */ }
+    throw new ApiError(res.status, 'download', msj);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombreArchivo;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function request(method, path, { body, query, isForm } = {}) {
   let url = BASE + path;
   if (query) {
