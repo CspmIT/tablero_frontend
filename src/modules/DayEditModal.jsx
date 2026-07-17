@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Video } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import ReunionModal from './ReunionModal.jsx';
 import {
@@ -121,7 +122,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
       const its = entry.items && entry.items.length
         ? entry.items.map((it) => (typeof it === 'string'
             ? { text: it, wip: false, tags: [], horas: null }
-            : { text: it?.text || '', wip: !!it?.wip, tags: Array.isArray(it?.tags) ? [...it.tags] : [], horas: (Number(it?.horas) > 0 ? Number(it.horas) : null) }))
+            : { ...it, text: it?.text || '', wip: !!it?.wip, tags: Array.isArray(it?.tags) ? [...it.tags] : [], horas: (Number(it?.horas) > 0 ? Number(it.horas) : null) }))
         : [{ text: '', wip: false, tags: [], horas: null }];
       setItems(its);
       const hx = entry.horas_extra;
@@ -161,12 +162,34 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
   const setItem = (i, patch) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   const addItem = () => setItems((arr) => [...arr, { text: '', wip: false, tags: [], horas: null }]);
   const removeItem = (i) => setItems((arr) => arr.filter((_, idx) => idx !== i));
+
+  // Ítems de reunión: la ✕ solo lo quita de TU día; cancelar para todos
+  // (Outlook avisa + se limpia la grilla de todos) es la acción explícita.
+  const quitarConAviso = (i) => {
+    const it = items[i];
+    if (it?.reunionId) {
+      if (!window.confirm('Este ítem pertenece a una reunión. La ✕ solo lo quita de TU día (la reunión sigue en pie para los demás). Para cancelarla para todos usá el botón violeta "Cancelar reunión". ¿Quitarlo solo de tu día?')) return;
+    }
+    removeItem(i);
+  };
+  const cancelarReunionDeItem = async (it) => {
+    if (!it?.reunionId) return;
+    if (!window.confirm('¿Cancelar la reunión PARA TODOS? Outlook envía la cancelación a los invitados y el ítem se quita de la grilla de todos los participantes.')) return;
+    try {
+      const r = await api.reuniones.cancelar(it.reunionId);
+      if (r.graphError) alert(r.graphError);
+      (onReunionCreada || onClose)(); // cierra y recarga la grilla
+    } catch (e) { alert(e.message || 'No se pudo cancelar (solo el organizador o un manager pueden)'); }
+  };
   const toggleWip = (i) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, wip: !it.wip } : it)));
   const addTag = (i, t) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, tags: [...it.tags, t] } : it)));
   const removeTag = (i, t) => setItems((arr) => arr.map((it, idx) => (idx === i ? { ...it, tags: it.tags.filter((x) => x !== t) } : it)));
 
   const workingDay = isWorkingDay(status);
+  // El spread preserva los campos invisibles de los ítems de reunión
+  // (reunionId, link): sin ellos, reprogramar/cancelar no encuentra el ítem.
   const cleanItems = items.map((it) => ({
+    ...it,
     text: it?.text || '',
     wip: !!it?.wip,
     tags: Array.isArray(it?.tags) ? it.tags.filter((t) => typeof t === 'string' && t.trim()) : [],
@@ -279,6 +302,19 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
                       placeholder={idx === 0 ? 'Tarea principal del día' : 'Otra cosa que hice…'}
                       className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
                     />
+                    {it.link && (
+                      <a href={it.link} target="_blank" rel="noreferrer" title="Abrir la reunión de Teams"
+                        className="shrink-0 p-1.5 rounded-lg hover:bg-slate-100" style={{ color: '#6264A7' }}>
+                        <Video size={16} />
+                      </a>
+                    )}
+                    {it.reunionId && (
+                      <button type="button" onClick={() => cancelarReunionDeItem(it)}
+                        title="Cancelar la reunión para todos (Outlook avisa)"
+                        className="shrink-0 text-[10px] px-1.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
+                        Cancelar<br/>reunión
+                      </button>
+                    )}
                     <span className="relative shrink-0" title="Horas dedicadas (vacío = comparte el resto del día)">
                       <input
                         type="number" min="0" max="12" step="0.5"
@@ -298,7 +334,7 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
                       WIP
                     </button>
                     {items.length > 1 && (
-                      <button type="button" onClick={() => removeItem(idx)} title="Quitar" className="text-slate-400 hover:text-red-500">×</button>
+                      <button type="button" onClick={() => quitarConAviso(idx)} title={it.reunionId ? 'Quitar solo de tu día' : 'Quitar'} className="text-slate-400 hover:text-red-500">×</button>
                     )}
                   </div>
                   <TagChips tags={it.tags} onAdd={(t) => addTag(idx, t)} onRemove={(t) => removeTag(idx, t)} catalogo={catalogoTags} />
