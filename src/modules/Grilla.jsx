@@ -193,6 +193,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
         feriadoName={dayCtx ? feriadosMap[fmtISO(dayCtx.date)] || null : null}
         onClose={() => setDayCtx(null)}
         onSave={guardarDia}
+        onReunionCreada={() => { setDayCtx(null); recargar(); }}
       />
 
       <WeeklyWipModal
