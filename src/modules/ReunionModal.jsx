@@ -55,7 +55,8 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
 
   const lugarFinal = f.modalidad === 'presencial' ? (f.sala === 'otra' ? f.otraSala.trim() : f.sala) : null;
   const valido = (esCliente || f.titulo.trim()) && f.fecha && f.horaInicio && f.horaFin && f.horaFin > f.horaInicio
-    && (f.modalidad === 'virtual' || lugarFinal) && f.ids.length > 0;
+    && (f.modalidad === 'virtual' || lugarFinal) && f.ids.length > 0
+    && (esCliente || f.tags.length > 0); // al menos 1 etiqueta: la prueba estrella no negocia
 
   const guardar = async () => {
     setTrabajando(true);
@@ -161,7 +162,7 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
           </div>
 
           <div>
-            <label className="block text-sm text-slate-600 mb-1">Etiquetas <span className="text-slate-400">(proyecto/tema: el ítem de la grilla nace etiquetado)</span></label>
+            <label className="block text-sm text-slate-600 mb-1">Etiquetas <span className="text-red-400">*</span> <span className="text-slate-400">(al menos una — proyecto/tema: el ítem nace etiquetado)</span></label>
             <div className="flex flex-wrap gap-1.5 mb-1.5">
               {f.tags.map((t) => (
                 <span key={t} className="text-xs px-2 py-1 rounded-full bg-coop-azul/10 text-coop-azul flex items-center gap-1">

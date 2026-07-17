@@ -223,6 +223,10 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                           <div className="flex items-start gap-1.5">
                             <span className={it.wip ? 'text-emerald-500' : 'text-slate-300'}>•</span>
                             <span className="break-words min-w-0 flex-1">{it.text}</span>
+                            {it.link && (
+                              <a href={it.link} target="_blank" rel="noreferrer" title="Abrir la reunión de Teams"
+                                className="shrink-0" style={{ color: '#6264A7' }}>▶</a>
+                            )}
                             {Number(it.horas) > 0 && <span className="text-xs text-slate-400 whitespace-nowrap">{it.horas} hs</span>}
                           </div>
                           {Array.isArray(it.tags) && it.tags.length > 0 && (
