@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useData } from '../data/DataContext.jsx';
+import ReunionModal from './ReunionModal.jsx';
 import {
-  STATUS_TYPES, ENTRY_TIMES, isWorkingDay, hoursBetween, fmtDDMM,
+  STATUS_TYPES, ENTRY_TIMES, isWorkingDay, hoursBetween, fmtDDMM, fmtISO,
 } from './grillaUtils.js';
 
 const FULL_DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -83,8 +84,12 @@ function TagChips({ tags, onAdd, onRemove, catalogo = [] }) {
   );
 }
 
-export default function DayEditModal({ open, onClose, collaborator, date, entry, weeklyWipText, feriadoName, onSave }) {
+export default function DayEditModal({ open, onClose, collaborator, date, entry, weeklyWipText, feriadoName, onSave, onReunionCreada }) {
   const { api, tags: tagsRegistro } = useData();
+  // Ola reuniones: crear una reunión directamente desde el día de la grilla
+  // (el ítem lo agrega el backend en la grilla de todos los participantes; el
+  // modal del día se cierra para que la recarga muestre el día actualizado).
+  const [reunionOpen, setReunionOpen] = useState(false);
   // Catálogo para autocompletar: registro Tag + todas las etiquetas en uso en la
   // grilla (el endpoint las trae por frecuencia). Fallback: solo registro.
   const [sugerenciasFull, setSugerenciasFull] = useState(null);
@@ -353,11 +358,22 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
             )}
           </div>
           <div className="flex gap-2">
+            <button onClick={() => setReunionOpen(true)}
+              title="Crear una reunión este día: evento en tu Outlook con invitaciones, e impacto en la grilla de todos los participantes"
+              className="px-3 py-2 text-sm border border-coop-naranja text-coop-naranja rounded-lg hover:bg-coop-naranja/5">🗓 + Reunión</button>
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
             <button onClick={handleSave} className="px-4 py-2 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90">Guardar</button>
           </div>
         </div>
       </div>
+
+      {reunionOpen && (
+        <ReunionModal
+          fechaInicial={fmtISO(dt)}
+          onDone={() => { setReunionOpen(false); onReunionCreada?.(); }}
+          onClose={() => setReunionOpen(false)}
+        />
+      )}
     </div>
   );
 }

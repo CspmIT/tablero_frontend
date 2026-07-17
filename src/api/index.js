@@ -100,6 +100,12 @@ export const api = {
     graphGuardar: (body) => http.put('/integraciones/graph', body),
     graphBorrar: () => http.del('/integraciones/graph'),
   },
+  reuniones: {
+    list: (params) => http.get('/reuniones', params),
+    create: (body) => http.post('/reuniones', body),
+    update: (id, body) => http.patch(`/reuniones/${id}`, body),
+    cancelar: (id) => http.del(`/reuniones/${id}`),
+  },
   permisos: {
     get: () => http.get('/permisos'),
     set: (colaboradorId, extra, ocultas) => http.put('/permisos', { colaboradorId, extra, ocultas }),

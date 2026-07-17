@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useData } from '../data/DataContext.jsx';
+import ReunionModal from './ReunionModal.jsx';
 import StatusBadge from './StatusBadge.jsx';
 import SwitchVista from '../components/SwitchVista.jsx';
 import { fmtISO, buildEntriesMap, isActiveCollab, isWorkingDay, STATUS_TYPES } from './grillaUtils.js';
@@ -21,6 +22,26 @@ export default function MiMes({ vista = 'mimes', setVista }) {
   const [cargando, setCargando] = useState(true);
   const [diaAbierto, setDiaAbierto] = useState(null); // { fecha, dia, entry, feriado } (modal escritorio)
   const [selDia, setSelDia] = useState(() => fmtISO(new Date())); // día elegido en la vista móvil
+  // Ola reuniones (16/07): próximas reuniones donde participo, con gestión.
+  const [reuniones, setReuniones] = useState([]);
+  const [puedoGestionar, setPuedoGestionar] = useState({});
+  const [reunionModal, setReunionModal] = useState(null); // null | { reunion? }
+  const cargarReuniones = useCallback(async () => {
+    try {
+      const r = await api.reuniones.list();
+      setReuniones(r.reuniones || []);
+      setPuedoGestionar(r.puedoGestionar || {});
+    } catch { setReuniones([]); }
+  }, [api]);
+  useEffect(() => { cargarReuniones(); }, [cargarReuniones]);
+  const cancelarReunion = async (r) => {
+    if (!window.confirm(`¿Cancelar "${r.titulo}"? Outlook les avisa a todos y se quita de la grilla.`)) return;
+    try {
+      const res = await api.reuniones.cancelar(r.id);
+      if (res.graphError) alert(res.graphError);
+      cargarReuniones(); recargar?.();
+    } catch (e) { alert(e.message || 'No se pudo cancelar'); }
+  };
 
   const activos = colaboradores.filter(isActiveCollab);
   // Por defecto, el usuario logueado; si no está en la lista (p.ej. gerencial externo), el primero.
@@ -105,6 +126,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
             <button onClick={() => cambiarMes(1)} className="px-2.5 py-1 rounded-lg text-slate-500 hover:bg-white">›</button>
           </div>
           <button onClick={irAHoy} className="px-3 py-1.5 rounded-lg text-sm border border-coop-azul text-coop-azul hover:bg-coop-azul/5">Hoy</button>
+          <button onClick={() => setReunionModal({})} className="px-3 py-1.5 rounded-lg text-sm bg-coop-naranja text-white hover:opacity-90">+ Reunión</button>
         </div>
       </div>
 
@@ -112,6 +134,30 @@ export default function MiMes({ vista = 'mimes', setVista }) {
         Calendario mensual de solo lectura{colab ? <> de <span className="font-medium text-slate-700">{colab.nombre}</span></> : ''}.
         Para editar un día, usá la grilla semanal.
       </p>
+
+      {reuniones.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4">
+          <p className="text-sm font-medium text-slate-600 mb-2">Mis próximas reuniones</p>
+          <ul className="space-y-1.5">
+            {reuniones.map((r) => (
+              <li key={r.id} className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-xs text-slate-400 whitespace-nowrap">{String(r.fecha).slice(0, 10).split('-').reverse().join('/')} · {r.horaInicio}–{r.horaFin}</span>
+                <span className="break-words min-w-0 flex-1">
+                  {r.tipo === 'cliente' ? `Videollamada · ${r.titulo}` : r.titulo}
+                  {r.modalidad === 'presencial' && r.lugar ? <span className="text-slate-400"> · {r.lugar}</span> : null}
+                  {r.joinUrl && <a href={r.joinUrl} target="_blank" rel="noreferrer" className="text-coop-azul hover:underline ml-1.5">Teams</a>}
+                </span>
+                {puedoGestionar[r.id] && (
+                  <span className="flex gap-1.5 shrink-0">
+                    <button onClick={() => setReunionModal({ reunion: r })} className="text-xs border border-slate-300 px-2 py-1 rounded-lg hover:border-coop-azul hover:text-coop-azul">Reprogramar</button>
+                    <button onClick={() => cancelarReunion(r)} className="text-xs border border-red-200 text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">Cancelar</button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {cargando ? <p className="text-slate-500 text-sm">Cargando…</p> : (<>
         {/* ============ Vista móvil (estilo app Calendar): mes completo de un
@@ -271,6 +317,15 @@ export default function MiMes({ vista = 'mimes', setVista }) {
           </table>
         </div>
       </>)}
+
+      {reunionModal && (
+        <ReunionModal
+          reunion={reunionModal.reunion || null}
+          fechaInicial={selDia}
+          onDone={() => { setReunionModal(null); cargarReuniones(); recargar?.(); }}
+          onClose={() => setReunionModal(null)}
+        />
+      )}
 
       {diaAbierto && (
         <DiaDetalleModal ctx={diaAbierto} colaborador={colab} onClose={() => setDiaAbierto(null)} />
