@@ -74,6 +74,8 @@ export const api = {
     deleteDay: (colaboradorId, fecha) => http.del(`/grilla?colaboradorId=${colaboradorId}&fecha=${fecha}`),
     wips: () => http.get('/grilla/wips'),
     setWip: (body) => http.put('/grilla/wip', body),
+    resumenSemana: (lunes) => http.get('/grilla/resumen-semana', { lunes }),
+    setResumenSemana: (body) => http.put('/grilla/resumen-semana', body),
   },
 
   plantillas: { list: () => http.get('/plantillas') },
@@ -94,6 +96,10 @@ export const api = {
   },
   analisis: {
     horasExtra: (mes) => http.get('/analisis/horas-extra', { mes }),
+    ociosidad: (anio) => http.get('/analisis/ociosidad', { anio }),
+    tagsCombo: (params) => http.get('/analisis/tags-combo', params),
+    rangoAnios: () => http.get('/analisis/rango-anios'),
+    rotacion: (desde, hasta) => http.get('/analisis/rotacion', { desde, hasta }),
   },
   integraciones: {
     graphEstado: () => http.get('/integraciones/graph'),

@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { Menu, X, ClipboardList, ChevronDown, LogOut, MonitorDown } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
+import { VERSION } from '../version.js';
 import FotoImg from './FotoImg.jsx';
 import DesktopDownloadModal from './DesktopDownloadModal.jsx';
 import { isTauri } from '../utils/isTauri.js';
@@ -197,6 +198,7 @@ export default function Layout({ modulos, infoGrupo = [], configuracion = null, 
           </button>
           <NavItems modulos={modulosVisibles} infoGrupo={infoVisibles} configuracion={configVisible} activo={activo}
             onSelect={seleccionar} expandido={abierto} enMovil={false} />
+          {abierto && <p className="px-5 py-2 text-[10px] text-slate-300 shrink-0">Tablero Cooptech v{VERSION}</p>}
         </aside>
 
         {/* Drawer móvil */}
