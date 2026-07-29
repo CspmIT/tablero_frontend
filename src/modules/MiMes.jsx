@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useData } from '../data/DataContext.jsx';
 import ReunionModal from './ReunionModal.jsx';
+import DayEditModal from './DayEditModal.jsx';
 import StatusBadge from './StatusBadge.jsx';
 import SwitchVista from '../components/SwitchVista.jsx';
 import { fmtISO, buildEntriesMap, isActiveCollab, isWorkingDay, STATUS_TYPES } from './grillaUtils.js';
@@ -21,6 +22,17 @@ export default function MiMes({ vista = 'mimes', setVista }) {
   const [feriadosMap, setFeriadosMap] = useState({});
   const [cargando, setCargando] = useState(true);
   const [diaAbierto, setDiaAbierto] = useState(null); // { fecha, dia, entry, feriado } (modal escritorio)
+  // Editor del día (26/07): Mi mes deja de ser solo lectura — tocar cualquier
+  // día (finde incluido) abre el mismo editor de la grilla, p.ej. para cargar
+  // horas extra de un sábado trabajado.
+  const [editCtx, setEditCtx] = useState(null); // { date }
+  const guardarDia = async (payload) => {
+    const { date } = editCtx;
+    if (payload === null) await api.grilla.deleteDay(colabId, fmtISO(date));
+    else await api.grilla.upsert({ colaboradorId: colabId, fecha: fmtISO(date), ...payload });
+    setEditCtx(null);
+    recargar?.();
+  };
   const [selDia, setSelDia] = useState(() => fmtISO(new Date())); // día elegido en la vista móvil
   // Ola reuniones (16/07): próximas reuniones donde participo, con gestión.
   const [reuniones, setReuniones] = useState([]);
@@ -83,11 +95,10 @@ export default function MiMes({ vista = 'mimes', setVista }) {
     d.setDate(d.getDate() - dow);
     while (d <= ultimoDia) {
       const fila = [];
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 7; i++) { // semana completa: el finde también trabaja a veces
         fila.push(new Date(d));
         d.setDate(d.getDate() + 1);
       }
-      d.setDate(d.getDate() + 2); // saltear el fin de semana
       filas.push(fila);
     }
     return filas;
@@ -164,13 +175,13 @@ export default function MiMes({ vista = 'mimes', setVista }) {
             vistazo, días pintados con los colores de la grilla, y detalle del
             día seleccionado debajo. ============ */}
         <div className="sm:hidden">
-          <div className="grid grid-cols-5 gap-1 mb-1">
-            {['L', 'M', 'X', 'J', 'V'].map((d) => (
+          <div className="grid grid-cols-7 gap-1 mb-1">
+            {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => (
               <span key={d} className="text-center text-[11px] font-medium text-slate-400">{d}</span>
             ))}
           </div>
           {semanas.map((fila, i) => (
-            <div key={i} className="grid grid-cols-5 gap-1 mb-1">
+            <div key={i} className="grid grid-cols-7 gap-1 mb-1">
               {fila.map((dia) => {
                 const iso = fmtISO(dia);
                 const delMes = dia.getMonth() === mesNum - 1;
@@ -211,9 +222,13 @@ export default function MiMes({ vista = 'mimes', setVista }) {
               const nombreDia = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][diaSel.getDay()];
               return (
                 <>
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-2 gap-2">
                     <span className="font-semibold text-slate-800">{nombreDia} {ad} de {MESES_ES[am - 1]}</span>
-                    {entry && <StatusBadge status={entry.status} entryTime={entry.entry_time} viajeLabel={entry.viaje_label} />}
+                    <span className="flex items-center gap-2">
+                      {entry && <StatusBadge status={entry.status} entryTime={entry.entry_time} viajeLabel={entry.viaje_label} />}
+                      <button onClick={() => setEditCtx({ date: diaSel })}
+                        className="text-xs border border-coop-azul text-coop-azul px-2.5 py-1 rounded-lg hover:bg-coop-azul/5">✎ Editar</button>
+                    </span>
                   </div>
                   {feriado && <p className="text-sm text-violet-600 mb-2">🎌 {feriado}</p>}
                   {items.length > 0 ? (
@@ -254,7 +269,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
           <table className="w-full border-separate" style={{ borderSpacing: 4 }}>
             <thead>
               <tr>
-                {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'].map((d) => (
+                {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map((d) => (
                   <th key={d} className="text-left text-xs font-medium text-slate-500 px-2 pb-1 w-1/5">{d}</th>
                 ))}
               </tr>
@@ -275,11 +290,11 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                     const hayContenido = entry || feriado;
                     return (
                       <td key={iso}
-                        onClick={() => hayContenido && setDiaAbierto({ fecha: iso, dia, entry, feriado })}
-                        className={`align-top rounded-lg border p-0 ${
+                        onClick={() => setEditCtx({ date: dia })}
+                        className={`align-top rounded-lg border p-0 cursor-pointer hover:border-coop-azul/40 ${
                           delMes ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-100 opacity-50'
-                        } ${hayContenido ? 'cursor-pointer hover:border-coop-azul/40' : ''}`}
-                        style={{ width: '20%' }}>
+                        }`}
+                        style={{ width: '14.28%' }}>
                         {/* contenedor interno de altura DURA: la td de una tabla estira
                             con el contenido (height = mínimo), este div no. */}
                         <div className="p-2 overflow-hidden" style={{ height: 116 }}>
@@ -330,6 +345,18 @@ export default function MiMes({ vista = 'mimes', setVista }) {
           onClose={() => setReunionModal(null)}
         />
       )}
+
+      <DayEditModal
+        open={!!editCtx}
+        collaborator={colab}
+        date={editCtx?.date}
+        entry={editCtx ? entries[`${colabId}:${fmtISO(editCtx.date)}`] : null}
+        weeklyWipText=""
+        feriadoName={editCtx ? feriadosMap[fmtISO(editCtx.date)] || null : null}
+        onSave={guardarDia}
+        onReunionCreada={() => { setEditCtx(null); recargar?.(); cargarReuniones?.(); }}
+        onClose={() => setEditCtx(null)}
+      />
 
       {diaAbierto && (
         <DiaDetalleModal ctx={diaAbierto} colaborador={colab} onClose={() => setDiaAbierto(null)} />

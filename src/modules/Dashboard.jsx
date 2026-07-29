@@ -33,6 +33,25 @@ function Kpi({ titulo, valor, sub, badge }) {
 
 export default function Dashboard() {
   const { api, colaboradores } = useData();
+  // KPI de dotación (26/07): activos del mes + promedio y altas/bajas del año.
+  const [rotacionKpi, setRotacionKpi] = useState(null);
+  useEffect(() => {
+    const hoy = new Date();
+    const anioActual = hoy.getFullYear();
+    api.analisis.rotacion(`${anioActual}-01`, hoy.toISOString().slice(0, 7))
+      .then((r) => {
+        const meses = r?.meses || [];
+        if (!meses.length) return;
+        const ultimo = meses[meses.length - 1];
+        setRotacionKpi({
+          mesActual: ultimo.activos,
+          promedioAnual: Math.round((meses.reduce((s2, x) => s2 + x.activos, 0) / meses.length) * 10) / 10,
+          altasAnio: meses.reduce((s2, x) => s2 + x.altas, 0),
+          bajasAnio: meses.reduce((s2, x) => s2 + x.bajas, 0),
+        });
+      })
+      .catch(() => {});
+  }, [api]);
   const [anio, setAnio] = useState(() => new Date().getFullYear());
   const [periodMode, setPeriodMode] = useState('month');
   const [monthKey, setMonthKey] = useState(() => new Date().toISOString().slice(0, 7));
@@ -168,6 +187,7 @@ export default function Dashboard() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-6">
             {/* Orden del relato gerencial: objetivos → operación → costos */}
+            <Kpi titulo="Colaboradores activos" valor={rotacionKpi ? String(rotacionKpi.mesActual) : '—'} sub={rotacionKpi ? `promedio ${anio}: ${rotacionKpi.promedioAnual} · altas ${rotacionKpi.altasAnio} / bajas ${rotacionKpi.bajasAnio}` : null} />
             <Kpi titulo={`Avance objetivos ${anio}`} valor={objetivosAvance != null ? `${objetivosAvance}%` : '—'} sub="promedio ponderado por peso" />
             <Kpi titulo="Ocupación productiva" valor={`${Math.round(ocupacion * 100)}%`} sub={`${fmtN(diasProd)} / ${fmtN(diasPotencial)} días`} badge={aBadge(varOcup)} />
             <Kpi titulo="Horas activables (Cooptech)" valor={`${fmtN(horasAct)} h`} sub="tiempo propio facturable" badge={aBadge(varHoras)} />

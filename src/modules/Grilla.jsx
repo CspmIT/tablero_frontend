@@ -24,6 +24,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   const [cargando, setCargando] = useState(true);
   const [dayCtx, setDayCtx] = useState(null); // { collab, date }
   const [wipCtx, setWipCtx] = useState(null); // { collab }
+  const [resumenes, setResumenes] = useState({}); // resumen semanal de costos, por colabId
 
   const weekEnd = addDays(weekStart, 6);
   const dates = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)); // lunes a viernes
@@ -31,12 +32,14 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   const recargar = useCallback(async () => {
     setCargando(true);
     try {
-      const [ents, ws, fers, guds] = await Promise.all([
+      const [ents, ws, fers, guds, rs] = await Promise.all([
         api.grilla.list({ desde: fmtISO(weekStart), hasta: fmtISO(weekEnd) }),
         api.grilla.wips(),
         api.feriados.list(),
         api.guardias.list(weekStart.getFullYear()),
+        api.grilla.resumenSemana(fmtISO(weekStart)).catch(() => ({ resumenes: {}, cooptechPct: {} })),
       ]);
+      setResumenes(rs.resumenes || {});
       setEntries(buildEntriesMap(ents));
       setWips(buildWipsMap(ws));
       const fmap = {};
@@ -61,6 +64,11 @@ export default function Grilla({ vista = 'grilla', setVista }) {
     await recargar();
   };
 
+  const guardarResumen = async (colaboradorId, summary) => {
+    try {
+      await api.grilla.setResumenSemana({ colaboradorId, lunes: fmtISO(weekStart), summary });
+    } catch (e) { alert(e.message || 'No se pudo guardar el resumen'); }
+  };
   const guardarWip = async (texto) => {
     const { collab } = wipCtx;
     await api.grilla.setWip({
@@ -170,7 +178,14 @@ export default function Grilla({ vista = 'grilla', setVista }) {
                     })}
                     <td className="px-3 py-2">
                       <button onClick={() => setWipCtx({ collab: c })} className="block w-full text-left text-xs">
-                        {wipText ? <span className="text-slate-700">{wipText}</span> : <span className="text-slate-300">+ definir foco</span>}
+                        <div className="flex gap-1.5">
+                          <span className="text-[10px] italic text-slate-400 w-7 shrink-0 mt-px">Def.</span>
+                          {wipText ? <span className="text-slate-700 min-w-0">{wipText}</span> : <span className="text-slate-300">+ definir foco</span>}
+                        </div>
+                        <div className="flex gap-1.5 mt-1 pt-1 border-t border-slate-100">
+                          <span className="text-[10px] italic text-slate-400 w-7 shrink-0 mt-px">Real</span>
+                          {resumenes[c.id] ? <span className="text-coop-azul min-w-0">{resumenes[c.id]}</span> : <span className="text-slate-300">+ resumen (costos)</span>}
+                        </div>
                         {stats.wipPctAvg !== null && (
                           <div className="text-coop-azul font-mono mt-1">{Math.round(dedicacionSemanalPct(stats) * 100)}% · {fmtWipHours(stats)}</div>
                         )}
@@ -200,8 +215,10 @@ export default function Grilla({ vista = 'grilla', setVista }) {
         open={!!wipCtx}
         collab={wipCtx?.collab}
         currentWip={wipCtx ? wips[getWeekKey(wipCtx.collab.id, weekStart)] || '' : ''}
+        currentResumen={wipCtx ? resumenes[wipCtx.collab.id] || '' : ''}
         onClose={() => setWipCtx(null)}
         onSave={guardarWip}
+        onSaveResumen={(summary) => wipCtx && guardarResumen(wipCtx.collab.id, summary)}
       />
     </div>
   );
