@@ -843,7 +843,11 @@ export default function CRM() {
         lead={presupCtx?.lead}
         estadoInicial={presupCtx?.lead?.coopcloudEstado}
         onAutoSave={(estado) => guardarEstado('coopcloudEstado', estado)}
-        onPdfDescargado={(estado, totales) => guardarEstado('coopcloudEstado', estado, totales?.costoMensual != null ? { coopcloudCostoMensual: Number(totales.costoMensual) } : {})}
+        onPdfDescargado={(estado, totales) => guardarEstado('coopcloudEstado', estado, {
+          ...(totales?.costoMensual != null ? { coopcloudCostoMensual: Number(totales.costoMensual) } : {}),
+          // PDF de la solapa Facturación: el total mensual viaja al valor del lead
+          ...(totales?.totalUSD != null ? { valorEstimadoUsd: Number(totales.totalUSD), valorOrigen: 'presupuestador' } : {}),
+        })}
         onClose={() => setPresupCtx(null)}
       />
       <ImportarLeads open={importOpen} onClose={() => setImportOpen(false)} onDone={cargar} />

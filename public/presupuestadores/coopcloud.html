@@ -136,6 +136,7 @@ input[type=range]{accent-color:var(--green)}
   <button data-tab="config">Configurador</button>
   <button data-tab="adicionales">Adicionales</button>
   <button data-tab="internos">Recursos internos</button>
+  <button data-tab="procoop">Facturación</button>
 </nav>
 
 <main>
@@ -271,6 +272,26 @@ input[type=range]{accent-color:var(--green)}
   </div>
 </section>
 
+<!-- ============ PROCOOP ============ -->
+<section class="tab-panel" id="tab-procoop">
+  <p class="intro">El <b>plan del cliente tal como se carga en Procoop</b>: TODOS los servicios monómicos (incluso los de valor cero, que documentan la configuración) con sus cantidades editables. Cada servicio es independiente para Procoop (precio × cantidad); la matemática de la retención vive acá y llega resuelta.</p>
+  <div class="card">
+    <div id="pcCliente" style="font-weight:700;margin-bottom:8px"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn" onclick="procoopDesdeConfigurador()">⟵ Tomar del Configurador</button>
+      <button class="btn" onclick="copiarProcoop()">📋 Copiar plan para Procoop</button>
+      <button class="btn" onclick="exportPDFFacturacion()">🧾 PDF de facturación</button>
+    </div>
+    <div id="procoopKpis" class="kpis"></div>
+    <table><thead><tr><th>Servicio (idéntico en Procoop)</th><th class="num">Cantidad</th><th class="num">Precio unitario</th><th class="num">Subtotal facturado</th></tr></thead>
+    <tbody id="procoopBody"></tbody></table>
+    <div id="procoopTotal" style="text-align:right;font-size:1.25rem;font-weight:800;margin-top:12px"></div>
+    <p class="hint" style="margin-top:10px">Regla de oro: "Snap c/h" y "Ret. (días)" no tienen precio propio pero su cantidad recalcula el "Snapshot retenido". Nunca editar el snapshot a mano en Procoop: cambió algo del cliente → regenerar el plan completo desde esta pestaña.</p>
+    <p class="hint">Snapshot retenido (GB) = (suma de TODOS los discos) × (24 ÷ Snap c/h) × Ret. días × factor de ocupación, redondeado hacia arriba, <b>al precio del GB de discos comunes (HDD)</b> sin importar el tier de la VM — los snapshots se almacenan en discos comunes (definición de gerencia, 27/07). Criterio: <i>CoopCloud_criterio_retencion_snapshots_27_07.md</i>.</p>
+    <p class="hint">VPN y Cert. llevan <b>precio manual editable</b> (aún sin modelo de costos detrás). Referencia comercial 07/2026: VPN + 10 certificados = US$ 50 → reparto sugerido: VPN 30 + cert. 2 (ajustable acá mismo; pendiente: incorporar su costo real al modelo).</p>
+  </div>
+</section>
+
 <!-- ============ ADICIONALES ============ -->
 <section class="tab-panel" id="tab-adicionales">
   <p class="intro">Precios de los servicios adicionales, derivados de los monómicos.</p>
@@ -327,6 +348,7 @@ function defaultState(){return{
     {n:'Full CPU',vcpu:24,ram:128,disco:250,tipo:'nvme',bw:500,ips:1,sf:12,sr:7}
   ],
   cfg:{vcpu:4,ram:8,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:7},
+  procoop:null, // plan de facturación (pestaña Procoop); null = se inicializa del Configurador
   areas:{cooptech:[{n:'VM ERP',vcpu:4,ram:16,disco:500,tipo:'ssd',bw:100,ips:1,sf:24,sr:7}],telecom:[],administracion:[]}
 };}
 let S = defaultState();
@@ -405,18 +427,116 @@ function costoVM(vm){
   const gbSnap=(+vm.disco)*snaps*fSnap;
   const comp={
     vcpu:(+vm.vcpu)*cu.vcpu, ram:(+vm.ram)*cu.ram, disco:(+vm.disco)*cu[vm.tipo],
-    bw:(+vm.bw)*cu.ab, ip:(+vm.ips)*cu.ip, snap:gbSnap*cu[vm.tipo]
+    bw:(+vm.bw)*cu.ab, ip:(+vm.ips)*cu.ip,
+    // Los snapshots se almacenan en discos COMUNES (HDD) sin importar el tier
+    // de la VM (definición de gerencia 27/07): se costean al GB de HDD.
+    snap:gbSnap*cu.hdd
   };
   const costo=comp.vcpu+comp.ram+comp.disco+comp.bw+comp.ip+comp.snap;
   return {costo, comp, snaps, gbSnap};
 }
 const precioDe=c=> R.margen<1? c/(1-R.margen): c;
 
+/* ============ PLAN PROCOOP (facturación por monómicos, editable) ============ */
+// El plan del cliente COMPLETO tal como se carga en Procoop: todos los servicios
+// (incluso los de precio cero que documentan la configuración: Tipo, Snap c/h,
+// Ret., Cert.), cantidades editables, y el snapshot recalculándose solo. Los
+// precios salen VIVOS del modelo (R.pu, con margen). Estado en S.procoop
+// (persiste con el autosave del puente CRM).
+function procoopEstado(){
+  if(!S.procoop){
+    const c=S.cfg, t=String(c.tipo||'nvme').toLowerCase();
+    S.procoop={vcpu:+c.vcpu,ram:+c.ram,disco_nvme:0,disco_ssd:0,disco_hdd:0,bw:+c.bw,ips:+c.ips,sf:+c.sf,sr:+c.sr,cert:0,vpn:0,precioVpn:30,precioCert:2,desc:0};
+    S.procoop['disco_'+t]=+c.disco;
+  }
+  // Claves nuevas sobre planes ya guardados (VPN y precios manuales, 27/07).
+  if(S.procoop.vpn===undefined)S.procoop.vpn=0;
+  if(S.procoop.precioVpn===undefined)S.procoop.precioVpn=30;
+  if(S.procoop.precioCert===undefined)S.procoop.precioCert=2;
+  // Migración de estados guardados con el formato viejo (disco+tipo únicos).
+  if(S.procoop.disco!==undefined){
+    const t=String(S.procoop.tipo||'nvme').toLowerCase();
+    S.procoop.disco_nvme=S.procoop.disco_nvme||0; S.procoop.disco_ssd=S.procoop.disco_ssd||0; S.procoop.disco_hdd=S.procoop.disco_hdd||0;
+    S.procoop['disco_'+t]=+S.procoop.disco||0;
+    delete S.procoop.disco; delete S.procoop.tipo;
+  }
+  return S.procoop;
+}
+function procoopDesdeConfigurador(){
+  const c=S.cfg, t=String(c.tipo||'nvme').toLowerCase();
+  const prev=S.procoop||{};
+  S.procoop={vcpu:+c.vcpu,ram:+c.ram,disco_nvme:0,disco_ssd:0,disco_hdd:0,bw:+c.bw,ips:+c.ips,sf:+c.sf,sr:+c.sr,cert:prev.cert||0,desc:prev.desc||0};
+  S.procoop['disco_'+t]=+c.disco;
+  save();renderProcoop();
+}
+// Snapshot retenido ÚNICO: los snapshots viven en discos comunes (HDD) sin
+// importar el tier del disco de la VM (gerencia, 27/07) → un solo servicio,
+// cantidad = suma de TODOS los discos × copias × factor, a precio de GB HDD.
+function pcGbSnapTotal(P){
+  const fSnap=(+S.factorSnapPct||0)/100;
+  const discos=(+P.disco_nvme||0)+(+P.disco_ssd||0)+(+P.disco_hdd||0);
+  const gb=discos*snapCount(+P.sf,+P.sr)*fSnap;
+  return gb>0?Math.ceil(gb-1e-9):0;
+}
+function lineasProcoop(){
+  const P=procoopEstado(), pu=R.pu;
+  const M=(n,u)=>`${n} Monómico CoopCloud (${u})`;
+  // Sin servicio "Tipo": los servicios dependientes del tier van POR TRIPLICADO
+  // (cada uno con su precio unitario fijo e independiente en Procoop).
+  return [
+    {nombre:M('vCPU','vCPU'),       k:'vcpu', cant:+P.vcpu, precio:pu.vcpu},
+    {nombre:M('RAM','GB'),          k:'ram',  cant:+P.ram,  precio:pu.ram},
+    {nombre:M('Disco NVMe','GB'),   k:'disco_nvme', cant:+P.disco_nvme, precio:pu.nvme},
+    {nombre:M('Disco SSD','GB'),    k:'disco_ssd',  cant:+P.disco_ssd,  precio:pu.ssd},
+    {nombre:M('Disco HDD','GB'),    k:'disco_hdd',  cant:+P.disco_hdd,  precio:pu.hdd},
+    {nombre:M('BW','Mbps'),         k:'bw',   cant:+P.bw,   precio:pu.ab},
+    {nombre:M('IPs','IP'),          k:'ips',  cant:+P.ips,  precio:pu.ip},
+    {nombre:M('Snap c/h','h'),      k:'sf',   cant:+P.sf,   precio:0},
+    {nombre:M('Ret.','días'),       k:'sr',   cant:+P.sr,   precio:0},
+    {nombre:M('Snapshot retenido','GB'), k:null, cant:pcGbSnapTotal(P), precio:pu.hdd},
+    {nombre:M('VPN','servicio'),    k:'vpn',  cant:+P.vpn,  precio:+P.precioVpn||0, pk:'precioVpn'},
+    {nombre:M('Cert.','unidad'),    k:'cert', cant:+P.cert, precio:+P.precioCert||0, pk:'precioCert'},
+    {nombre:M('Descuento','US$'),   k:'desc', cant:+P.desc, precio:-1},
+  ];
+}
+function pcSet(k,v){
+  const P=procoopEstado();
+  P[k]=+v||0;
+  save();renderProcoop();
+}
+function renderProcoop(){
+  const ls=lineasProcoop();
+  const sub=ls.filter(l=>l.precio>0).reduce((a,l)=>a+l.cant*l.precio,0);
+  const desc=+procoopEstado().desc||0;
+  const total=sub-desc;
+  document.getElementById('procoopKpis').innerHTML=
+    kpi('Subtotal servicios',usd(sub))+kpi('Descuento',usd(desc))+kpi('TOTAL facturado',usd(total));
+  document.getElementById('procoopBody').innerHTML=ls.map(l=>{
+    let celda;
+    if(l.k===null){
+      celda=`<b>${l.cant}</b> <span class="sub" title="Se recalcula solo desde Disco, Snap c/h y Ret.">⚙</span>`;
+    } else {
+      celda=`<input type="number" min="0" step="any" value="${l.cant}" onchange="pcSet('${l.k}',this.value)" style="width:90px;text-align:right">`;
+    }
+    const subLinea=(typeof l.cant==='number')?l.cant*l.precio:0;
+    const celdaPrecio=l.pk
+      ? `<input type="number" min="0" step="any" value="${l.precio}" onchange="pcSet('${l.pk}',this.value)" style="width:80px;text-align:right" title="Precio manual (sin modelo de costos detrás aún)">`
+      : (l.precio===0?'—':usd(l.precio,l.precio<0?2:5));
+    return `<tr><td>${l.nombre}</td><td class="num">${celda}</td><td class="num">${celdaPrecio}</td><td class="num ${subLinea<0?'':'pos'}">${(l.precio===0&&!l.pk)?'—':usd(subLinea)}</td></tr>`;
+  }).join('');
+  document.getElementById('procoopTotal').innerHTML='TOTAL FACTURADO: '+usd(total);
+  document.getElementById('pcCliente').textContent='Plan para: '+(S.cliente||'—');
+}
+function copiarProcoop(){
+  const txt=lineasProcoop().map(l=>`${l.nombre}\t${l.cant}`).join('\n');
+  navigator.clipboard?.writeText(txt).then(()=>alert('Plan copiado: pegalo en Procoop (servicio + cantidad), idéntico.')).catch(()=>alert(txt));
+}
+
 /* ============================== RENDER ============================== */
 function recalc(){R=calc();renderActive();save();}
 function renderActive(){
   const t=document.querySelector('.tab-panel.active').id.replace('tab-','');
-  ({inputs:renderInputsAux,monomicos:renderMon,planes:renderPlanes,config:renderConfig,adicionales:renderAdic,internos:renderInternos}[t]||(()=>{}))();
+  ({inputs:renderInputsAux,monomicos:renderMon,planes:renderPlanes,config:renderConfig,adicionales:renderAdic,internos:renderInternos,procoop:renderProcoop}[t]||(()=>{}))();
 }
 
 function renderInputsAux(){
@@ -505,7 +625,7 @@ function renderAdic(){
   TIPOS.forEach(t=>{const c=250*R.cu[t];rows.push(['Storage extra '+t.toUpperCase(),'bloque 250 GB',c,precioDe(c)]);});
   rows.push(['IP pública adicional','por IP',R.cu.ip,R.pu.ip]);
   rows.push(['Ancho de banda adicional','por Mbps',R.cu.ab,R.pu.ab]);
-  TIPOS.forEach(t=>{rows.push(['Snapshot adicional '+t.toUpperCase(),'por GB de VM',R.cu[t]*(+S.factorSnapPct/100),precioDe(R.cu[t]*(+S.factorSnapPct/100))]);});
+  rows.push(['Snapshot adicional (en discos comunes)','por GB de VM',R.cu.hdd*(+S.factorSnapPct/100),precioDe(R.cu.hdd*(+S.factorSnapPct/100))]);
   tb.innerHTML=rows.map(([n,u,c,p])=>`<tr><td>${n}</td><td class="num sub">${u}</td><td class="num">${usd(c,4)}</td><td class="num pos">${usd(p,4)}</td></tr>`).join('');
 }
 
@@ -612,6 +732,44 @@ function exportPDF(){
   doc.setFontSize(8);doc.setTextColor(120);doc.text('Precios en USD, sin IVA. Presupuesto orientativo generado con el simulador CoopCloud.',12,285);
   doc.save('presupuesto-coopcloud.pdf');
   coopBridgePost('pdf_descargado',{totales:{costoTotalMensual:R.costoTotalMensual,pool:R.pool},estado:S});
+}
+
+// PDF del plan de facturación (solapa Facturación): tabla de monómicos con
+// cantidades y el TOTAL FACTURADO. Al descargarlo, el valor en USD viaja al
+// CRM (pdf_descargado → valorEstimadoUsd del lead), como Reconecta y +Agua.
+function exportPDFFacturacion(){
+  if(typeof window.jspdf==='undefined'){alert('Necesitás conexión a internet para generar el PDF (no se cargó la librería).');return;}
+  const {jsPDF}=window.jspdf; const doc=new jsPDF();
+  const ls=lineasProcoop();
+  const sub=ls.filter(l=>l.precio>0).reduce((a,l)=>a+l.cant*l.precio,0);
+  const desc=+procoopEstado().desc||0;
+  const total=sub-desc;
+  doc.setFillColor(15,63,94);doc.rect(0,0,210,30,'F');
+  doc.setTextColor(255);doc.setFontSize(15);doc.text('Plan de facturación CoopCloud',50,16);
+  doc.setFontSize(9);doc.text('Servicios monómicos — Coopmorteros',50,22);
+  const cli=S.cliente||document.getElementById('cfgCliente')?.value||'—';
+  doc.setTextColor(40);doc.setFontSize(10);
+  doc.text('Cliente: '+cli,12,42);doc.text('Fecha: '+new Date().toLocaleDateString('es-AR'),150,42);
+  doc.setDrawColor(140,198,63);doc.setLineWidth(.8);doc.line(12,46,198,46);
+  let y=56;doc.setFontSize(9);doc.setTextColor(15,63,94);
+  doc.text('Servicio',12,y);doc.text('Cantidad',128,y,{align:'right'});doc.text('P. unitario',162,y,{align:'right'});doc.text('Subtotal',196,y,{align:'right'});
+  doc.setDrawColor(220);doc.line(12,y+2,198,y+2);y+=8;doc.setTextColor(40);
+  ls.forEach(l=>{
+    doc.text(l.nombre,12,y);
+    doc.text(String(l.cant),128,y,{align:'right'});
+    doc.text(l.precio===0?'—':usd(l.precio,l.precio<0?2:4),162,y,{align:'right'});
+    const st=(typeof l.cant==='number')?l.cant*l.precio:0;
+    doc.text(l.precio===0?'—':usd(st),196,y,{align:'right'});
+    y+=7;
+  });
+  y+=3;doc.setDrawColor(220);doc.line(12,y,198,y);y+=11;
+  doc.setFillColor(238,246,238);doc.rect(12,y-8,186,14,'F');
+  doc.setFontSize(13);doc.setTextColor(15,63,94);doc.text('TOTAL FACTURADO mensual',16,y);
+  doc.setTextColor(111,168,47);doc.text(usd(total),196,y,{align:'right'});
+  doc.setFontSize(8);doc.setTextColor(120);doc.text('Precios en USD, sin IVA. Cantidades para cargar idénticas en Procoop. Generado con el simulador CoopCloud.',12,285);
+  const limpio=String(cli).replace(/[^a-zA-Z0-9 _-]/g,'').trim().replace(/\s+/g,'_')||'cliente';
+  doc.save('facturacion-coopcloud-'+limpio+'.pdf');
+  coopBridgePost('pdf_descargado',{totales:{totalUSD:total,origen:'facturacion'},estado:S});
 }
 
 /* ============================== NAV ============================== */
