@@ -9,21 +9,28 @@ import { SOLAPAS_GESTIONABLES, AJUSTES } from '../nav.js';
 import Equipo from './Equipo.jsx';
 import Importar from './Importar.jsx';
 import ImportarGrilla from './ImportarGrilla.jsx';
+import { Bell } from 'lucide-react';
+import { pushEstado, activarNotificaciones } from '../utils/pushClient.js';
 
 const PESTANIAS = [
   { id: 'permisos', label: 'Permisos de vistas', icon: ShieldCheck },
   ...AJUSTES,
+  { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
 ];
 
 export default function Configuracion() {
-  const [pest, setPest] = useState('permisos');
+  const { me } = useData();
+  const esManager = me?.tipo === 'manager';
+  // No-managers: Configuración existe solo para sus preferencias personales.
+  const pestanias = esManager ? PESTANIAS : PESTANIAS.filter((t) => t.id === 'notificaciones');
+  const [pest, setPest] = useState(esManager ? 'permisos' : 'notificaciones');
   return (
     <div className="p-4">
       <h2 className="text-xl font-semibold text-coop-negro flex items-center gap-2 mb-3">
         <Settings size={20} className="text-coop-naranja" /> Configuración
       </h2>
       <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto">
-        {PESTANIAS.map((p) => (
+        {pestanias.map((p) => (
           <button key={p.id} onClick={() => setPest(p.id)}
             className={`px-4 py-2 text-sm whitespace-nowrap border-b-2 -mb-px ${
               pest === p.id ? 'border-coop-azul text-coop-azul font-medium' : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -36,6 +43,7 @@ export default function Configuracion() {
       {pest === 'equipo' && <Equipo />}
       {pest === 'importar' && <Importar />}
       {pest === 'importar_grilla' && <ImportarGrilla />}
+      {pest === 'notificaciones' && <NotifPrefs />}
     </div>
   );
 }
@@ -133,6 +141,65 @@ function PanelPermisos() {
       <p className="text-xs text-slate-400 mt-2">
         Los cambios impactan cuando el usuario recarga la aplicación. Configuración es siempre solo-manager.
       </p>
+    </div>
+  );
+}
+
+
+// --- Preferencias de notificación (30/07): qué le importa a CADA usuario ----
+// El catálogo de tipos vive en el backend (TIPOS_NOTIFICACION): agregar un
+// tipo allá lo hace aparecer acá solo, con su default.
+function NotifPrefs() {
+  const { api } = useData();
+  const [tipos, setTipos] = useState([]);
+  const [mias, setMias] = useState({});
+  const [estadoDisp, setEstadoDisp] = useState(pushEstado());
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    api.push.preferencias().then((r) => { setTipos(r.tipos || []); setMias(r.mias || {}); }).catch(() => {});
+  }, [api]);
+
+  const alternar = async (id) => {
+    const nuevas = { ...mias, [id]: !mias[id] };
+    setMias(nuevas); setGuardando(true);
+    try { const r = await api.push.guardarPreferencias(nuevas); setMias(r.mias || nuevas); }
+    catch { setMias(mias); alert('No se pudo guardar la preferencia'); }
+    finally { setGuardando(false); }
+  };
+
+  return (
+    <div className="max-w-2xl">
+      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <p className="font-medium text-slate-800 mb-1">Este dispositivo</p>
+        {estadoDisp === 'granted' && <p className="text-sm text-emerald-600">✓ Notificaciones activadas en este dispositivo.</p>}
+        {estadoDisp === 'denied' && <p className="text-sm text-red-500">Bloqueadas por el navegador: habilitalas desde la configuración del sitio (candado en la barra de dirección).</p>}
+        {estadoDisp === 'no_soportado' && <p className="text-sm text-slate-500">Este navegador no soporta notificaciones push.</p>}
+        {estadoDisp === 'default' && (
+          <button onClick={() => activarNotificaciones(api).then(() => setEstadoDisp('granted')).catch((e) => { setEstadoDisp(pushEstado()); alert(e.message); })}
+            className="text-sm px-3 py-1.5 rounded-lg bg-coop-azul text-white hover:opacity-90">🔔 Activar en este dispositivo</button>
+        )}
+        <p className="text-xs text-slate-400 mt-2">El permiso es por dispositivo (activalo en el celular y en la compu por separado). En Android conviene la app instalada.</p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <p className="font-medium text-slate-800 mb-3">Qué querés que te notifique {guardando && <span className="text-xs text-slate-400">guardando…</span>}</p>
+        <ul className="space-y-3">
+          {tipos.map((t) => (
+            <li key={t.id} className="flex items-start gap-3">
+              <button onClick={() => alternar(t.id)} role="switch" aria-checked={!!mias[t.id]}
+                className={`mt-0.5 w-10 h-6 rounded-full transition-colors shrink-0 ${mias[t.id] ? 'bg-coop-azul' : 'bg-slate-300'}`}>
+                <span className={`block w-5 h-5 bg-white rounded-full shadow transform transition-transform ${mias[t.id] ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </button>
+              <span>
+                <span className="text-sm font-medium text-slate-700">{t.label}</span>
+                <span className="block text-xs text-slate-400">{t.desc}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-slate-400 mt-3">Las preferencias aplican a todos tus dispositivos con notificaciones activadas.</p>
+      </div>
     </div>
   );
 }

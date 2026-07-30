@@ -111,6 +111,14 @@ export const api = {
     create: (body) => http.post('/reuniones', body),
     update: (id, body) => http.patch(`/reuniones/${id}`, body),
     cancelar: (id) => http.del(`/reuniones/${id}`),
+    responder: (id, respuesta) => http.post(`/reuniones/${id}/respuesta`, { respuesta }),
+    syncOutlook: (desde, hasta) => http.post('/reuniones/sync-outlook', { desde, hasta }),
+  },
+  push: {
+    clavePublica: () => http.get('/push/clave-publica'),
+    suscribir: (suscripcion) => http.post('/push/suscribir', { suscripcion }),
+    preferencias: () => http.get('/push/preferencias'),
+    guardarPreferencias: (prefs) => http.put('/push/preferencias', { prefs }),
   },
   permisos: {
     get: () => http.get('/permisos'),

@@ -26,7 +26,9 @@ export const INFO = [
 ];
 
 // Configuración (engranaje): panel de permisos + ajustes del sistema.
-export const CONFIGURACION = { id: 'configuracion', label: 'Configuración', icon: Settings, listo: true, roles: ['manager'] };
+// Visible para todos: los no-managers solo ven adentro la pestaña
+// "Notificaciones" (sus preferencias personales); el resto sigue solo-manager.
+export const CONFIGURACION = { id: 'configuracion', label: 'Configuración', icon: Settings, listo: true, roles: null };
 
 // Ajustes que viven DENTRO de Configuración (antes en Información adicional).
 export const AJUSTES = [
