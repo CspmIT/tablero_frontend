@@ -4,6 +4,7 @@ import { useData } from '../data/DataContext.jsx';
 import StatusBadge from './StatusBadge.jsx';
 import DayEditModal from './DayEditModal.jsx';
 import WeeklyWipModal from './WeeklyWipModal.jsx';
+import { pushEstado, activarNotificaciones } from '../utils/pushClient.js';
 import SwitchVista from '../components/SwitchVista.jsx';
 import { mergeWeeks, findGuardiaByMonday, guardSetOf } from './guardiasUtils.js';
 import {
@@ -25,6 +26,41 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   const [dayCtx, setDayCtx] = useState(null); // { collab, date }
   const [wipCtx, setWipCtx] = useState(null); // { collab }
   const [resumenes, setResumenes] = useState({}); // resumen semanal de costos, por colabId
+  // Invitaciones a reuniones pendientes de respuesta (ola respuestas 29/07):
+  // el banner vive acá porque la Grilla es la pantalla diaria de todos.
+  const [invitaciones, setInvitaciones] = useState([]);
+  const cargarInvitaciones = useCallback(async () => {
+    try {
+      const r = await api.reuniones.list();
+      setInvitaciones((r.reuniones || []).filter(x => x.miRespuesta === null));
+    } catch { setInvitaciones([]); }
+  }, [api]);
+  useEffect(() => { cargarInvitaciones(); }, [cargarInvitaciones]);
+  // Sync inverso (30/07): trae a MI grilla mis reuniones de Outlook de la
+  // semana visible. Apretarlo ES el opt-in (acción explícita, sin switches).
+  const [syncing, setSyncing] = useState(false);
+  const sincronizarOutlook = async () => {
+    setSyncing(true);
+    try {
+      const iso = (d) => fmtISO(d);
+      const r = await api.reuniones.syncOutlook(iso(weekStart), iso(weekEnd));
+      const partes = [];
+      if (r.agregadas) partes.push(`${r.agregadas} nueva${r.agregadas > 1 ? 's' : ''}`);
+      if (r.actualizadas) partes.push(`${r.actualizadas} actualizada${r.actualizadas > 1 ? 's' : ''}`);
+      if (r.eliminadas) partes.push(`${r.eliminadas} quitada${r.eliminadas > 1 ? 's' : ''}`);
+      alert(partes.length ? `Outlook sincronizado: ${partes.join(', ')}.` : 'Outlook sincronizado: tu semana ya estaba al día.');
+      recargar();
+    } catch (e) { alert(e.message || 'No se pudo sincronizar con Outlook'); }
+    finally { setSyncing(false); }
+  };
+
+  const responderInvitacion = async (id, respuesta) => {
+    try {
+      const r = await api.reuniones.responder(id, respuesta);
+      if (r.graphError) alert(r.graphError);
+      cargarInvitaciones(); recargar();
+    } catch (e) { alert(e.message || 'No se pudo responder'); }
+  };
 
   const weekEnd = addDays(weekStart, 6);
   const dates = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)); // lunes a viernes
@@ -86,9 +122,41 @@ export default function Grilla({ vista = 'grilla', setVista }) {
 
   return (
     <div>
+      {pushEstado() === 'default' && (
+        <button
+          onClick={() => activarNotificaciones(api).then(() => alert('Notificaciones activadas: vas a recibir invitaciones y cambios de reuniones aunque la app esté cerrada.')).catch((e) => alert(e.message))}
+          className="w-full text-left text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 mb-3 hover:border-coop-azul/40">
+          🔔 Activá las notificaciones para enterarte de invitaciones y cambios de reuniones aunque la app esté cerrada (recomendado en el celular con la app instalada).
+        </button>
+      )}
+      {invitaciones.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
+          <p className="text-sm font-medium text-amber-800 mb-2">📅 Tenés {invitaciones.length === 1 ? 'una invitación pendiente' : `${invitaciones.length} invitaciones pendientes`}</p>
+          <ul className="space-y-2">
+            {invitaciones.map((r) => (
+              <li key={r.id} className="flex items-center gap-2 flex-wrap text-sm">
+                <span className="text-xs text-slate-500 whitespace-nowrap">{String(r.fecha).slice(0, 10).split('-').reverse().join('/')} · {r.horaInicio}–{r.horaFin}</span>
+                <span className="min-w-0 flex-1 break-words">
+                  {r.tipo === 'cliente' ? `Videollamada · ${r.titulo}` : r.titulo}
+                  {r.modalidad === 'presencial' && r.lugar ? <span className="text-slate-400"> · {r.lugar}</span> : null}
+                </span>
+                <span className="flex gap-1.5 shrink-0">
+                  <button onClick={() => responderInvitacion(r.id, 'aceptada')} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:opacity-90">Aceptar</button>
+                  <button onClick={() => responderInvitacion(r.id, 'provisional')} className="text-xs px-2.5 py-1 rounded-lg border border-amber-400 text-amber-700 hover:bg-amber-100">Provisional</button>
+                  <button onClick={() => responderInvitacion(r.id, 'rechazada')} className="text-xs px-2.5 py-1 rounded-lg border border-red-300 text-red-600 hover:bg-red-50">Rechazar</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <SwitchVista vista={vista} setVista={setVista} />
         <div className="flex items-center gap-2 text-sm">
+          <button onClick={sincronizarOutlook} disabled={syncing} title="Importa a tu grilla las reuniones de tu Outlook de esta semana (las genere quien las genere)"
+            className="px-2 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:border-coop-azul/40 disabled:opacity-50">
+            {syncing ? 'Sincronizando…' : '⇅ Outlook'}
+          </button>
           <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
           <span className="text-slate-600">{fmtDDMM(weekStart)} – {fmtDDMM(weekEnd)} · {weekStart.getFullYear()}</span>
           <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="px-2 py-1 rounded hover:bg-slate-100">›</button>
