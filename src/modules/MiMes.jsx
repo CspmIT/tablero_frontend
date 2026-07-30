@@ -157,6 +157,16 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                   {r.tipo === 'cliente' ? `Videollamada · ${r.titulo}` : r.titulo}
                   {r.modalidad === 'presencial' && r.lugar ? <span className="text-slate-400"> · {r.lugar}</span> : null}
                   {r.joinUrl && <a href={r.joinUrl} target="_blank" rel="noreferrer" className="text-coop-azul hover:underline ml-1.5">Teams</a>}
+                  {r.miRespuesta === 'organizador' && Array.isArray(r.colaboradoresIds) && r.colaboradoresIds.length > 1 && (() => {
+                    const resp = r.respuestas || {};
+                    const otros = r.colaboradoresIds.filter((id) => id !== r.organizadorId);
+                    const n = (v2) => otros.filter((id) => resp[id] === v2 || resp[String(id)] === v2).length;
+                    const pend = otros.length - n('aceptada') - n('rechazada') - n('provisional');
+                    return <span className="ml-1.5 text-[11px] text-slate-400" title="Respuestas de los invitados">✓{n('aceptada')} ?{n('provisional')} ✗{n('rechazada')}{pend > 0 ? ` · ${pend} sin responder` : ''}</span>;
+                  })()}
+                  {r.miRespuesta === 'aceptada' && <span className="ml-1.5 text-[11px] text-emerald-600">✓ aceptada</span>}
+                  {r.miRespuesta === 'provisional' && <span className="ml-1.5 text-[11px] text-amber-600">? provisional</span>}
+                  {r.miRespuesta === 'rechazada' && <span className="ml-1.5 text-[11px] text-red-500">✗ rechazada</span>}
                 </span>
                 {puedoGestionar[r.id] && (
                   <span className="flex gap-1.5 shrink-0">
@@ -266,7 +276,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
 
         {/* ============ Vista escritorio: la tabla de casillas fijas ============ */}
         <div className="overflow-x-auto hidden sm:block">
-          <table className="w-full border-separate" style={{ borderSpacing: 4 }}>
+          <table className="w-full border-separate" style={{ borderSpacing: 4, tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map((d) => (
@@ -297,7 +307,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                         style={{ width: '14.28%' }}>
                         {/* contenedor interno de altura DURA: la td de una tabla estira
                             con el contenido (height = mínimo), este div no. */}
-                        <div className="p-2 overflow-hidden" style={{ height: 116 }}>
+                        <div className="p-1.5 overflow-hidden break-words" style={{ height: 96 }}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs font-semibold text-slate-500">{dia.getDate()}</span>
                           <span className="flex items-center gap-1">
