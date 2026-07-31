@@ -91,7 +91,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
     const filas = [];
     const d = new Date(primerDia);
     // Retroceder al lunes de la semana del día 1
-    const dow = (d.getDay() + 6) % 7; // 0 = lunes
+    const dow = d.getDay(); // 0 = domingo: semana estilo calendario de pared
     d.setDate(d.getDate() - dow);
     while (d <= ultimoDia) {
       const fila = [];
@@ -146,39 +146,6 @@ export default function MiMes({ vista = 'mimes', setVista }) {
         Para editar un día, usá la grilla semanal.
       </p>
 
-      {reuniones.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4">
-          <p className="text-sm font-medium text-slate-600 mb-2">Mis próximas reuniones</p>
-          <ul className="space-y-1.5">
-            {reuniones.map((r) => (
-              <li key={r.id} className="flex items-center gap-2 text-sm flex-wrap">
-                <span className="text-xs text-slate-400 whitespace-nowrap">{String(r.fecha).slice(0, 10).split('-').reverse().join('/')} · {r.horaInicio}–{r.horaFin}</span>
-                <span className="break-words min-w-0 flex-1">
-                  {r.tipo === 'cliente' ? `Videollamada · ${r.titulo}` : r.titulo}
-                  {r.modalidad === 'presencial' && r.lugar ? <span className="text-slate-400"> · {r.lugar}</span> : null}
-                  {r.joinUrl && <a href={r.joinUrl} target="_blank" rel="noreferrer" className="text-coop-azul hover:underline ml-1.5">Teams</a>}
-                  {r.miRespuesta === 'organizador' && Array.isArray(r.colaboradoresIds) && r.colaboradoresIds.length > 1 && (() => {
-                    const resp = r.respuestas || {};
-                    const otros = r.colaboradoresIds.filter((id) => id !== r.organizadorId);
-                    const n = (v2) => otros.filter((id) => resp[id] === v2 || resp[String(id)] === v2).length;
-                    const pend = otros.length - n('aceptada') - n('rechazada') - n('provisional');
-                    return <span className="ml-1.5 text-[11px] text-slate-400" title="Respuestas de los invitados">✓{n('aceptada')} ?{n('provisional')} ✗{n('rechazada')}{pend > 0 ? ` · ${pend} sin responder` : ''}</span>;
-                  })()}
-                  {r.miRespuesta === 'aceptada' && <span className="ml-1.5 text-[11px] text-emerald-600">✓ aceptada</span>}
-                  {r.miRespuesta === 'provisional' && <span className="ml-1.5 text-[11px] text-amber-600">? provisional</span>}
-                  {r.miRespuesta === 'rechazada' && <span className="ml-1.5 text-[11px] text-red-500">✗ rechazada</span>}
-                </span>
-                {puedoGestionar[r.id] && (
-                  <span className="flex gap-1.5 shrink-0">
-                    <button onClick={() => setReunionModal({ reunion: r })} className="text-xs border border-slate-300 px-2 py-1 rounded-lg hover:border-coop-azul hover:text-coop-azul">Reprogramar</button>
-                    <button onClick={() => cancelarReunion(r)} className="text-xs border border-red-200 text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">Cancelar</button>
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {cargando ? <p className="text-slate-500 text-sm">Cargando…</p> : (<>
         {/* ============ Vista móvil (estilo app Calendar): mes completo de un
@@ -186,7 +153,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
             día seleccionado debajo. ============ */}
         <div className="sm:hidden">
           <div className="grid grid-cols-7 gap-1 mb-1">
-            {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => (
+            {['D', 'L', 'M', 'X', 'J', 'V', 'S'].map((d) => (
               <span key={d} className="text-center text-[11px] font-medium text-slate-400">{d}</span>
             ))}
           </div>
@@ -279,7 +246,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
           <table className="w-full border-separate" style={{ borderSpacing: 4, tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map((d) => (
+                {['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'].map((d) => (
                   <th key={d} className="text-left text-xs font-medium text-slate-500 px-2 pb-1 w-1/5">{d}</th>
                 ))}
               </tr>
@@ -354,6 +321,40 @@ export default function MiMes({ vista = 'mimes', setVista }) {
           onDone={() => { setReunionModal(null); cargarReuniones(); recargar?.(); }}
           onClose={() => setReunionModal(null)}
         />
+      )}
+
+      {reuniones.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4">
+          <p className="text-sm font-medium text-slate-600 mb-2">Mis próximas reuniones</p>
+          <ul className="space-y-1.5">
+            {reuniones.map((r) => (
+              <li key={r.id} className="flex items-center gap-2 text-sm flex-wrap">
+                <span className="text-xs text-slate-400 whitespace-nowrap">{String(r.fecha).slice(0, 10).split('-').reverse().join('/')} · {r.horaInicio}–{r.horaFin}</span>
+                <span className="break-words min-w-0 flex-1">
+                  {r.tipo === 'cliente' ? `Videollamada · ${r.titulo}` : r.titulo}
+                  {r.modalidad === 'presencial' && r.lugar ? <span className="text-slate-400"> · {r.lugar}</span> : null}
+                  {r.joinUrl && <a href={r.joinUrl} target="_blank" rel="noreferrer" className="text-coop-azul hover:underline ml-1.5">Teams</a>}
+                  {r.miRespuesta === 'organizador' && Array.isArray(r.colaboradoresIds) && r.colaboradoresIds.length > 1 && (() => {
+                    const resp = r.respuestas || {};
+                    const otros = r.colaboradoresIds.filter((id) => id !== r.organizadorId);
+                    const n = (v2) => otros.filter((id) => resp[id] === v2 || resp[String(id)] === v2).length;
+                    const pend = otros.length - n('aceptada') - n('rechazada') - n('provisional');
+                    return <span className="ml-1.5 text-[11px] text-slate-400" title="Respuestas de los invitados">✓{n('aceptada')} ?{n('provisional')} ✗{n('rechazada')}{pend > 0 ? ` · ${pend} sin responder` : ''}</span>;
+                  })()}
+                  {r.miRespuesta === 'aceptada' && <span className="ml-1.5 text-[11px] text-emerald-600">✓ aceptada</span>}
+                  {r.miRespuesta === 'provisional' && <span className="ml-1.5 text-[11px] text-amber-600">? provisional</span>}
+                  {r.miRespuesta === 'rechazada' && <span className="ml-1.5 text-[11px] text-red-500">✗ rechazada</span>}
+                </span>
+                {puedoGestionar[r.id] && (
+                  <span className="flex gap-1.5 shrink-0">
+                    <button onClick={() => setReunionModal({ reunion: r })} className="text-xs border border-slate-300 px-2 py-1 rounded-lg hover:border-coop-azul hover:text-coop-azul">Reprogramar</button>
+                    <button onClick={() => cancelarReunion(r)} className="text-xs border border-red-200 text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">Cancelar</button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <DayEditModal
