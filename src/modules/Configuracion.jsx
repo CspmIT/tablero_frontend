@@ -174,7 +174,7 @@ function NotifPrefs() {
         <p className="font-medium text-slate-800 mb-1">Este dispositivo</p>
         {estadoDisp === 'granted' && <p className="text-sm text-emerald-600">✓ Notificaciones activadas en este dispositivo.</p>}
         {estadoDisp === 'denied' && <p className="text-sm text-red-500">Bloqueadas por el navegador: habilitalas desde la configuración del sitio (candado en la barra de dirección).</p>}
-        {estadoDisp === 'no_soportado' && <p className="text-sm text-slate-500">Este navegador no soporta notificaciones push.</p>}
+        {estadoDisp === 'no_soportado' && <p className="text-sm text-slate-500">Este entorno no soporta notificaciones push. Si estás en la <b>app de escritorio</b>, usá el Tablero desde Chrome/Edge (o instalalo como PWA desde el navegador) para recibirlas; en el celular, la app instalada es la mejor opción.</p>}
         {estadoDisp === 'default' && (
           <button onClick={() => activarNotificaciones(api).then(() => setEstadoDisp('granted')).catch((e) => { setEstadoDisp(pushEstado()); alert(e.message); })}
             className="text-sm px-3 py-1.5 rounded-lg bg-coop-azul text-white hover:opacity-90">🔔 Activar en este dispositivo</button>

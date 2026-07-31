@@ -81,3 +81,49 @@ export const http = {
   del: (path) => request('DELETE', path),
   postForm: (path, formData) => request('POST', path, { body: formData, isForm: true }),
 };
+
+
+// POST que consume una respuesta Server-Sent Events (30/07, CriterIA):
+// mantiene viva la conexión con los latidos del servidor durante las
+// generaciones largas (1-3 min) y resuelve con el evento "resultado".
+export async function postSSE(path, body) {
+  const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+  const esSSE = (res.headers.get('content-type') || '').includes('text/event-stream');
+  if (!res.ok && !esSSE) {
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j?.error?.message || j?.message || msg; } catch {}
+    const err = new Error(msg); err.status = res.status; throw err;
+  }
+  if (!esSSE) return res.json(); // compat: backend viejo sin SSE
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buffer = '';
+  let evento = null, datos = '';
+  let resultado = null, errorSSE = null;
+  const procesar = (bloque) => {
+    evento = null; datos = '';
+    for (const linea of bloque.split('\n')) {
+      if (linea.startsWith('event:')) evento = linea.slice(6).trim();
+      else if (linea.startsWith('data:')) datos += linea.slice(5).trim();
+    }
+    if (evento === 'resultado' && datos) { try { resultado = JSON.parse(datos); } catch {} }
+    if (evento === 'error' && datos) { try { errorSSE = JSON.parse(datos); } catch { errorSSE = { mensaje: datos }; } }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += dec.decode(value, { stream: true });
+    let corte;
+    while ((corte = buffer.indexOf('\n\n')) >= 0) {
+      procesar(buffer.slice(0, corte));
+      buffer = buffer.slice(corte + 2);
+    }
+  }
+  if (errorSSE) { const err = new Error(errorSSE.mensaje || 'Falló la generación'); err.code = errorSSE.error; throw err; }
+  if (!resultado) { const err = new Error('La conexión se cortó antes del resultado (reintentá)'); throw err; }
+  return resultado;
+}

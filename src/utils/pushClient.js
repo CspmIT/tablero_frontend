@@ -8,7 +8,12 @@ function b64aUint8(base64) {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 
+import { isTauri } from './isTauri.js';
+
 export function pushSoportado() {
+  // El webview de Tauri expone las APIs pero NO implementa Web Push real
+  // (no hay servicio de push detrás): mejor no ofrecer lo que no se cumple.
+  if (isTauri()) return false;
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 

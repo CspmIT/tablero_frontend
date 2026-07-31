@@ -1,4 +1,4 @@
-import { http } from './client.js';
+import { http, postSSE } from './client.js';
 
 // Helper para generar el CRUD estándar de un recurso.
 function recurso(path) {
@@ -125,8 +125,10 @@ export const api = {
     set: (colaboradorId, extra, ocultas) => http.put('/permisos', { colaboradorId, extra, ocultas }),
   },
   criteria: {
-    preguntas: (body) => http.post('/criteria/preguntas', body),
-    generar: (body) => http.post('/criteria/generar', body),
+    // SSE de punta a punta: latidos del servidor mantienen viva la conexión
+    // durante los 1-3 minutos de generación (el 504 de los proxies, muerto).
+    preguntas: (body) => postSSE('/criteria/preguntas', body),
+    generar: (body) => postSSE('/criteria/generar', body),
   },
   deseos: {
     list: (todos) => http.get('/deseos', todos ? { todos: 1 } : undefined),
