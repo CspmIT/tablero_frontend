@@ -7008,6 +7008,7 @@ async function boot() {
       presupuesto: (typeof state !== "undefined" ? (state.presupuesto || null) : null),
       view: (typeof state !== "undefined" ? state.view : "home"),
       criteria: (typeof state !== "undefined" ? (state.criteria || null) : null),
+      documento: (typeof state !== "undefined" ? (state.documento || null) : null),
       meta: (window.__coopLeadMeta || null)
     };
   }
@@ -7019,6 +7020,7 @@ async function boot() {
       if ("project" in estado) state.project = estado.project || null;
       if ("presupuesto" in estado) state.presupuesto = estado.presupuesto || null;
       if ("criteria" in estado) state.criteria = estado.criteria || null;
+      if ("documento" in estado) state.documento = estado.documento || null;
       if (estado.project && estado.project.id) state.projectId = estado.project.id;
     }
     // Modo de apertura: "relevamiento" -> editor; "presupuesto" -> presupuesto.
@@ -7265,6 +7267,19 @@ async function boot() {
     var respuestas = (cw.preguntas || []).map(function (p, i) {
       return { pregunta: p.pregunta, respuesta: (cw.respuestas[i] || "").trim() };
     }).filter(function (r) { return r.respuesta; });
+    // Feedback de la reunión con el cliente (modo Presentación): viaja como
+    // contexto para que la regeneración AJUSTE el planteo a la conversación.
+    var fb = (state.documento && state.documento.feedback) || {};
+    var titulosSec = {};
+    ((state.documento && state.documento.secciones) || []).forEach(function (x) { titulosSec[x.id] = x.titulo; });
+    Object.keys(fb).forEach(function (k) {
+      var f = fb[k]; if (!f || (!f.estado && !f.nota)) return;
+      var partes = [];
+      if (f.estado === "ahora_no") partes.push("el cliente POSTERGA este punto (no incluirlo en esta etapa)");
+      if (f.estado === "sigue") partes.push("el cliente confirma avanzar con este punto");
+      if (f.nota) partes.push("dijo: " + f.nota);
+      respuestas.push({ pregunta: "FEEDBACK DE REUNIÓN — sección \"" + (titulosSec[k] || k) + "\"", respuesta: partes.join("; ") });
+    });
     return { relevamiento: relevamientoLiviano(), imagenes: imagenes, epigrafesNoEnviadas: epigrafes, respuestas: respuestas };
   }
 
@@ -7281,6 +7296,15 @@ async function boot() {
       if (msg.error) { cw.error = msg.error; }
       else { cw.preguntas = (msg.resultado && msg.resultado.preguntas) || []; cw.error = null; }
       pintar();
+    }
+    if (msg.type === "criteria_nota_resultado") {
+      if (msg.error) { alert("No se pudo redactar la nota: " + msg.error); pintar(); return; }
+      var nota = msg.resultado && msg.resultado.nota;
+      if (nota && state.criteria && state.criteria.planteo) {
+        state.criteria.planteo.notas_a_terceros = (state.criteria.planteo.notas_a_terceros || []).concat([nota]);
+        emitirSnapshot(); pintar();
+      }
+      return;
     }
     if (msg.type === "criteria_resultado") {
       cw.generando = false;
@@ -7491,6 +7515,18 @@ async function boot() {
     }
     if (p.advertencias && p.advertencias.length) h5 += "<div class='cw-sec'>Advertencias</div><ul style='margin:4px 0 0;padding-left:18px'>" + p.advertencias.map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("") + "</ul>";
     if (p.etapas && p.etapas.length) h5 += "<div class='cw-sec'>Etapas</div><ul style='margin:4px 0 0;padding-left:18px'>" + p.etapas.map(function (e) { return "<li><b>Etapa " + esc(e.numero) + ":</b> " + esc(e.alcance) + "</li>"; }).join("") + "</ul>";
+    var sugeridas = (p.notas_a_terceros_sugeridas || []).filter(function (n) {
+      // Ocultar la sugerencia si ya se redactó una nota para el mismo organismo.
+      return !(p.notas_a_terceros || []).some(function (r) { return r.destinatario_organismo === n.destinatario_organismo; });
+    });
+    if (sugeridas.length) {
+      h5 += "<div class='cw-sec'>Notas a terceros sugeridas</div><p style='margin:0 0 6px;color:#64748b;font-size:12px'>CriterIA detectó que estos ítems podrían requerir acuerdo con un tercero. Si ya existe convenio, no hace falta nota; si no, pedí la redacción.</p>" +
+        sugeridas.map(function (n, i) {
+          return "<div class='cw-preg'><b>" + esc(n.destinatario_organismo || "") + "</b> — " + esc(n.destinatario_persona_o_area || "") +
+            "<br><small style='color:#475569'>" + esc(n.motivo || "") + (n.regla ? " · <i>" + esc(n.regla) + "</i>" : "") + "</small><br>" +
+            "<button class='cw-btn' data-cwnota='" + i + "' style='margin-top:6px'>✍ Redactar nota</button></div>";
+        }).join("");
+    }
     if (p.notas_a_terceros && p.notas_a_terceros.length) {
       h5 += "<div class='cw-sec'>Notas a terceros (borrador editable — firma el cliente)</div>" + p.notas_a_terceros.map(function (n) {
         return "<div class='cw-preg'><b>" + esc(n.destinatario_organismo || "") + "</b> — " + esc(n.destinatario_persona_o_area || "") + "<br><i>" + esc(n.asunto || "") + "</i><br><small style='white-space:pre-wrap'>" + esc(n.cuerpo || "") + "</small></div>";
@@ -7504,10 +7540,401 @@ async function boot() {
     return h5;
   }
 
+  // Exporta el planteo completo como Markdown (31/07): para leerlo cómodo en
+  // PC, editarlo y darle la forma final (abre en cualquier editor / Word).
+  function descargarPlanteoMd() {
+    var c = state.criteria || {}; var p = c.planteo || {}; var m = c.metadata || {};
+    if (!c.planteo) return;
+    var L = [];
+    var nombreRel = (state.nombre || state.titulo || "relevamiento");
+    L.push("# Planteo CriterIA — " + nombreRel);
+    L.push("");
+    L.push("**Versión " + (m.version || 1) + "** · generado " + String(m.fechaRelevamiento || "").slice(0, 10) +
+      (m.relevadorNombre ? " por " + m.relevadorNombre : "") +
+      (m.estado === "validado" ? " · **VALIDADO** por " + (m.validadorNombre || "") + " el " + String(m.fechaValidacion || "").slice(0, 10) : " · borrador sin validar"));
+    L.push("");
+    if (p.resumen_analisis) { L.push("## Resumen"); L.push(""); L.push(p.resumen_analisis); L.push(""); }
+    if (p.plantas_modelo && p.plantas_modelo.length) {
+      L.push("## Plantas modelo / nodos"); L.push("");
+      p.plantas_modelo.forEach(function (x) { L.push("- **" + x.nombre + "**: " + (x.descripcion || "")); });
+      L.push("");
+    }
+    if (p.equipamiento && p.equipamiento.length) {
+      L.push("## Lista de materiales"); L.push("");
+      L.push("| Cant. | Ítem | Regla aplicada |");
+      L.push("|---|---|---|");
+      p.equipamiento.forEach(function (e) {
+        var item = String(e.item || "").replace(/\|/g, "/") + (e.notas ? " — _" + String(e.notas).replace(/\|/g, "/") + "_" : "");
+        L.push("| " + (e.cantidad != null ? e.cantidad : "") + " | " + item + " | " + String(e.regla_aplicada || "").replace(/\|/g, "/") + " |");
+      });
+      L.push("");
+    }
+    if (p.asignacion_recursos && p.asignacion_recursos.length) {
+      L.push("## Asignación de recursos"); L.push("");
+      p.asignacion_recursos.forEach(function (r) {
+        L.push("**" + r.equipo + "** — " + (r.ubicacion || ""));
+        [].concat(r.entradas_analogicas || [], r.buses_modbus || []).forEach(function (d) { L.push("- " + d); });
+        L.push("");
+      });
+    }
+    if (p.etapas && p.etapas.length) {
+      L.push("## Etapas"); L.push("");
+      p.etapas.forEach(function (e, i) { L.push((i + 1) + ". " + (typeof e === "string" ? e : (e.nombre ? "**" + e.nombre + "**: " + (e.descripcion || "") : JSON.stringify(e)))); });
+      L.push("");
+    }
+    if (p.advertencias && p.advertencias.length) {
+      L.push("## Advertencias"); L.push("");
+      p.advertencias.forEach(function (a) { L.push("- ⚠ " + a); });
+      L.push("");
+    }
+    if (p.notas_a_terceros && p.notas_a_terceros.length) {
+      L.push("## Notas a terceros (borradores — firma el cliente)"); L.push("");
+      p.notas_a_terceros.forEach(function (n) {
+        L.push("### " + (n.destinatario_organismo || "") + " — " + (n.destinatario_persona_o_area || ""));
+        L.push("**Asunto:** " + (n.asunto || "")); L.push("");
+        L.push(n.cuerpo || ""); L.push("");
+      });
+    }
+    if (p.a_revisar && p.a_revisar.length) {
+      L.push("## A REVISAR — con la información proporcionada no es posible generar un plan completo"); L.push("");
+      p.a_revisar.forEach(function (a) { L.push("- **" + a.aspecto + "**: " + a.que_falta + " — " + a.por_que_bloquea); });
+      L.push("");
+    }
+    if (c.notasRevision) { L.push("## Notas de revisión"); L.push(""); L.push(c.notasRevision); L.push(""); }
+    L.push("---");
+    L.push("_Generado por CriterIA (Tablero Cooptech) el " + new Date().toLocaleDateString("es-AR") + ". Borrador para revisión de ingeniería: no reemplaza el criterio profesional._");
+
+    var md = L.join("\n");
+    var limpio = nombreRel.replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "_") || "relevamiento";
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown;charset=utf-8" }));
+    a.download = "Planteo_CriterIA_" + limpio + "_v" + (m.version || 1) + ".md";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
+  /* ============ DOCUMENTO DEL PROYECTO (Ola 5.b, 31/07) ============
+     El plan/propuesta con el formato estándar de la casa (Castelli, Santa
+     Catalina): portada oficial + contenido + secciones FIJAS institucionales
+     + relevamiento humano (con fotos y epígrafes) + propuesta de CriterIA.
+     Todo EDITABLE y regenerable a PDF en cualquier momento del proceso. */
+
+  var FIJAS = {
+    importancia: "Calidad del Agua\n- Monitoreo Continuo de Parámetros de Calidad: la capacidad de monitorear la calidad del agua en tiempo real ayuda a garantizar que la planta cumpla con los estándares de calidad establecidos. Cualquier desviación puede abordarse de inmediato.\n\nSeguridad\n- Gestión de Riesgos: el monitoreo remoto puede contribuir a la gestión proactiva de riesgos, como fugas, contaminación o eventos inesperados, minimizando así los impactos negativos.\n\nEficiencia Operativa\n- Detección Temprana de Problemas: permite la detección temprana de posibles problemas o fallas en los equipos, lo que facilita la intervención antes de que se conviertan en problemas mayores.\n- Reducción de Tiempo de Inactividad: es posible implementar estrategias de mantenimiento predictivo. Esto ayuda a reducir el tiempo de inactividad no planificado al abordar problemas antes de que afecten gravemente la operación.\n- Toma de Decisiones a Distancia: la capacidad de acceder a los datos y controlar ciertos aspectos de la planta de agua potable de forma remota brinda flexibilidad a los operadores y gestores para tomar decisiones desde cualquier ubicación.\n\nAhorro de Costos\n- Optimización de Recursos: al comprender mejor el rendimiento de los equipos y los consumos de recursos, puedes optimizar la utilización de energía, agua y otros insumos, lo que ahorra costos operativos.\n- Menor Mantenimiento Correctivo: al realizar mantenimiento predictivo en lugar de correctivo, se reducen los costos asociados con reparaciones urgentes y sustituciones de emergencia.\n\nSostenibilidad Ambiental\n- Reducción de Desperdicios: al optimizar los procesos y recursos, contribuyes a la sostenibilidad ambiental al reducir desperdicios de agua y energía.\n\nMejora en la Planificación a Largo Plazo\nAnálisis de Datos Históricos: el almacenamiento y análisis de datos históricos permiten identificar tendencias a largo plazo, lo que puede informar la planificación estratégica y las inversiones futuras.",
+    eficiente: "La experiencia propia nos lleva a afirmar que independientemente de los controles y automatizaciones, para un monitoreo correcto de cualquier planta de agua es necesario conocer el estado de:\n\n1. Niveles de reserva\nEl monitoreo en tiempo real de los niveles de cisternas y/o tanques en una planta de agua potable es la herramienta principal para gestionar con precisión y garantizar un suministro constante y adecuado y con ello, mejorar la calidad del servicio.\n\n2. Caudales\nSe considera necesario contar con macro-medición de caudal de ingreso a cisterna y de salida a red urbana. La medición del caudal de entrada y salida permite realizar un seguimiento del consumo de agua y detectar tempranamente pérdidas en el sistema. Comparar el caudal de salida respecto de la sumatoria de consumos urbanos sirve como indicador del estado de la red.\n\n3. Presiones\nEl monitoreo conjunto de la presión y el caudal puede ayudar a identificar posibles problemas en el sistema, como aplastamientos u obstrucciones en las tuberías, fugas o daños en las válvulas. En un nivel mayor de tecnificación, resulta interesante contar con sensores de presión distribuidos en la red urbana para conocer la calidad del servicio y la detección temprana de pérdidas.\n\n4. Calidad de agua\nEsencial para asegurar que el agua distribuida cumpla con los estándares de salubridad. Es crucial el seguimiento de la dosificación de cloro (evitando tanto la falta de desinfección como la sobredosificación) y de la salinidad, especialmente cuando el recurso proviene de extracción subterránea.\n\n5. Sistema de bombeo\nEl monitoreo del estado de las bombas es crucial: encendido y apagado en tiempo real, porcentaje de marcha en bombas con variador, y horas de funcionamiento para mantenimiento preventivo. Contar con telemetría de estos parámetros permite un mantenimiento predictivo y ajustado a la realidad del sistema.",
+    producto: "Bienvenido a \"Más Agua\", tu solución integral para la gestión inteligente de servicios de agua, aplicable a agua potable, aguas industriales, aguas grises o aguas cloacales. Somos una plataforma web innovadora con funciones automáticas que simplifican y optimizan el control de procesos hídricos.\n\nCaracterísticas destacadas:\n- Facilidad de uso: dispositivos e interfaces diseñados para una operación intuitiva, incluso por usuarios no especializados.\n- Automatización Avanzada: funciones automáticas que mejoran la eficiencia y reducen la carga de trabajo manual.\n- Gestión y Envío de Alarmas: notificaciones instantáneas sobre cualquier desviación o situación crítica.\n- Escalabilidad: se adapta desde una pequeña planta hasta un complejo proceso de tratamiento de aguas.\n- Adaptabilidad Personalizada: cada planta es única; la aplicación se adapta a los requerimientos específicos del proceso.\n- Seguridad: trabajo coordinado con el área de IT, red VLAN dedicada a IoT y enlace seguro hacia nuestros servidores.\n\nEl servicio incluye: licencias de usuario ilimitadas, actualizaciones sin cargo, resguardo y backup de base de datos, capacitación, soporte 8x5 vía tickets y teléfono, seguimiento remoto permanente y asesoría en ampliaciones.\n\n\"Más Agua\" cuenta con impacto internacional: el producto fue presentado en el Congreso RPIC 2021 (San Juan), premiado por el comité científico y publicado en el repositorio IEEE Xplore: \"Control by IoT in Drinking Water Pumping Station and Cisterns\" (ieeexplore.ieee.org/document/9648462).",
+    cooptech: "Bienvenidos a CoopTech, una empresa de desarrollo de software e IoT que ha emergido a partir de la Cooperativa de Servicios Públicos de Morteros con su propia visión y propósito. CoopTech nació como un área de IT y Desarrollo interna de la Cooperativa, que desde sus inicios se ha dedicado a proporcionar servicios esenciales a la comunidad de Morteros, sus colonias y su área rural.\n\nCon una experiencia consolidada de cinco años en el desarrollo de software e IoT, nuestras soluciones permiten a las cooperativas y empresas gestionar eficientemente los recursos, monitorear el estado de las infraestructuras y anticipar posibles problemas antes de que afecten a los usuarios.\n\nCoopTech no se limita a las fronteras de Morteros: trabajamos con cooperativas y empresas de Córdoba, Santa Fe, La Pampa y Buenos Aires, brindando soluciones adaptadas a las necesidades específicas de cada región. Nos enorgullece ser agentes de cambio, contribuyendo al progreso sostenible de las comunidades que servimos, con un compromiso continuo con la excelencia, la ética y la innovación."
+  };
+
+  function textoRelevamiento() {
+    var pr = state.project || {}; var L = [];
+    (pr.zonas || pr.zones || []).forEach(function (z) {
+      L.push((z.nombre || z.name || "Zona") + (z.descripcion ? "\n" + z.descripcion : ""));
+      (z.componentes || z.components || []).forEach(function (c) {
+        var linea = "- " + (c.nombre || c.name || c.tipo || "Componente");
+        if (c.detalle || c.descripcion) linea += ": " + (c.detalle || c.descripcion);
+        if (c.observaciones) linea += " · Obs: " + c.observaciones;
+        L.push(linea);
+      });
+      L.push("");
+    });
+    if (pr.necesidades) L.push("Necesidades declaradas:\n" + pr.necesidades);
+    if (pr.observaciones) L.push("Observaciones generales:\n" + pr.observaciones);
+    return L.join("\n").trim() || "Completar con el relevamiento de campo.";
+  }
+
+  function textoPropuesta() {
+    var p = (state.criteria && state.criteria.planteo) || {}; var L = [];
+    if (p.resumen_analisis) L.push(p.resumen_analisis + "\n");
+    if (p.plantas_modelo && p.plantas_modelo.length) {
+      L.push("Plantas modelo / nodos de monitoreo:");
+      p.plantas_modelo.forEach(function (x) { L.push("- " + x.nombre + ": " + (x.descripcion || "")); });
+      L.push("");
+    }
+    if (p.equipamiento && p.equipamiento.length) {
+      L.push("Equipamiento propuesto:");
+      p.equipamiento.forEach(function (e) { L.push("- " + (e.cantidad != null ? e.cantidad + " × " : "") + (e.item || "") + (e.notas ? " (" + e.notas + ")" : "")); });
+      L.push("");
+    }
+    if (p.etapas && p.etapas.length) {
+      L.push("Etapas de implementación:");
+      p.etapas.forEach(function (e, i) { L.push((i + 1) + ". " + (typeof e === "string" ? e : ((e.alcance || e.nombre || "") + (e.justificacion ? " — " + e.justificacion : "")))); });
+      L.push("");
+    }
+    if (p.advertencias && p.advertencias.length) {
+      L.push("Consideraciones y advertencias:");
+      p.advertencias.forEach(function (a) { L.push("- " + a); });
+    }
+    return L.join("\n").trim() || "Generar el planteo con CriterIA o completar manualmente.";
+  }
+
+  // Versión SIN jerga para la pantalla del cliente: qué se monitorea y por
+  // qué le importa (de las plantas modelo del planteo, o genérica si no hay).
+  // Ola 5.d: plantillas por TIPO de cliente — el mismo documento habla
+  // distinto según a quién se le presenta (léxico, énfasis y genéricas).
+  var TIPOS_CLIENTE = {
+    cooperativa: {
+      etiqueta: "Cooperativa de servicios",
+      objetivo: "Integrar las tecnologías del servicio de agua potable de {cliente} para una mejor gestión y diagnóstico del servicio, facilitando la supervisión técnica del suministro mediante monitoreo en tiempo real, de manera remota y simultánea, sobre los parámetros de importancia en las distintas instalaciones que conforman el sistema hídrico de la localidad.",
+      importancia: "Para una cooperativa, el agua es el servicio donde la comunidad más siente la gestión: cada corte, cada baja de presión y cada duda sobre la calidad llega directo al asociado. El monitoreo propuesto apunta a tres resultados concretos: continuidad del suministro (alertas antes de que el problema llegue al usuario), cuidado del patrimonio cooperativo (bombas y equipos con mantenimiento predictivo en lugar de correctivo) y transparencia ante el consejo y la asamblea (datos históricos objetivos para decidir inversiones).",
+      genericas: ["• Niveles de reserva: cuánta agua hay disponible para la localidad, en todo momento y desde cualquier lugar.", "• Caudales de ingreso y salida: detectar pérdidas temprano y conocer el consumo real de la comunidad.", "• Presiones: la calidad del servicio tal como la reciben los asociados.", "• Cloración: seguridad sanitaria verificada automáticamente, sin depender de la inspección visual.", "• Bombeo y energía: cuidar los equipos de la cooperativa y anticipar fallas antes de que corten el servicio."],
+    },
+    municipio: {
+      etiqueta: "Municipio / Comuna",
+      objetivo: "Dotar a {cliente} de una herramienta de supervisión integral del servicio de agua potable, con monitoreo en tiempo real y registro histórico auditable, que respalde la toma de decisiones de gestión, la planificación de inversiones y la rendición de cuentas ante la comunidad.",
+      importancia: "Para un municipio, el monitoreo del agua es gestión pública medible: continuidad del servicio ante la ciudadanía, registro histórico objetivo para fundamentar inversiones y obras, respuesta rápida ante reclamos con datos en lugar de suposiciones, y trazabilidad sanitaria documentada ante los organismos de control.",
+      genericas: ["• Niveles de reserva: disponibilidad de agua de la localidad, visible para el área técnica y la gestión.", "• Caudales: consumo real y detección temprana de pérdidas en la red pública.", "• Presiones: calidad del servicio por zona, con registro ante reclamos.", "• Cloración: cumplimiento sanitario verificado y documentado automáticamente.", "• Bombeo y energía: protección de los activos públicos y eficiencia energética."],
+    },
+    empresa: {
+      etiqueta: "Empresa / Industria",
+      objetivo: "Integrar el monitoreo del sistema hídrico de {cliente} al esquema de gestión de la planta, aportando visibilidad en tiempo real, alertas tempranas y registro histórico de los parámetros críticos del proceso, con foco en continuidad operativa y eficiencia de costos.",
+      importancia: "En un entorno industrial, el agua es insumo y riesgo operativo a la vez: una parada por falta de suministro o una falla de bombeo impacta directo en producción. El monitoreo propuesto apunta a continuidad operativa (alertas antes de la parada), eficiencia (consumos reales por turno y por proceso, base para reducir costos) y mantenimiento predictivo de los equipos críticos.",
+      genericas: ["• Niveles de reserva: disponibilidad de agua de proceso, sin sorpresas al inicio de turno.", "• Caudales: consumo real por línea o sector, base para eficiencia y costeo.", "• Presiones: estabilidad del suministro a los puntos críticos del proceso.", "• Calidad del agua: parámetros dentro de especificación, con registro.", "• Bombeo y energía: los equipos críticos monitoreados, con mantenimiento predictivo."],
+    },
+  };
+  function tipoClienteActual() { return TIPOS_CLIENTE[(state.documento && state.documento.tipoCliente) || "cooperativa"] || TIPOS_CLIENTE.cooperativa; }
+
+  function textoMonitoreoCliente() {
+    var p = (state.criteria && state.criteria.planteo) || {};
+    var L = [];
+    if (p.plantas_modelo && p.plantas_modelo.length) {
+      p.plantas_modelo.forEach(function (x) {
+        L.push("• " + x.nombre + "\n" + (x.descripcion || ""));
+        L.push("");
+      });
+    } else {
+      tipoClienteActual().genericas.forEach(function (g) { L.push(g); L.push(""); });
+    }
+    L.push("\nCada uno de estos puntos genera alertas automáticas y registro histórico: el sistema avisa antes de que el problema llegue al usuario.");
+    return L.join("\n");
+  }
+
+  function armarDocumento() {
+    var cliente = (window.__coopLeadMeta && window.__coopLeadMeta.razon) || state.nombre || "Cooperativa cliente";
+    var tc = tipoClienteActual();
+    var imp = tc.importancia;
+    var p = (state.criteria && state.criteria.planteo) || {};
+    if (p.advertencias && p.advertencias.length) imp += "\n\nPuntos de atención detectados en el relevamiento:\n" + p.advertencias.map(function (a) { return "- " + a; }).join("\n");
+    var tipoPrevio = (state.documento && state.documento.tipoCliente) || "cooperativa";
+    state.documento = {
+      tipoCliente: tipoPrevio,
+      tituloProyecto: "Monitoreo del servicio de agua potable de " + cliente,
+      logoCliente: null,
+      incluirFotos: true,
+      feedback: {}, // { [secId]: { estado: 'sigue'|'ahora_no', nota, fecha } }
+      secciones: [
+        { id: "objetivo", vista: "ambas", titulo: "Objetivo", cuerpo: tc.objetivo.replace("{cliente}", cliente), incluir: true },
+        { id: "imp_gral", vista: "ambas", titulo: "Importancia del monitoreo: Generalidades", cuerpo: FIJAS.importancia, incluir: true, fija: true },
+        { id: "imp_cliente", vista: "ambas", titulo: "Importancia del monitoreo: en " + cliente, cuerpo: imp, incluir: true },
+        { id: "eficiente", vista: "ambas", titulo: "¿Cómo lograr un monitoreo eficiente?", cuerpo: FIJAS.eficiente, incluir: true, fija: true },
+        { id: "monitoreo_cliente", vista: "cliente", titulo: "Qué vamos a monitorear en su proyecto", cuerpo: textoMonitoreoCliente(), incluir: true },
+        { id: "relevamiento", vista: "tecnica", titulo: "Relevamiento", cuerpo: textoRelevamiento(), incluir: true },
+        { id: "propuesta", vista: "tecnica", titulo: "Propuesta", cuerpo: textoPropuesta(), incluir: true },
+        { id: "producto", vista: "ambas", titulo: "Nuestro producto: Generalidades", cuerpo: FIJAS.producto, incluir: true, fija: true },
+        { id: "cooptech", vista: "ambas", titulo: "Cooptech: Transformando el Futuro con Innovación Digital", cuerpo: FIJAS.cooptech, incluir: true, fija: true },
+      ],
+    };
+    emitirSnapshot();
+  }
+
+  function abrirDocumento() {
+    if (!state.documento) armarDocumento();
+    cw.docAbierto = true; pintar();
+  }
+
+  function docSet(i, campo, valor) {
+    var d = state.documento; if (!d) return;
+    if (i === -1) d[campo] = valor; else d.secciones[i][campo] = valor;
+    emitirSnapshot();
+    if (campo === "incluir") pintar();
+  }
+
+  // Dictado por voz de la nota de reunión (Web Speech — Chrome/Android):
+  // el caso estrella del dictado: capturar lo que dice el cliente EN VIVO.
+  function dictarNota(secId) {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Este navegador no soporta dictado por voz (usalo en Chrome)."); return; }
+    var rec = new SR();
+    rec.lang = "es-AR"; rec.continuous = false; rec.interimResults = false;
+    rec.onresult = function (e) {
+      var txt = e.results[0][0].transcript;
+      var d = state.documento; d.feedback = d.feedback || {};
+      var previa = (d.feedback[secId] && d.feedback[secId].nota) || "";
+      d.feedback[secId] = Object.assign({}, d.feedback[secId], { nota: (previa ? previa + " " : "") + txt, fecha: new Date().toISOString() });
+      emitirSnapshot(); pintar();
+    };
+    rec.onerror = function (e) { if (e.error !== "no-speech") alert("Dictado: " + e.error); };
+    rec.start();
+  }
+
+  function renderPresentacion() {
+    var d = state.documento;
+    var fotos = (cw.fotos || []).filter(function (f) { return f.sel; }).slice(0, 4);
+    var h = "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>" +
+      "<span style='font-size:22px;font-weight:800;color:#152c54'>" + esc(d.tituloProyecto) + "</span>" +
+      "<button class='cw-btn' data-cwact='pres_salir'>Salir de presentación</button></div>";
+    d.secciones.filter(function (x) { return x.incluir && (x.vista || "ambas") !== "tecnica"; }).forEach(function (sec) {
+      var f = (d.feedback || {})[sec.id] || {};
+      h += "<div style='background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px 20px;margin-bottom:14px'>" +
+        "<div style='display:flex;justify-content:space-between;gap:10px;align-items:center'>" +
+        "<span style='font-size:19px;font-weight:700;color:#152c54'>" + esc(sec.titulo) + "</span>" +
+        "<span style='display:flex;gap:6px'>" +
+        "<button data-fb='" + sec.id + "|sigue' class='cw-btn' style='" + (f.estado === "sigue" ? "background:#059669;color:#fff" : "") + "' title='El cliente avanza con esto'>✅</button>" +
+        "<button data-fb='" + sec.id + "|ahora_no' class='cw-btn' style='" + (f.estado === "ahora_no" ? "background:#d97706;color:#fff" : "") + "' title='Lo posterga'>⏸</button>" +
+        "<button data-fb='" + sec.id + "|nota' class='cw-btn' title='Nota escrita'>✏</button>" +
+        "<button data-fb='" + sec.id + "|dictar' class='cw-btn' title='Dictar nota por voz'>🎤</button></span></div>" +
+        "<div style='font-size:16px;line-height:1.65;color:#1e293b;white-space:pre-wrap;margin-top:10px'>" + esc(sec.cuerpo || "") + "</div>" +
+        (f.nota ? "<div style='margin-top:10px;background:#fef9c3;border-radius:9px;padding:8px 12px;font-size:14px'>📝 " + esc(f.nota) + "</div>" : "") +
+        "</div>";
+    });
+    if (fotos.length) {
+      h += "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px'>" +
+        fotos.map(function (f) { return "<img data-cwthumb='" + f.id + "' style='width:100%;border-radius:12px'>"; }).join("") + "</div>";
+    }
+    h += "<p class='cw-meta' style='margin-top:12px'>Las reacciones (✅ ⏸ 📝 🎤) quedan guardadas: al volver, \"Recomponer desde CriterIA\" las inyecta como contexto para ajustar el planteo.</p>";
+    return h;
+  }
+
+  function renderDocumento() {
+    var d = state.documento;
+    var h = "<div class='cw-head'><b>📕 Documento del proyecto</b><span class='cw-meta'>Editá lo que haga falta y generá el PDF las veces que quieras (antes, durante o después de la reunión con el cliente).</span></div>";
+    h += "<div style='display:flex;gap:8px;flex-wrap:wrap;margin:10px 0'>" +
+      "<button class='cw-btn' data-cwact='doc_volver'>← Volver a CriterIA</button>" +
+      "<button class='cw-btn' data-cwact='doc_recomponer'>↻ Recomponer desde CriterIA</button>" +
+      "<label class='cw-btn' style='cursor:pointer'>🏷 Logo del cliente<input type='file' accept='image/*' data-doclogo style='display:none'></label>" +
+      "<button class='cw-btn' data-cwact='doc_presentar'>🖥 Presentar al cliente</button>" +
+      "<button class='cw-btn ok' data-cwact='doc_pdf'>🧾 Generar PDF</button></div>";
+    if (d.logoCliente) h += "<div class='cw-meta'>Logo del cliente cargado ✓ (va en la carátula del proyecto)</div>";
+    h += "<div class='cw-sec'>Tipo de cliente <small style='font-weight:400;color:#64748b'>(adapta el lenguaje del objetivo, la importancia y la vista cliente — al cambiarlo, recomponé)</small></div>" +
+      "<select data-doctipo style='border:1px solid #cbd5e1;border-radius:7px;padding:6px 9px'>" +
+      Object.keys(TIPOS_CLIENTE).map(function (k) { return "<option value='" + k + "' " + (((d.tipoCliente || "cooperativa") === k) ? "selected" : "") + ">" + TIPOS_CLIENTE[k].etiqueta + "</option>"; }).join("") + "</select>";
+    h += "<div class='cw-sec'>Título del proyecto</div><input type='text' value='" + esc(d.tituloProyecto) + "' data-doctitulo style='width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:14px;font-weight:600'>";
+    h += "<label style='display:flex;gap:6px;align-items:center;margin:10px 0;font-size:13px'><input type='checkbox' data-docfotos " + (d.incluirFotos ? "checked" : "") + "> Incluir las fotos seleccionadas del relevamiento (con sus epígrafes) en la sección Relevamiento</label>";
+    d.secciones.forEach(function (sec, i) {
+      h += "<div style='border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin:10px 0" + (sec.incluir ? "" : ";opacity:.5") + "'>" +
+        "<div style='display:flex;gap:8px;align-items:center'><input type='checkbox' data-docinc='" + i + "' " + (sec.incluir ? "checked" : "") + ">" +
+        "<input type='text' value='" + esc(sec.titulo) + "' data-doctit='" + i + "' style='flex:1;border:1px solid #cbd5e1;border-radius:7px;padding:5px 8px;font-weight:600'>" +
+        "<select data-docvista='" + i + "' title='En qué vista aparece' style='border:1px solid #cbd5e1;border-radius:7px;padding:4px'>" +
+          ["ambas", "tecnica", "cliente"].map(function (vv) { return "<option value='" + vv + "' " + ((sec.vista || "ambas") === vv ? "selected" : "") + ">" + ({ ambas: "PDF + Cliente", tecnica: "Solo PDF", cliente: "Solo Cliente" })[vv] + "</option>"; }).join("") + "</select>" +
+        (sec.fija ? "<span class='cw-meta'>institucional</span>" : "") + "</div>" +
+        "<textarea data-doccuerpo='" + i + "' rows='" + Math.min(14, Math.max(4, (sec.cuerpo || "").split("\n").length + 1)) + "' style='width:100%;margin-top:8px;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:13px;line-height:1.45'>" + esc(sec.cuerpo || "") + "</textarea></div>";
+    });
+    return h;
+  }
+
+  // PDF del Documento del proyecto: portada oficial +Agua, encabezado CoopTech
+  // y pie Coopmorteros en cada página, Contenido con numeración (dos pasadas),
+  // carátula del proyecto con logo del cliente, secciones y fotos con epígrafe.
+  async function exportarDocumentoPDF(btn) {
+    if (typeof window.jspdf === "undefined") { alert("Necesitás conexión a internet para generar el PDF (no se cargó la librería)."); return; }
+    var d = state.documento; if (!d) return;
+    if (btn) { btn.disabled = true; btn.textContent = "Generando…"; }
+    try {
+      var jsPDF = window.jspdf.jsPDF;
+      var doc = new jsPDF({ unit: "mm", format: "a4" });
+      var W = 210, H = 297, MX = 22, MT = 34, MB = 22, y = MT;
+      var indice = []; // { titulo, pagina }
+
+      function marco() {
+        doc.setFillColor(21, 44, 84); doc.rect(0, 0, W, 20, "F");
+        doc.setTextColor(255); doc.setFontSize(13); doc.setFont("helvetica", "bold");
+        doc.text("CoopTech", MX, 12);
+        doc.setFontSize(6.5); doc.setFont("helvetica", "normal");
+        doc.text("S O L U C I O N E S   4 . 0", MX, 16.5);
+        doc.setTextColor(30); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+        doc.text("COOPMORTEROS", MX, H - 10);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(30);
+      }
+      function nuevaPagina() { doc.addPage(); marco(); y = MT; }
+      function espacio(alto) { if (y + alto > H - MB) nuevaPagina(); }
+
+      // --- Portada oficial ---
+      try {
+        var resp = await fetch("portada_agua.jpg");
+        var blob = await resp.blob();
+        var dataURL = await new Promise(function (res, rej) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = rej; fr.readAsDataURL(blob); });
+        doc.addImage(dataURL, "JPEG", 0, 0, W, H);
+      } catch (e) { /* sin portada: sigue igual */ }
+
+      // --- Carátula del proyecto ---
+      nuevaPagina();
+      doc.setFontSize(10); doc.text("MORTEROS, " + new Date().toLocaleDateString("es-AR", { day: "numeric", month: "long", year: "numeric" }), W - MX, y, { align: "right" }); y += 14;
+      doc.setFontSize(17); doc.setFont("helvetica", "bold");
+      var tit = doc.splitTextToSize("Proyecto: " + d.tituloProyecto, W - MX * 2);
+      doc.text(tit, MX, y); y += tit.length * 8 + 6;
+      doc.setFont("helvetica", "normal");
+      if (d.logoCliente) { try { doc.addImage(d.logoCliente, "JPEG", W / 2 - 22, y, 44, 0); y += 40; } catch (e) { try { doc.addImage(d.logoCliente, "PNG", W / 2 - 22, y, 44, 0); y += 40; } catch (e2) { /* */ } } }
+
+      // --- Secciones ---
+      var secciones = d.secciones.filter(function (x) { return x.incluir && (x.vista || "ambas") !== "cliente"; });
+      for (var si = 0; si < secciones.length; si++) {
+        var sec = secciones[si];
+        espacio(30); if (y > MT + 6 && si > 0) { nuevaPagina(); }
+        indice.push({ titulo: sec.titulo, pagina: doc.getNumberOfPages() });
+        doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text(sec.titulo, MX, y);
+        doc.setDrawColor(140, 198, 63); doc.setLineWidth(.6); doc.line(MX, y + 2, MX + 60, y + 2);
+        doc.setTextColor(30); y += 10; doc.setFontSize(10.5);
+        var parrafos = String(sec.cuerpo || "").split("\n");
+        parrafos.forEach(function (par) {
+          if (!par.trim()) { y += 3; return; }
+          var negrita = /^[A-ZÁÉÍÓÚÑ¿][^a-z]*$/.test(par.trim()) && par.trim().length < 60;
+          doc.setFont("helvetica", negrita ? "bold" : "normal");
+          var lineas = doc.splitTextToSize(par, W - MX * 2);
+          lineas.forEach(function (ln) { espacio(6); doc.text(ln, MX, y); y += 5.4; });
+        });
+        doc.setFont("helvetica", "normal");
+
+        // Fotos del relevamiento al final de su sección
+        if (sec.id === "relevamiento" && d.incluirFotos) {
+          var fotos = (cw.fotos || []).filter(function (f) { return f.sel; });
+          for (var fi = 0; fi < fotos.length; fi++) {
+            try {
+              var data = await getPhotoData(fotos[fi].id); if (!data) continue;
+              var img = await reescalar(data, 1000); if (!img) img = data;
+              var props = doc.getImageProperties(img);
+              var iw = 130, ih = iw * props.height / props.width;
+              if (ih > 110) { ih = 110; iw = ih * props.width / props.height; }
+              espacio(ih + 14);
+              doc.addImage(img, "JPEG", (W - iw) / 2, y, iw, ih); y += ih + 4;
+              if (fotos[fi].caption) {
+                doc.setFontSize(8.5); doc.setFont("helvetica", "italic"); doc.setTextColor(90);
+                var cap = doc.splitTextToSize("Figura " + (fi + 1) + ": " + fotos[fi].caption, W - MX * 2);
+                cap.forEach(function (ln) { doc.text(ln, W / 2, y, { align: "center" }); y += 4; });
+                doc.setTextColor(30); doc.setFont("helvetica", "normal"); doc.setFontSize(10.5);
+              }
+              y += 5;
+            } catch (e) { /* foto ilegible */ }
+          }
+        }
+        y += 6;
+      }
+
+      // --- Contenido (segunda pasada): página 2, corrigiendo numeración ---
+      doc.insertPage(2); doc.setPage(2); marco();
+      var cy = MT;
+      doc.setFontSize(16); doc.setTextColor(21, 44, 84); doc.text("Contenido", MX, cy); cy += 12;
+      doc.setFontSize(10.5); doc.setTextColor(30);
+      indice.forEach(function (it) {
+        var pag = it.pagina + 1; // el índice insertado corre todo una página
+        var titulo = it.titulo.length > 70 ? it.titulo.slice(0, 67) + "…" : it.titulo;
+        doc.text(titulo, MX, cy);
+        doc.text(String(pag), W - MX, cy, { align: "right" });
+        doc.setDrawColor(200); doc.setLineDashPattern([0.5, 1.2], 0);
+        doc.line(MX + doc.getTextWidth(titulo) + 3, cy - 1, W - MX - 8, cy - 1);
+        doc.setLineDashPattern([], 0);
+        cy += 7.5;
+      });
+
+      var limpio = d.tituloProyecto.replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "_").slice(0, 60) || "proyecto";
+      doc.save("Plan_Propuesta_" + limpio + ".pdf");
+    } catch (e) { alert("No se pudo generar el PDF: " + (e.message || e)); }
+    if (btn) { btn.disabled = false; btn.textContent = "🧾 Generar PDF"; }
+  }
+
   function botonera() {
     var izq = "", der = "";
     if (cw.paso > 1 && cw.paso < 5) izq = "<button class='cw-btn' data-cwact='atras'>← Atrás</button>";
-    if (cw.paso === 5 && state.criteria && state.criteria.planteo) izq = "<button class='cw-btn' data-cwact='regenerar'>↻ Regenerar (nueva versión)</button>";
+    if (cw.paso === 5 && state.criteria && state.criteria.planteo) izq = "<button class='cw-btn' data-cwact='regenerar'>↻ Regenerar (nueva versión)</button><button class='cw-btn' data-cwact='documento'>📕 Documento del proyecto</button>";
     if (cw.paso === 1) der = "<button class='cw-btn pri' data-cwact='sig'>Siguiente →</button>";
     if (cw.paso === 2) der = "<button class='cw-btn pri' data-cwact='sig'>Siguiente →</button>";
     if (cw.paso === 3) der = "<button class='cw-btn pri' data-cwact='sig'>" + (cw.preguntas === null ? "Generar igual →" : "Continuar →") + "</button>";
@@ -7529,6 +7956,14 @@ async function boot() {
       ov.addEventListener("click", function (e) { if (e.target === ov && !cw.generando) cerrar(); });
     }
     var titulos = { 1: "Completitud del relevamiento", 2: "Selección de fotos y bocetos", 3: "Preguntas de CriterIA", 4: "Generación", 5: "Revisión y validación" };
+    if (cw.docAbierto) {
+      ov.innerHTML = "<div id='criteria-box'>" +
+        "<div class='cw-head'><span class='cw-title'>" + (cw.presentando ? esc((window.__coopLeadMeta && window.__coopLeadMeta.razon) || "Presentación") : "CriterIA <small>Documento del proyecto</small>") + "</span>" +
+        "<button class='cw-btn' data-cwact='doc_volver'>✕</button></div>" +
+        "<div class='cw-body'" + (cw.presentando ? " style='background:#f8fafc'" : "") + ">" + (cw.presentando ? renderPresentacion() : renderDocumento()) + "</div></div>";
+      cargarThumbs();
+      return;
+    }
     ov.innerHTML = "<div id='criteria-box'>" +
       "<div class='cw-head'><span class='cw-title'>CriterIA <small>paso " + cw.paso + " de 5 · " + titulos[cw.paso] + "</small></span>" +
       "<button class='cw-btn' data-cwact='cerrar'>✕</button></div>" +
@@ -7536,6 +7971,39 @@ async function boot() {
       "<div class='cw-foot'>" + botonera() + "</div></div>";
     cargarThumbs();
   }
+
+  // Edición del Documento del proyecto: delegado global de cambios.
+  document.addEventListener("change", function (ev) {
+    var t = ev.target; var d = state.documento;
+    if (!d || !cw.docAbierto) return;
+    if (t.hasAttribute("data-doctitulo")) docSet(-1, "tituloProyecto", t.value);
+    else if (t.hasAttribute("data-doctipo")) {
+      docSet(-1, "tipoCliente", t.value);
+      if (confirm("¿Recomponer Objetivo, Importancia y la vista cliente con la plantilla de \"" + TIPOS_CLIENTE[t.value].etiqueta + "\"? (el resto de tus ediciones se conserva)")) {
+        var tc2 = TIPOS_CLIENTE[t.value];
+        var cliente2 = (window.__coopLeadMeta && window.__coopLeadMeta.razon) || state.nombre || "Cooperativa cliente";
+        d.secciones.forEach(function (sec) {
+          if (sec.id === "objetivo") sec.cuerpo = tc2.objetivo.replace("{cliente}", cliente2);
+          if (sec.id === "imp_cliente") {
+            var p2 = (state.criteria && state.criteria.planteo) || {};
+            sec.cuerpo = tc2.importancia + ((p2.advertencias && p2.advertencias.length) ? "\n\nPuntos de atención detectados en el relevamiento:\n" + p2.advertencias.map(function (a) { return "- " + a; }).join("\n") : "");
+          }
+          if (sec.id === "monitoreo_cliente") sec.cuerpo = textoMonitoreoCliente();
+        });
+        emitirSnapshot(); pintar();
+      }
+    }
+    else if (t.hasAttribute("data-docfotos")) docSet(-1, "incluirFotos", t.checked);
+    else if (t.hasAttribute("data-doctit")) docSet(Number(t.getAttribute("data-doctit")), "titulo", t.value);
+    else if (t.hasAttribute("data-doccuerpo")) docSet(Number(t.getAttribute("data-doccuerpo")), "cuerpo", t.value);
+    else if (t.hasAttribute("data-docinc")) docSet(Number(t.getAttribute("data-docinc")), "incluir", t.checked);
+    else if (t.hasAttribute("data-docvista")) docSet(Number(t.getAttribute("data-docvista")), "vista", t.value);
+    else if (t.hasAttribute("data-doclogo") && t.files && t.files[0]) {
+      var fr = new FileReader();
+      fr.onload = function () { reescalar(fr.result, 500).then(function (chico) { docSet(-1, "logoCliente", chico || fr.result); pintar(); }); };
+      fr.readAsDataURL(t.files[0]);
+    }
+  });
 
   function cargarThumbs() {
     var imgs = document.querySelectorAll("img[data-cwthumb]");
@@ -7925,6 +8393,47 @@ async function boot() {
     if (act === "regenerar") { cw.paso = 1; cw.error = null; cw.preguntas = null; cw.respuestas = {}; pintar(); }
     if (act === "guardar") { emitirSnapshot(); btn.textContent = "✓ Guardado"; setTimeout(function () { btn.textContent = "Guardar"; }, 1200); }
     if (act === "validar") { if (confirm("¿Validar el planteo? Queda registrado tu nombre y la fecha, y la versión se congela para el informe.")) validar(); }
+    if (act === "descargar") descargarPlanteoMd();
+    if (act === "documento") abrirDocumento();
+    if (act === "doc_volver") { cw.docAbierto = false; pintar(); }
+    if (act === "doc_recomponer") { if (confirm("¿Recomponer el documento desde CriterIA y el relevamiento? Se pierden las ediciones manuales de las secciones.")) { armarDocumento(); pintar(); } }
+    if (act === "doc_pdf") exportarDocumentoPDF(ev.target);
+    if (act === "doc_presentar") { cw.presentando = true; pintar(); }
+    if (act === "pres_salir") { cw.presentando = false; pintar(); }
+    var fb = ev.target.closest("[data-fb]");
+    if (fb) {
+      var partes = fb.getAttribute("data-fb").split("|");
+      var secId = partes[0], accion = partes[1];
+      var d2 = state.documento; d2.feedback = d2.feedback || {};
+      if (accion === "nota") {
+        var previa = (d2.feedback[secId] && d2.feedback[secId].nota) || "";
+        var nota = prompt("Nota de la reunión (lo que dijo el cliente):", previa);
+        if (nota === null) return;
+        d2.feedback[secId] = Object.assign({}, d2.feedback[secId], { nota: nota, fecha: new Date().toISOString() });
+      } else if (accion === "dictar") {
+        dictarNota(secId);
+        return;
+      } else {
+        var actual = d2.feedback[secId] && d2.feedback[secId].estado;
+        d2.feedback[secId] = Object.assign({}, d2.feedback[secId], { estado: actual === accion ? null : accion, fecha: new Date().toISOString() });
+      }
+      emitirSnapshot(); pintar();
+    }
+    var bn = ev.target.closest("[data-cwnota]");
+    if (bn) {
+      var idx = Number(bn.getAttribute("data-cwnota"));
+      var sug = ((state.criteria.planteo.notas_a_terceros_sugeridas || []).filter(function (n) {
+        return !(state.criteria.planteo.notas_a_terceros || []).some(function (r) { return r.destinatario_organismo === n.destinatario_organismo; });
+      }))[idx];
+      if (!sug) return;
+      bn.disabled = true; bn.textContent = "Redactando…";
+      // Nota liviana: relevamiento SIN imágenes (la nota no las necesita — tokens).
+      post("criteria_nota", {
+        relevamiento: relevamientoLiviano(), planteoResumen: state.criteria.planteo.resumen_analisis || "",
+        destinatario: { destinatario_organismo: sug.destinatario_organismo, destinatario_persona_o_area: sug.destinatario_persona_o_area },
+        motivo: sug.motivo || "",
+      });
+    }
   }, true);
   document.addEventListener("change", function (e) {
     var t = e.target;

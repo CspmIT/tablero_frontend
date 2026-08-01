@@ -129,6 +129,7 @@ export const api = {
     // durante los 1-3 minutos de generación (el 504 de los proxies, muerto).
     preguntas: (body) => postSSE('/criteria/preguntas', body),
     generar: (body) => postSSE('/criteria/generar', body),
+    nota: (body) => postSSE('/criteria/nota', body),
   },
   deseos: {
     list: (todos) => http.get('/deseos', todos ? { todos: 1 } : undefined),
