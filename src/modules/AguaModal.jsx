@@ -35,6 +35,11 @@ export default function AguaModal({ open, lead, modo, estadoInicial, onAutoSave,
             .then((r) => win?.postMessage({ __coop: true, type: 'criteria_preguntas_resultado', resultado: r }, '*'))
             .catch((e) => win?.postMessage({ __coop: true, type: 'criteria_preguntas_resultado', error: [e?.message, e?.status && `HTTP ${e.status}`].filter(Boolean).join(' · ') || 'Error al pedir preguntas' }, '*'));
           break;
+        case 'criteria_nota':
+          api.criteria.nota(msg.payload || {})
+            .then((r) => win?.postMessage({ __coop: true, type: 'criteria_nota_resultado', resultado: r, pedidoId: msg.pedidoId }, '*'))
+            .catch((e) => win?.postMessage({ __coop: true, type: 'criteria_nota_resultado', error: e?.message || 'Error al redactar la nota', pedidoId: msg.pedidoId }, '*'));
+          break;
         case 'criteria_generar':
           api.criteria.generar(msg.payload || {})
             .then((r) => win?.postMessage({ __coop: true, type: 'criteria_resultado', resultado: r }, '*'))
