@@ -7887,6 +7887,93 @@ async function boot() {
     return h;
   }
 
+  /* ===== Mapa de la localidad (02/08): la Figura 1 de los planes reales.
+     Teselas satelitales públicas (Esri World Imagery) cosidas en canvas +
+     marcadores de zonas/fuentes con GPS. Sin claves ni servicios pagos. */
+  function parseCoord(str) {
+    if (!str) return null;
+    str = String(str).trim();
+    // Decimal: "-31.68, -62.01" o "-31.68 -62.01"
+    var m = str.match(/(-?\d{1,3}(?:[.,]\d+)?)[\s,;]+(-?\d{1,3}(?:[.,]\d+)?)$/);
+    if (m) {
+      var la = parseFloat(m[1].replace(",", ".")), lo = parseFloat(m[2].replace(",", "."));
+      if (Math.abs(la) <= 90 && Math.abs(lo) <= 180) return { lat: la, lon: lo };
+    }
+    // DMS: 36°5'6.55"S 57°48'35.17"O
+    var dms = /(\d{1,3})°\s*(\d{1,2})?'?\s*([\d.]+)?"?\s*([NSEOW])/gi, res = [], k;
+    while ((k = dms.exec(str))) {
+      var val = Number(k[1]) + Number(k[2] || 0) / 60 + Number(k[3] || 0) / 3600;
+      if (/[SO W]/i.test(k[4]) && k[4].toUpperCase() !== "N" && k[4].toUpperCase() !== "E") val = -val;
+      res.push(val);
+    }
+    if (res.length >= 2) return { lat: res[0], lon: res[1] };
+    return null;
+  }
+
+  function puntosGeorreferenciados() {
+    var pts = [];
+    var g = state.project?.general?.gps;
+    if (g && g.lat && g.lon) pts.push({ lat: +g.lat, lon: +g.lon, nombre: "Cliente" });
+    (state.project?.fuentes || []).forEach(function (f) {
+      if (f.gps && f.gps.lat && f.gps.lon) pts.push({ lat: +f.gps.lat, lon: +f.gps.lon, nombre: f.nombre || "Fuente" });
+    });
+    (state.project?.zonas || []).forEach(function (z) {
+      if (z.gps && z.gps.lat && z.gps.lon) pts.push({ lat: +z.gps.lat, lon: +z.gps.lon, nombre: z.nombre || "Zona" });
+    });
+    return pts.filter(function (p2) { return isFinite(p2.lat) && isFinite(p2.lon) && p2.lat !== 0; });
+  }
+
+  function lon2tx(lon, z) { return (lon + 180) / 360 * Math.pow(2, z); }
+  function lat2ty(lat, z) { var r = lat * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z); }
+
+  async function generarMapa() {
+    var d = state.documento; if (!d) return;
+    var centro = null;
+    var manual = parseCoord(d.mapaCentroManual || "");
+    var pts = puntosGeorreferenciados();
+    if (manual) centro = manual;
+    else if (pts.length) {
+      centro = { lat: pts.reduce(function (a, p2) { return a + p2.lat; }, 0) / pts.length, lon: pts.reduce(function (a, p2) { return a + p2.lon; }, 0) / pts.length };
+    }
+    if (!centro) { alert("Necesito una referencia: cargá GPS en alguna zona/fuente del relevamiento, o pegá coordenadas (acepta decimales o 36°5'6\"S 57°48'35\"O)."); return; }
+    var zoom = Math.max(11, Math.min(17, Number(d.mapaZoom) || 14));
+    var CW = 1024, CH = 640, T = 256;
+    var cx = lon2tx(centro.lon, zoom) * T, cy = lat2ty(centro.lat, zoom) * T;
+    var x0 = cx - CW / 2, y0 = cy - CH / 2;
+    var canvas = document.createElement("canvas"); canvas.width = CW; canvas.height = CH;
+    var ctx = canvas.getContext("2d");
+    var t0x = Math.floor(x0 / T), t0y = Math.floor(y0 / T), t1x = Math.floor((x0 + CW) / T), t1y = Math.floor((y0 + CH) / T);
+    var cargas = [];
+    for (var tx = t0x; tx <= t1x; tx++) for (var ty = t0y; ty <= t1y; ty++) {
+      (function (tx2, ty2) {
+        cargas.push(new Promise(function (res) {
+          var img = new Image(); img.crossOrigin = "anonymous";
+          img.onload = function () { ctx.drawImage(img, tx2 * T - x0, ty2 * T - y0); res(true); };
+          img.onerror = function () { res(false); };
+          img.src = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" + zoom + "/" + ty2 + "/" + tx2;
+        }));
+      })(tx, ty);
+    }
+    var oks = await Promise.all(cargas);
+    if (!oks.some(Boolean)) { alert("No se pudieron descargar las imágenes satelitales (¿hay internet?)."); return; }
+    // Marcadores con etiqueta
+    if (d.mapaMarcadores !== false) {
+      pts.forEach(function (p2) {
+        var mx = lon2tx(p2.lon, zoom) * T - x0, my = lat2ty(p2.lat, zoom) * T - y0;
+        if (mx < 0 || my < 0 || mx > CW || my > CH) return;
+        ctx.fillStyle = "#e11d48"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(mx, my, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.font = "bold 15px Arial"; ctx.lineWidth = 4; ctx.strokeStyle = "rgba(255,255,255,.95)";
+        ctx.strokeText(p2.nombre, mx + 11, my + 5); ctx.fillStyle = "#111"; ctx.fillText(p2.nombre, mx + 11, my + 5);
+      });
+    }
+    ctx.font = "11px Arial"; ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.fillRect(CW - 235, CH - 18, 235, 18);
+    ctx.fillStyle = "#333"; ctx.fillText("Imágenes: Esri World Imagery (Maxar)", CW - 228, CH - 5);
+    d.mapa = canvas.toDataURL("image/jpeg", 0.88);
+    d.mapaCentro = centro; d.mapaZoom = zoom;
+    emitirSnapshot(); pintar();
+  }
+
   function renderDocumento() {
     var d = state.documento;
     var h = "<div class='cw-head'><b>📕 Documento del proyecto</b><span class='cw-meta'>Editá lo que haga falta y generá el PDF las veces que quieras (antes, durante o después de la reunión con el cliente).</span></div>";
@@ -7902,6 +7989,14 @@ async function boot() {
       Object.keys(TIPOS_CLIENTE).map(function (k) { return "<option value='" + k + "' " + (((d.tipoCliente || "cooperativa") === k) ? "selected" : "") + ">" + TIPOS_CLIENTE[k].etiqueta + "</option>"; }).join("") + "</select>";
     h += "<div class='cw-sec'>Título del proyecto</div><input type='text' value='" + esc(d.tituloProyecto) + "' data-doctitulo style='width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:7px 9px;font-size:14px;font-weight:600'>";
     h += "<label style='display:flex;gap:6px;align-items:center;margin:10px 0;font-size:13px'><input type='checkbox' data-docfotos " + (d.incluirFotos ? "checked" : "") + "> Incluir las fotos seleccionadas del relevamiento (con sus epígrafes) en la sección Relevamiento</label>";
+    h += "<div style='border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin:10px 0'>" +
+      "<div style='font-weight:600;margin-bottom:6px'>🗺 Mapa de la localidad <small style='font-weight:400;color:#64748b'>(Figura 1, va después del Objetivo)</small></div>" +
+      (d.mapa ? "<img src='" + d.mapa + "' style='width:100%;max-width:520px;border-radius:9px;display:block;margin-bottom:8px'>" : "<p class='cw-meta' style='margin:0 0 8px'>Todavía sin mapa. Se centra solo con los GPS del relevamiento (" + puntosGeorreferenciados().length + " puntos) o pegá coordenadas.</p>") +
+      "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>" +
+      "<input type='text' placeholder='Opcional: centro manual (-31.68, -62.01 o 36°5\'6&quot;S 57°48\'35&quot;O)' value='" + esc(d.mapaCentroManual || "") + "' data-docmapacentro style='flex:1;min-width:230px;border:1px solid #cbd5e1;border-radius:7px;padding:6px 9px;font-size:12px'>" +
+      "<label style='font-size:12px'>Zoom <input type='number' min='11' max='17' value='" + (d.mapaZoom || 14) + "' data-docmapazoom style='width:56px;border:1px solid #cbd5e1;border-radius:7px;padding:5px'></label>" +
+      "<label style='font-size:12px;display:flex;gap:4px;align-items:center'><input type='checkbox' data-docmapamarc " + (d.mapaMarcadores !== false ? "checked" : "") + "> Marcadores</label>" +
+      "<button class='cw-btn' data-cwact='doc_mapa'>" + (d.mapa ? "↻ Regenerar mapa" : "🗺 Generar mapa") + "</button></div></div>";
     d.secciones.forEach(function (sec, i) {
       h += "<div style='border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin:10px 0" + (sec.incluir ? "" : ";opacity:.5") + "'>" +
         "<div style='display:flex;gap:8px;align-items:center'><input type='checkbox' data-docinc='" + i + "' " + (sec.incluir ? "checked" : "") + ">" +
@@ -7926,15 +8021,30 @@ async function boot() {
       var doc = new jsPDF({ unit: "mm", format: "a4" });
       var W = 210, H = 297, MX = 22, MT = 34, MB = 22, y = MT;
       var indice = []; // { titulo, pagina }
+      async function cargarImg(url) {
+        try {
+          var r = await fetch(url); if (!r.ok) return null;
+          var b = await r.blob();
+          return await new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = function () { res(null); }; fr.readAsDataURL(b); });
+        } catch (e) { return null; }
+      }
+      var marcaCoop = await cargarImg("marca_coopmorteros.png");
+      var marcaTech = await cargarImg("marca_cooptech.png");
 
       function marco() {
         doc.setFillColor(21, 44, 84); doc.rect(0, 0, W, 20, "F");
+        var tx = MX;
+        if (marcaTech) { try { doc.addImage(marcaTech, "PNG", MX, 4, 12, 12); tx = MX + 15; } catch (e) { } }
         doc.setTextColor(255); doc.setFontSize(13); doc.setFont("helvetica", "bold");
-        doc.text("CoopTech", MX, 12);
+        doc.text("CoopTech", tx, 11);
         doc.setFontSize(6.5); doc.setFont("helvetica", "normal");
-        doc.text("S O L U C I O N E S   4 . 0", MX, 16.5);
-        doc.setTextColor(30); doc.setFontSize(9); doc.setFont("helvetica", "bold");
-        doc.text("COOPMORTEROS", MX, H - 10);
+        doc.text("S O L U C I O N E S   4 . 0", tx, 15.5);
+        if (marcaCoop) {
+          try { var pr = doc.getImageProperties(marcaCoop); var lw = 34; doc.addImage(marcaCoop, "PNG", MX, H - 8 - lw * pr.height / pr.width, lw, lw * pr.height / pr.width); } catch (e) { }
+        } else {
+          doc.setTextColor(30); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+          doc.text("COOPMORTEROS", MX, H - 10);
+        }
         doc.setFont("helvetica", "normal"); doc.setTextColor(30);
       }
       function nuevaPagina() { doc.addPage(); marco(); y = MT; }
@@ -7955,7 +8065,16 @@ async function boot() {
       var tit = doc.splitTextToSize("Proyecto: " + d.tituloProyecto, W - MX * 2);
       doc.text(tit, MX, y); y += tit.length * 8 + 6;
       doc.setFont("helvetica", "normal");
-      if (d.logoCliente) { try { doc.addImage(d.logoCliente, "JPEG", W / 2 - 22, y, 44, 0); y += 40; } catch (e) { try { doc.addImage(d.logoCliente, "PNG", W / 2 - 22, y, 44, 0); y += 40; } catch (e2) { /* */ } } }
+      if (d.logoCliente) {
+        try {
+          var fmtL = d.logoCliente.indexOf("image/png") >= 0 ? "PNG" : "JPEG";
+          var prL = doc.getImageProperties(d.logoCliente);
+          var lwL = 46, lhL = lwL * prL.height / prL.width;
+          if (lhL > 34) { lhL = 34; lwL = lhL * prL.width / prL.height; }
+          doc.addImage(d.logoCliente, fmtL, (W - lwL) / 2, y + 2, lwL, lhL);
+          y += lhL + 14; // respiro real: el Objetivo arranca DESPUÉS del logo
+        } catch (e) { /* logo ilegible: se omite */ }
+      }
 
       // --- Secciones ---
       var secciones = d.secciones.filter(function (x) { return x.incluir && (x.vista || "ambas") !== "cliente"; });
@@ -7990,7 +8109,7 @@ async function boot() {
               doc.addImage(img, "JPEG", (W - iw) / 2, y, iw, ih); y += ih + 4;
               if (fotos[fi].caption) {
                 doc.setFontSize(8.5); doc.setFont("helvetica", "italic"); doc.setTextColor(90);
-                var cap = doc.splitTextToSize("Figura " + (fi + 1) + ": " + fotos[fi].caption, W - MX * 2);
+                var cap = doc.splitTextToSize("Figura " + (fi + (d.mapa ? 2 : 1)) + ": " + fotos[fi].caption, W - MX * 2);
                 cap.forEach(function (ln) { doc.text(ln, W / 2, y, { align: "center" }); y += 4; });
                 doc.setTextColor(30); doc.setFont("helvetica", "normal"); doc.setFontSize(10.5);
               }
@@ -7999,6 +8118,17 @@ async function boot() {
           }
         }
         y += 6;
+        if (sec.id === "objetivo" && d.mapa) {
+          try {
+            var prM = doc.getImageProperties(d.mapa);
+            var mw = 150, mh = mw * prM.height / prM.width;
+            espacio(mh + 16);
+            doc.addImage(d.mapa, "JPEG", (W - mw) / 2, y, mw, mh); y += mh + 4;
+            doc.setFontSize(8.5); doc.setFont("helvetica", "italic"); doc.setTextColor(90);
+            doc.text("Figura 1: Mapa de la localidad — " + ((window.__coopLeadMeta && window.__coopLeadMeta.razon) || ""), W / 2, y, { align: "center" });
+            doc.setTextColor(30); doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); y += 8;
+          } catch (eM) { /* mapa ilegible */ }
+        }
       }
 
       // --- Contenido (segunda pasada): página 2, corrigiendo numeración ---
@@ -8090,6 +8220,9 @@ async function boot() {
     else if (t.hasAttribute("data-doccuerpo")) docSet(Number(t.getAttribute("data-doccuerpo")), "cuerpo", t.value);
     else if (t.hasAttribute("data-docinc")) docSet(Number(t.getAttribute("data-docinc")), "incluir", t.checked);
     else if (t.hasAttribute("data-docvista")) docSet(Number(t.getAttribute("data-docvista")), "vista", t.value);
+    else if (t.hasAttribute("data-docmapacentro")) docSet(-1, "mapaCentroManual", t.value);
+    else if (t.hasAttribute("data-docmapazoom")) docSet(-1, "mapaZoom", Number(t.value));
+    else if (t.hasAttribute("data-docmapamarc")) docSet(-1, "mapaMarcadores", t.checked);
     else if (t.hasAttribute("data-doclogo") && t.files && t.files[0]) {
       var fr = new FileReader();
       fr.onload = function () { reescalar(fr.result, 500).then(function (chico) { docSet(-1, "logoCliente", chico || fr.result); pintar(); }); };
@@ -8489,6 +8622,7 @@ async function boot() {
     if (act === "documento") abrirDocumento();
     if (act === "doc_volver") { cw.docAbierto = false; pintar(); }
     if (act === "doc_recomponer") { if (confirm("¿Recomponer el documento desde CriterIA y el relevamiento? Se pierden las ediciones manuales de las secciones.")) { armarDocumento(); pintar(); } }
+    if (act === "doc_mapa") { e.target.disabled = true; e.target.textContent = "Descargando teselas…"; generarMapa().finally(function () { }); }
     if (act === "doc_pdf") exportarDocumentoPDF(e.target);
     if (act === "doc_presentar") { cw.presentando = true; pintar(); }
     if (act === "pres_salir") { cw.presentando = false; pintar(); }
