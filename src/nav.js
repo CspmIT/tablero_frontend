@@ -2,8 +2,7 @@
 // `roles`: si está, sólo esos tipos ven el ítem por defecto; si falta, todos.
 // El panel de Configuración puede otorgar (extra) u ocultar (ocultas) solapas
 // por usuario, por encima de estos defaults.
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet, Sparkles, BarChart3, Lightbulb, Settings } from 'lucide-react';
-import IconoTecnico from './components/IconoTecnico.jsx';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet, Sparkles, BarChart3, Lightbulb, Settings, Wrench } from 'lucide-react';
 
 export const MODULOS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true, roles: ['manager', 'gerencial'] },
@@ -14,7 +13,7 @@ export const MODULOS = [
   { id: 'objetivos', label: 'Objetivos', icon: Target, listo: true },
   { id: 'asistente', label: 'Asistente IA', icon: Sparkles, listo: true },
   { id: 'deseos', label: 'Mis deseos', icon: Lightbulb, listo: true },
-  { id: 'visitas', label: 'Visitas técnicas', icon: IconoTecnico, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
+  { id: 'visitas', label: 'Campo', icon: Wrench, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
 ];
 
 // Agrupados bajo "Información adicional".

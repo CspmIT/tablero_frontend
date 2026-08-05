@@ -22,7 +22,7 @@ import Analisis from './modules/Analisis.jsx';
 import Deseos from './modules/Deseos.jsx';
 import Configuracion from './modules/Configuracion.jsx';
 import { MODULOS, INFO, CONFIGURACION } from './nav.js';
-import VisitasTecnicas from './modules/VisitasTecnicas.jsx';
+import Campo from './modules/Campo.jsx';
 import MiMes from './modules/MiMes.jsx';
 
 // Navegación: definida en src/nav.js (compartida con el panel de permisos).
@@ -55,7 +55,7 @@ function Contenido({ activo }) {
   if (activo === 'asistente') return <Asistente />;
   if (activo === 'analisis') return <Analisis />;
   if (activo === 'deseos') return <Deseos />;
-  if (activo === 'visitas') return <VisitasTecnicas />;
+  if (activo === 'visitas') return <Campo />;
   if (activo === 'configuracion') return <Configuracion />;
   if (activo === 'importar') return <Importar />;
   if (activo === 'importar_grilla') return <ImportarGrilla />;
