@@ -4693,7 +4693,7 @@ function renderEditor() {
         </div>
         ${renderTree()}
         <div class="sidebar-footer">
-          <button class="btn btn-sm" data-action="go-preview">Vista previa</button>
+
           <button class="btn btn-sm" data-action="go-home">Inicio</button>
         </div>
       </aside>
@@ -4790,7 +4790,8 @@ function renderTree() {
   // Secciones genéricas
   html += nodeRow("secciones", "📄", "Secciones genéricas");
   // Preview
-  html += nodeRow("preview", "👁", "Vista previa del informe");
+  // Vista previa del informe OCULTA (02/08): el documento oficial es el
+  // "Documento del proyecto" de CriterIA — dos modos confundían en campo.
 
   html += `</div>`;
   return html;
@@ -7577,9 +7578,14 @@ async function boot() {
       if (cw.preguntas === null) return h + "<button class='cw-btn pri' data-cwact='preguntas'>Pedir preguntas a CriterIA</button>";
       if (!cw.preguntas.length) return h + "<p style='color:#059669'>✓ CriterIA no encontró nada crítico que preguntar. Adelante.</p>";
       return h + cw.preguntas.map(function (p, i) {
+        var nFotos = (cw.fotosPregunta && cw.fotosPregunta[i]) || 0;
         return "<div class='cw-preg'><b>" + (i + 1) + ". " + esc(p.pregunta) + "</b>" +
           "<div class='cw-meta'>" + esc(p.por_que_importa || "") + (p.como_responderla ? " · <i>" + esc(p.como_responderla) + "</i>" : "") + "</div>" +
-          "<textarea rows='2' data-cwresp='" + i + "' placeholder='Respuesta (texto; podés dejarla vacía)'>" + esc(cw.respuestas[i] || "") + "</textarea></div>";
+          "<textarea rows='2' data-cwresp='" + i + "' placeholder='Respuesta (texto; podés dejarla vacía)'>" + esc(cw.respuestas[i] || "") + "</textarea>" +
+          "<div style='display:flex;gap:8px;margin-top:6px;align-items:center'>" +
+          "<label class='cw-btn' style='cursor:pointer'>📷 Foto" + (nFotos ? " (" + nFotos + ")" : "") + "<input type='file' accept='image/*' data-cwfotoq='" + i + "' style='display:none'></label>" +
+          "<button class='cw-btn' data-cwgpsq='" + i + "'>📍 Ubicación</button>" +
+          "<span class='cw-meta'>La evidencia entra al relevamiento y viaja a CriterIA, sin salir de acá.</span></div></div>";
       }).join("");
     }
     if (cw.paso === 4) {
@@ -8194,6 +8200,27 @@ async function boot() {
     cargarThumbs();
   }
 
+  // Evidencia EN la pregunta (02/08): la foto entra al pool del relevamiento
+  // (scope general), queda SELECCIONADA con epígrafe automático y suma al
+  // payload de CriterIA; la ubicación se anexa a la respuesta como texto.
+  document.addEventListener("change", function (ev2) {
+    var t2 = ev2.target;
+    if (!t2.hasAttribute || !t2.hasAttribute("data-cwfotoq") || !t2.files || !t2.files[0]) return;
+    var qi = Number(t2.getAttribute("data-cwfotoq"));
+    savePhoto(t2.files[0]).then(function (meta) {
+      var g = state.project.general = state.project.general || {};
+      if (!g.photos) g.photos = [];
+      g.photos.push(meta);
+      var pregunta = (cw.preguntas[qi] && cw.preguntas[qi].pregunta) || "";
+      var epigrafe = "Respuesta a pregunta " + (qi + 1) + (pregunta ? ": " + pregunta.slice(0, 70) : "");
+      meta.caption = meta.caption || epigrafe;
+      cw.fotos.push({ id: meta.id, sel: true, caption: epigrafe, is_sketch: false });
+      cw.fotosPregunta = cw.fotosPregunta || {};
+      cw.fotosPregunta[qi] = (cw.fotosPregunta[qi] || 0) + 1;
+      emitirSnapshot(); pintar();
+    }).catch(function () { alert("No se pudo guardar la foto"); });
+  });
+
   // Edición del Documento del proyecto: delegado global de cambios.
   document.addEventListener("change", function (ev) {
     var t = ev.target; var d = state.documento;
@@ -8253,7 +8280,7 @@ async function boot() {
     });
     orden.push({ id: "necesidades", label: "Necesidades del cliente" });
     orden.push({ id: "etapas", label: "Etapas del proyecto" });
-    orden.push({ id: "preview", label: "Vista previa del informe" });
+    // preview retirado del recorrido (02/08): el cierre es CriterIA → Documento.
     return orden;
   }
 
@@ -8622,6 +8649,18 @@ async function boot() {
     if (act === "documento") abrirDocumento();
     if (act === "doc_volver") { cw.docAbierto = false; pintar(); }
     if (act === "doc_recomponer") { if (confirm("¿Recomponer el documento desde CriterIA y el relevamiento? Se pierden las ediciones manuales de las secciones.")) { armarDocumento(); pintar(); } }
+    var gq = e.target.closest("[data-cwgpsq]");
+    if (gq) {
+      var qi2 = Number(gq.getAttribute("data-cwgpsq"));
+      if (!navigator.geolocation) { alert("Este dispositivo no expone ubicación."); return; }
+      gq.textContent = "📍 Obteniendo…";
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        var lat = pos.coords.latitude.toFixed(6), lon = pos.coords.longitude.toFixed(6);
+        cw.respuestas[qi2] = ((cw.respuestas[qi2] || "").trim() + " (ubicación: " + lat + ", " + lon + ")").trim();
+        pintar();
+      }, function () { gq.textContent = "📍 Ubicación"; alert("No se pudo obtener la ubicación (permiso o señal)."); }, { enableHighAccuracy: true, timeout: 12000 });
+      return;
+    }
     if (act === "doc_mapa") { e.target.disabled = true; e.target.textContent = "Descargando teselas…"; generarMapa().finally(function () { }); }
     if (act === "doc_pdf") exportarDocumentoPDF(e.target);
     if (act === "doc_presentar") { cw.presentando = true; pintar(); }
