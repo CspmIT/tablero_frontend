@@ -32,7 +32,25 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
     tags: Array.isArray(reunion?.tags) ? reunion.tags : [],
     tagInput: '',
     notas: '',
+    emailsExternos: Array.isArray(reunion?.emailsExternos) ? reunion.emailsExternos : [],
+    emailInput: '',
+    buscarCol: '',
+    finTocado: !!reunion, // al editar, respetar el fin existente
   }));
+  // Carola 04/08: "Desde" arrastra "Hasta" a +1 hora (editable: si tocás el
+  // fin a mano, deja de seguirte).
+  const setDesde = (hi) => {
+    setF((s2) => {
+      const [h, m] = hi.split(':').map(Number);
+      const fin = `${String(Math.min(23, h + 1)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      return { ...s2, horaInicio: hi, horaFin: s2.finTocado ? s2.horaFin : fin };
+    });
+  };
+  const agregarEmail = (raw) => {
+    const e = String(raw || '').trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return;
+    setF((s2) => s2.emailsExternos.includes(e) ? { ...s2, emailInput: '' } : { ...s2, emailsExternos: [...s2.emailsExternos, e].slice(0, 10), emailInput: '' });
+  };
   // Autocompletado de etiquetas: mismo catálogo completo de la grilla.
   const [sugerencias, setSugerencias] = useState([]);
   useEffect(() => {
@@ -66,13 +84,13 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
         r = await api.reuniones.update(reunion.id, {
           titulo: esCliente ? undefined : f.titulo.trim(),
           fecha: f.fecha, horaInicio: f.horaInicio, horaFin: f.horaFin,
-          colaboradoresIds: f.ids, lugar: lugarFinal, tags: f.tags,
+          colaboradoresIds: f.ids, lugar: lugarFinal, tags: f.tags, emailsExternos: f.emailsExternos,
         });
       } else {
         r = await api.reuniones.create({
           titulo: f.titulo.trim(), fecha: f.fecha, horaInicio: f.horaInicio, horaFin: f.horaFin,
           modalidad: f.modalidad, lugar: lugarFinal, colaboradoresIds: f.ids,
-          tags: f.tags, notas: f.notas.trim() || null,
+          tags: f.tags, notas: f.notas.trim() || null, emailsExternos: f.emailsExternos,
         });
       }
       if (r.graphError) alert(`Guardado, pero Outlook avisó un problema: ${r.graphError}`);
@@ -109,12 +127,12 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
             </div>
             <div>
               <label className="block text-sm text-slate-600 mb-1">Desde</label>
-              <input type="time" value={f.horaInicio} onChange={(e) => setF({ ...f, horaInicio: e.target.value })}
+              <input type="time" value={f.horaInicio} onChange={(e) => setDesde(e.target.value)}
                 className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             </div>
             <div>
               <label className="block text-sm text-slate-600 mb-1">Hasta</label>
-              <input type="time" value={f.horaFin} onChange={(e) => setF({ ...f, horaFin: e.target.value })}
+              <input type="time" value={f.horaFin} onChange={(e) => setF({ ...f, horaFin: e.target.value, finTocado: true })}
                 className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             </div>
           </div>
@@ -150,8 +168,10 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
 
           <div>
             <label className="block text-sm text-slate-600 mb-1">Participantes</label>
+            <input value={f.buscarCol} onChange={(e) => setF({ ...f, buscarCol: e.target.value })}
+              placeholder="Buscar colaborador…" className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm mb-1.5" />
             <div className="border border-slate-200 rounded-lg p-2 max-h-44 overflow-y-auto space-y-1">
-              {activos.map((c) => (
+              {activos.filter((c) => !f.buscarCol.trim() || (c.nombre || '').toLowerCase().includes(f.buscarCol.trim().toLowerCase()) || f.ids.includes(c.id)).map((c) => (
                 <label key={c.id} className={`flex items-center gap-2 text-sm px-1.5 py-1 rounded ${c.id === organizadorId ? 'text-slate-400' : 'hover:bg-slate-50 cursor-pointer'}`}>
                   <input type="checkbox" checked={f.ids.includes(c.id)} disabled={c.id === organizadorId}
                     onChange={() => toggle(c.id)} className="w-4 h-4" />
@@ -159,6 +179,24 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
                 </label>
               ))}
             </div>
+            <label className="block text-sm text-slate-600 mt-2 mb-1">Invitados externos (por mail)</label>
+            {f.emailsExternos.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {f.emailsExternos.map((em) => (
+                  <span key={em} className="inline-flex items-center gap-1 text-xs bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5">
+                    ✉ {em}
+                    <button onClick={() => setF({ ...f, emailsExternos: f.emailsExternos.filter((x) => x !== em) })} className="hover:text-red-500">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <input value={f.emailInput}
+              onChange={(e) => setF({ ...f, emailInput: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',' || e.key === ' ') { e.preventDefault(); agregarEmail(f.emailInput); } }}
+              onBlur={() => agregarEmail(f.emailInput)}
+              placeholder="mail@cliente.com (Enter para agregar; hasta 10)"
+              className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+            <p className="text-[11px] text-slate-400 mt-1">Para equipos del cliente con varios mails: reciben la invitación de Outlook/Teams como cualquier participante.</p>
           </div>
 
           <div>

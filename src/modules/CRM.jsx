@@ -18,8 +18,9 @@ const ETAPAS = [
   { id: 'trial', label: 'Trial' },
   { id: 'ganado', label: 'Ganado' },
   { id: 'perdido', label: 'Perdido' },
+  { id: 'declinado', label: 'Declinado' },
 ];
-const PRODUCTOS = ['+Agua', 'Reconecta', 'Centinela', 'CoopCloud', 'Cooptech (consultoría)', 'Otro'];
+const PRODUCTOS_DEFAULT = ['+Agua', 'Reconecta', 'Centinela', 'CoopCloud', 'Call Center', 'Antivirus ESET', 'Cooptech (consultoría)', 'Otro'];
 const FUENTES = ['Referido', 'Evento', 'Web', 'Pauta Paga', 'Llamada en frío', 'Recomendación', 'Otro'];
 // Catálogo de próximas acciones (pedido de Carola). "Otra" habilita texto libre.
 const PROX_ACCIONES = [
@@ -30,7 +31,7 @@ const PROX_ACCIONES = [
 const TIPOS_ACT = [{ v: 'visita', label: 'Visita' }, { v: 'videollamada', label: 'Videollamada' }, { v: 'evento', label: 'Evento' }];
 
 const leadVacio = {
-  organizacion: '', contactoNombre: '', telefono: '', email: '', ciudad: '', fechaPrimerContacto: '',
+  organizacion: '', contactoNombre: '', cargo: '', telefono: '', email: '', ciudad: '', fechaPrimerContacto: '',
   productos: [], valorEstimadoUsd: '', esEvento: false, cantidadEquipos: '', equiposDetalle: '', ownerId: '',
   etapa: 'contacto', fuente: '', fuenteOtra: '', proximaAccion: '', proximaAccionFecha: '', notas: '',
   trialVence: '', trialNotas: '', motivoPerdido: '', montoFacturadoUsd: '',
@@ -83,6 +84,13 @@ export default function CRM() {
   const [periodo, setPeriodo] = useState('acumulado');
   const [dimFecha, setDimFecha] = useState('contacto');
   const [showMetricas, setShowMetricas] = useState(false);
+  const [productosCat, setProductosCat] = useState(PRODUCTOS_DEFAULT);
+  const [menuAcciones, setMenuAcciones] = useState(false);
+  const [productosOpen, setProductosOpen] = useState(false);
+  const [vistaCuentas, setVistaCuentas] = useState(false);
+  useEffect(() => {
+    api.leads.productosCatalogo().then((r) => { if (Array.isArray(r?.productos) && r.productos.length) setProductosCat(r.productos); }).catch(() => {});
+  }, [api]);
   const [presupCtx, setPresupCtx] = useState(null); // { tipo, modo, lead }
   // Datos de facturación: viven en el Cliente, no en el lead. `fact` refleja la
   // ficha (prellenada al abrir); `factOpen` es el tilde que despliega los campos.
@@ -205,8 +213,13 @@ export default function CRM() {
   const strOrNull = (v) => (v ? v : null);
   const guardar = async () => {
     if (!form.organizacion.trim()) { alert('La organización es obligatoria'); return; }
+    // Obligatorios (Carola 04/08): sin producto, fuente y responsable, el CRM
+    // pierde las métricas por las que existe.
+    if (!(form.productos || []).length) { alert('Elegí al menos un producto de interés'); return; }
+    if (!form.fuente) { alert('Indicá la fuente del lead'); return; }
+    if (!form.ownerId) { alert('Asigná un responsable'); return; }
     const payload = {
-      organizacion: form.organizacion.trim(), contactoNombre: strOrNull(form.contactoNombre), telefono: strOrNull(form.telefono),
+      organizacion: form.organizacion.trim(), contactoNombre: strOrNull(form.contactoNombre), cargo: strOrNull(form.cargo), telefono: strOrNull(form.telefono),
       email: strOrNull(form.email), ciudad: strOrNull(form.ciudad), fechaPrimerContacto: strOrNull(form.fechaPrimerContacto),
       productos: form.productos, valorEstimadoUsd: numOrNull(form.valorEstimadoUsd), esEvento: !!form.esEvento, cantidadEquipos: numOrNull(form.cantidadEquipos),
       equiposDetalle: strOrNull(form.equiposDetalle), ownerId: numOrNull(form.ownerId), etapa: form.etapa,
@@ -237,7 +250,7 @@ export default function CRM() {
     setForm({
       ...leadVacio, ...l, productos: l.productos || [], valorEstimadoUsd: l.valorEstimadoUsd ?? '', esEvento: !!l.esEvento, cantidadEquipos: l.cantidadEquipos ?? '',
       ownerId: l.ownerId ?? '', equiposDetalle: l.equiposDetalle || '', fuente: l.fuente || '', fuenteOtra: l.fuenteOtra || '',
-      proximaAccion: l.proximaAccion || '', notas: l.notas || '', trialNotas: l.trialNotas || '', motivoPerdido: l.motivoPerdido || '',
+      cargo: l.cargo || '', proximaAccion: l.proximaAccion || '', notas: l.notas || '', trialNotas: l.trialNotas || '', motivoPerdido: l.motivoPerdido || '',
       montoFacturadoUsd: l.montoFacturadoUsd ?? '', presupuestoLink: l.presupuestoLink || '',
       fechaPrimerContacto: dstr(l.fechaPrimerContacto), proximaAccionFecha: dstr(l.proximaAccionFecha), trialVence: dstr(l.trialVence),
       presupuestoEnviadoFecha: dstr(l.presupuestoEnviadoFecha), presupuestoAprobadoFecha: dstr(l.presupuestoAprobadoFecha),
@@ -330,7 +343,7 @@ export default function CRM() {
   if (cargando) return <p className="text-slate-500">Cargando CRM…</p>;
   if (error) return <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">{error}</div>;
 
-  const colColor = (id) => (id === 'ganado' ? 'bg-emerald-50' : id === 'perdido' ? 'bg-slate-200' : 'bg-slate-100');
+  const colColor = (id) => (id === 'ganado' ? 'bg-emerald-50' : (id === 'perdido' || id === 'declinado') ? 'bg-slate-200' : 'bg-slate-100');
   const visibles = (etId) => leadsBase.filter((l) => l.etapa === etId
     && (!filtroOwner || l.ownerId === Number(filtroOwner))
     && coincideBusqueda(l, busqueda));
@@ -353,19 +366,37 @@ export default function CRM() {
           </select>
           <button onClick={() => setShowMetricas(true)} className="border border-slate-200 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-50">Métricas</button>
           <button onClick={togglePerdidos} className="border border-slate-200 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-50">
-            {mostrarPerdidos ? 'Ocultar perdidos' : 'Mostrar perdidos'}
+            {mostrarPerdidos ? 'Ocultar perdidos/declinados' : 'Mostrar perdidos/declinados'}
           </button>
-          <button onClick={() => setImportOpen(true)} className="border border-slate-200 text-slate-600 text-sm font-medium px-3 py-2 rounded-lg hover:bg-slate-50">Importar de Kommo</button>
+          <button onClick={() => setVistaCuentas((v) => !v)}
+            className={`border text-sm px-3 py-2 rounded-lg ${vistaCuentas ? 'border-coop-azul text-coop-azul bg-coop-azul/5 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+            {vistaCuentas ? 'Embudo' : 'Cuentas'}
+          </button>
           <button onClick={() => setForm({ ...leadVacio })} className="bg-coop-naranja text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">+ Lead</button>
-          {me?.tipo === 'manager' && (
-            <button onClick={() => setGraphOpen(true)} title="Integración Outlook/Teams"
+          <div className="relative">
+            <button onClick={() => setMenuAcciones((v) => !v)} title="Acciones del CRM"
               className="relative p-2 rounded-lg text-slate-400 hover:text-coop-azul hover:bg-slate-100">
               <Settings size={18} />
               {graphEstado?.configurado && graphEstado?.diasParaVencer != null && graphEstado.diasParaVencer <= 30 && (
                 <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${graphEstado.diasParaVencer < 0 ? 'bg-red-500' : 'bg-amber-400'}`} />
               )}
             </button>
-          )}
+            {menuAcciones && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMenuAcciones(false)} />
+                <div className="absolute right-0 top-10 z-50 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1 text-sm">
+                  {me?.tipo === 'manager' && (
+                    <button onClick={() => { setMenuAcciones(false); setGraphOpen(true); }}
+                      className="w-full text-left px-4 py-2 hover:bg-slate-50">Configurar Outlook/Teams</button>
+                  )}
+                  <button onClick={() => { setMenuAcciones(false); setImportOpen(true); }}
+                    className="w-full text-left px-4 py-2 hover:bg-slate-50">Importar de Kommo</button>
+                  <button onClick={() => { setMenuAcciones(false); setProductosOpen(true); }}
+                    className="w-full text-left px-4 py-2 hover:bg-slate-50">Listado de productos</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -387,8 +418,51 @@ export default function CRM() {
         </div>
       </div>
 
+      {vistaCuentas && (
+        <div className="max-w-3xl">
+          {(() => {
+            const norm2 = (t) => String(t || '').trim().toLowerCase();
+            const grupos = new Map();
+            (leads || []).forEach((l) => {
+              const k = norm2(l.organizacion) || '(sin organización)';
+              if (!grupos.has(k)) grupos.set(k, { nombre: l.organizacion || '(sin organización)', leads: [] });
+              grupos.get(k).leads.push(l);
+            });
+            const cuentas = [...grupos.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
+            const etLabel = (id) => (ETAPAS.find((e) => e.id === id)?.label || id);
+            return cuentas.map((cta) => {
+              const ganados = cta.leads.filter((l) => l.etapa === 'ganado');
+              return (
+                <div key={cta.nombre} className="bg-white border border-slate-200 rounded-xl p-3 mb-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="font-semibold text-slate-800">{cta.nombre}</span>
+                    <span className="text-xs text-slate-400">
+                      {cta.leads.length} oportunidad{cta.leads.length !== 1 ? 'es' : ''}
+                      {ganados.length > 0 && <span className="text-emerald-600 font-medium"> · cliente por {ganados.flatMap((l) => l.productos || []).map((p) => p.nombre || p).join(', ') || 'productos ganados'}</span>}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 space-y-1">
+                    {cta.leads.map((l) => (
+                      <button key={l.id} onClick={() => editar(l)}
+                        className="w-full flex items-center justify-between gap-2 text-left text-sm px-2.5 py-1.5 rounded-lg hover:bg-slate-50 border border-slate-100">
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full shrink-0 ${l.etapa === 'ganado' ? 'bg-emerald-100 text-emerald-700' : (l.etapa === 'perdido' || l.etapa === 'declinado') ? 'bg-slate-200 text-slate-500' : 'bg-coop-azul/10 text-coop-azul'}`}>{etLabel(l.etapa)}</span>
+                          <span className="truncate">{(l.productos || []).map((p) => p.nombre || p).join(' + ') || 'Sin producto'}</span>
+                        </span>
+                        <span className="text-xs text-slate-400 shrink-0">{l.valorEstimadoUsd ? `US$ ${l.valorEstimadoUsd}` : ''}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+          <p className="text-[11px] text-slate-400 mt-2">Las cuentas agrupan todas las oportunidades (activas, ganadas, perdidas y declinadas) por organización. Caso Colonia Caroya: una cuenta, dos leads — Reconecta ganado y Call Center en curso.</p>
+        </div>
+      )}
+      {!vistaCuentas && (
       <div className="flex gap-3 overflow-x-auto pb-3 snap-x snap-mandatory">
-        {ETAPAS.filter((et) => et.id !== 'perdido' || mostrarPerdidos).map((et) => {
+        {ETAPAS.filter((et) => (et.id !== 'perdido' && et.id !== 'declinado') || mostrarPerdidos).map((et) => {
           const items = visibles(et.id);
           return (
             <div key={et.id} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (arrastrando) mover(arrastrando, et.id); setArrastrando(null); }} className={`${colColor(et.id)} rounded-xl p-2 flex-1 min-w-[170px] min-h-[200px] snap-start`}>
@@ -401,7 +475,7 @@ export default function CRM() {
                   <div key={l.id} draggable onDragStart={() => setArrastrando(l.id)} onDragEnd={() => setArrastrando(null)} onClick={() => editar(l)}
                     className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm cursor-pointer">
                     <p className="text-sm font-medium text-slate-800">{l.organizacion}</p>
-                    {l.contactoNombre && <p className="text-xs text-slate-500">{l.contactoNombre}</p>}
+                    {l.contactoNombre && <p className="text-xs text-slate-500">{l.contactoNombre}{l.cargo ? ` · ${l.cargo}` : ''}</p>}
                     {(l.productos || []).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1.5">
                         {l.productos.map((p) => <span key={p} className="text-[10px] px-1.5 py-0.5 rounded bg-coop-azul/10 text-coop-azul">{p}</span>)}
@@ -437,6 +511,35 @@ export default function CRM() {
           );
         })}
       </div>
+      )}
+
+      {productosOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setProductosOpen(false); }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+            <h3 className="font-semibold mb-1">Listado de productos</h3>
+            <p className="text-xs text-slate-500 mb-3">Los productos elegibles en los leads. Se gestionan acá — sin pedir desarrollo.</p>
+            <div className="space-y-1.5 max-h-72 overflow-y-auto mb-3">
+              {productosCat.map((prod, i) => (
+                <div key={prod} className="flex items-center gap-2 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5">
+                  <span className="flex-1">{prod}</span>
+                  <button onClick={() => setProductosCat((ps) => { const a = [...ps]; if (i > 0) { [a[i - 1], a[i]] = [a[i], a[i - 1]]; } return a; })}
+                    className="text-slate-400 hover:text-coop-azul" title="Subir">↑</button>
+                  <button onClick={() => { if (productosCat.length > 1 && confirm(`¿Quitar "${prod}" del catálogo? (los leads que ya lo tienen no se tocan)`)) setProductosCat((ps) => ps.filter((x) => x !== prod)); }}
+                    className="text-slate-400 hover:text-red-500" title="Quitar">×</button>
+                </div>
+              ))}
+            </div>
+            <NuevoProducto onAdd={(nombre) => setProductosCat((ps) => ps.includes(nombre) ? ps : [...ps, nombre])} />
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setProductosOpen(false)} className="px-4 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50">Cancelar</button>
+              <button onClick={async () => {
+                try { const r = await api.leads.guardarProductos(productosCat); setProductosCat(r.productos); setProductosOpen(false); }
+                catch (e) { alert('No se pudo guardar: ' + (e.message || '')); }
+              }} className="px-4 py-2 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90">Guardar catálogo</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Accesos directos a los presupuestadores, sin lead (presupuesto suelto; el PDF se descarga desde la herramienta). */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -456,6 +559,7 @@ export default function CRM() {
               <Campo label="Organización"><Inp v={form.organizacion} on={(v) => up(setForm, 'organizacion', v)} /></Campo>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Campo label="Contacto"><Inp v={form.contactoNombre} on={(v) => up(setForm, 'contactoNombre', v)} /></Campo>
+                <Campo label="Cargo (opcional)"><Inp v={form.cargo} on={(v) => up(setForm, 'cargo', v)} /></Campo>
                 <Campo label="Teléfono"><Inp v={form.telefono} on={(v) => up(setForm, 'telefono', v)} /></Campo>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -465,7 +569,7 @@ export default function CRM() {
               </div>
               <Campo label="Productos de interés">
                 <div className="flex flex-wrap gap-2">
-                  {PRODUCTOS.map((p) => (
+                  {[...new Set([...productosCat, ...(form.productos || [])])].map((p) => (
                     <button key={p} type="button" onClick={() => toggleProducto(p)} className={`text-xs px-2.5 py-1 rounded-full border ${form.productos.includes(p) ? 'bg-coop-azul text-white border-coop-azul' : 'border-slate-300 text-slate-600'}`}>{p}</button>
                   ))}
                 </div>
@@ -973,3 +1077,19 @@ function GraphConfigModal({ api, estado, onClose }) {
 const up = (set, k, v) => set((f) => ({ ...f, [k]: v }));
 function Campo({ label, children }) { return <div><label className="block text-sm text-slate-600 mb-1">{label}</label>{children}</div>; }
 function Inp({ v, on, type = 'text' }) { return <input type={type} value={v} onChange={(e) => on(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />; }
+
+
+// Alta de producto para el catálogo (modal Listado de productos).
+function NuevoProducto({ onAdd }) {
+  const [v, setV] = useState('');
+  const agregar = () => { const n = v.trim(); if (n) { onAdd(n); setV(''); } };
+  return (
+    <div className="flex gap-2">
+      <input value={v} onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') agregar(); }}
+        placeholder="Nuevo producto (p.ej. Antivirus ESET)"
+        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+      <button onClick={agregar} className="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:border-coop-azul">Agregar</button>
+    </div>
+  );
+}
