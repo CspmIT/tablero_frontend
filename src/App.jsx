@@ -24,6 +24,7 @@ import Configuracion from './modules/Configuracion.jsx';
 import { MODULOS, INFO, CONFIGURACION } from './nav.js';
 import Campo from './modules/Campo.jsx';
 import MiMes from './modules/MiMes.jsx';
+import MiDia from './modules/MiDia.jsx';
 
 // Navegación: definida en src/nav.js (compartida con el panel de permisos).
 
@@ -40,6 +41,7 @@ function Contenido({ activo }) {
   if (activo === 'equipo') return <Equipo />;
   if (activo === 'grilla') {
     if (subVista === 'mimes') return <MiMes vista={subVista} setVista={setSubVista} />;
+    if (subVista === 'midia') return <MiDia vista={subVista} setVista={setSubVista} />;
     return subVista === 'misemana'
       ? <MiSemana vista={subVista} setVista={setSubVista} />
       : <Grilla vista={subVista} setVista={setSubVista} />;
