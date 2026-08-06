@@ -352,7 +352,16 @@ export default function CRM() {
     <div>
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
-          <h2 className="text-xl font-semibold text-coop-negro">CRM · Embudo comercial</h2>
+          <div className="inline-flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+            {[['embudo', 'Embudo'], ['cuentas', 'Cuentas']].map(([id, lbl]) => (
+              <button key={id} onClick={() => setVistaCuentas(id === 'cuentas')}
+                className={`text-sm sm:text-base font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors ${
+                  (vistaCuentas ? 'cuentas' : 'embudo') === id ? 'bg-coop-azul text-white' : 'text-slate-500 hover:bg-white'
+                }`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
           <p className="text-sm text-slate-500">Pipeline activo: <span className="font-mono text-emerald-700">{fmtUSD(pipeline)}</span></p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -367,10 +376,6 @@ export default function CRM() {
           <button onClick={() => setShowMetricas(true)} className="border border-slate-200 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-50">Métricas</button>
           <button onClick={togglePerdidos} className="border border-slate-200 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-50">
             {mostrarPerdidos ? 'Ocultar perdidos/declinados' : 'Mostrar perdidos/declinados'}
-          </button>
-          <button onClick={() => setVistaCuentas((v) => !v)}
-            className={`border text-sm px-3 py-2 rounded-lg ${vistaCuentas ? 'border-coop-azul text-coop-azul bg-coop-azul/5 font-medium' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-            {vistaCuentas ? 'Embudo' : 'Cuentas'}
           </button>
           <button onClick={() => setForm({ ...leadVacio })} className="bg-coop-naranja text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">+ Lead</button>
           <div className="relative">
@@ -422,8 +427,15 @@ export default function CRM() {
         <div className="max-w-3xl">
           {(() => {
             const norm2 = (t) => String(t || '').trim().toLowerCase();
+            // El buscador y el filtro de responsable también rigen acá: si
+            // ALGÚN lead de la cuenta matchea, la cuenta aparece COMPLETA
+            // (buscar "caroya" trae "Col. Caroya" Y "Colonia Caroya").
+            const matchean = new Set(
+              (leads || []).filter((l) => coincideBusqueda(l, busqueda) && (!filtroOwner || l.ownerId === Number(filtroOwner)))
+                .map((l) => norm2(l.organizacion) || '(sin organización)')
+            );
             const grupos = new Map();
-            (leads || []).forEach((l) => {
+            (leads || []).filter((l) => matchean.has(norm2(l.organizacion) || '(sin organización)')).forEach((l) => {
               const k = norm2(l.organizacion) || '(sin organización)';
               if (!grupos.has(k)) grupos.set(k, { nombre: l.organizacion || '(sin organización)', leads: [] });
               grupos.get(k).leads.push(l);

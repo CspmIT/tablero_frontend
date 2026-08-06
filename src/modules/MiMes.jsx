@@ -37,6 +37,17 @@ export default function MiMes({ vista = 'mimes', setVista }) {
   // Ola reuniones (16/07): próximas reuniones donde participo, con gestión.
   const [reuniones, setReuniones] = useState([]);
   const [puedoGestionar, setPuedoGestionar] = useState({});
+  const [respOutlook, setRespOutlook] = useState({}); // { [reunionId]: { cargando, lista } }
+  const verRespuestas = async (id) => {
+    if (respOutlook[id] && !respOutlook[id].cargando) { setRespOutlook((m) => { const c = { ...m }; delete c[id]; return c; }); return; }
+    setRespOutlook((m) => ({ ...m, [id]: { cargando: true, lista: [] } }));
+    try {
+      const r = await api.reuniones.respuestasOutlook(id);
+      setRespOutlook((m) => ({ ...m, [id]: { cargando: false, lista: r.respuestas || [], sinOutlook: r.sinOutlook } }));
+    } catch (e) {
+      setRespOutlook((m) => ({ ...m, [id]: { cargando: false, lista: [], error: e.message } }));
+    }
+  };
   const [reunionModal, setReunionModal] = useState(null); // null | { reunion? }
   const cargarReuniones = useCallback(async () => {
     try {
@@ -345,11 +356,36 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                   {r.miRespuesta === 'provisional' && <span className="ml-1.5 text-[11px] text-amber-600">? provisional</span>}
                   {r.miRespuesta === 'rechazada' && <span className="ml-1.5 text-[11px] text-red-500">✗ rechazada</span>}
                 </span>
+                <button onClick={() => verRespuestas(r.id)} title="Respuestas de los invitados (en vivo desde Outlook — incluye externos)"
+                  className="text-xs border border-slate-200 text-slate-500 px-2 py-1 rounded-lg hover:border-coop-azul hover:text-coop-azul shrink-0">
+                  👥 {respOutlook[r.id]?.cargando ? '…' : 'Respuestas'}
+                </button>
                 {puedoGestionar[r.id] && (
                   <span className="flex gap-1.5 shrink-0">
                     <button onClick={() => setReunionModal({ reunion: r })} className="text-xs border border-slate-300 px-2 py-1 rounded-lg hover:border-coop-azul hover:text-coop-azul">Reprogramar</button>
                     <button onClick={() => cancelarReunion(r)} className="text-xs border border-red-200 text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">Cancelar</button>
                   </span>
+                )}
+                {respOutlook[r.id] && !respOutlook[r.id].cargando && (
+                  <div className="w-full mt-1.5 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    {respOutlook[r.id].error && <p className="text-xs text-red-500">{respOutlook[r.id].error}</p>}
+                    {respOutlook[r.id].sinOutlook && <p className="text-xs text-slate-400">Esta reunión no tiene evento de Outlook asociado.</p>}
+                    {(respOutlook[r.id].lista || []).map((a) => (
+                      <div key={a.email} className="flex items-center justify-between gap-2 text-xs py-0.5">
+                        <span className="truncate text-slate-600">{a.nombre || a.email}</span>
+                        <span className={
+                          a.respuesta === 'acepto' ? 'text-emerald-600 font-medium shrink-0' :
+                          a.respuesta === 'rechazo' ? 'text-red-500 font-medium shrink-0' :
+                          a.respuesta === 'tentativo' ? 'text-amber-600 font-medium shrink-0' : 'text-slate-400 shrink-0'
+                        }>
+                          {a.respuesta === 'acepto' ? '✓ aceptó' : a.respuesta === 'rechazo' ? '✗ rechazó' : a.respuesta === 'tentativo' ? '? tentativo' : '· sin respuesta'}
+                        </span>
+                      </div>
+                    ))}
+                    {!respOutlook[r.id].error && !respOutlook[r.id].sinOutlook && (respOutlook[r.id].lista || []).length === 0 && (
+                      <p className="text-xs text-slate-400">Outlook no reporta asistentes para este evento.</p>
+                    )}
+                  </div>
                 )}
               </li>
             ))}

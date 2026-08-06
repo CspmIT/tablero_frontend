@@ -31,6 +31,15 @@ export default function Multivac() {
   const [cmd, setCmd] = useState('');
   const [historial, setHistorial] = useState([]);
   const [histIdx, setHistIdx] = useState(-1);
+  const [atajos, setAtajos] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('cooptech:multivac_atajos')) || ['help', 'login', 'status', 'save']; }
+    catch { return ['help', 'login', 'status', 'save']; }
+  });
+  const [editAtajos, setEditAtajos] = useState(false);
+  const guardarAtajos = (lista) => {
+    setAtajos(lista);
+    try { localStorage.setItem('cooptech:multivac_atajos', JSON.stringify(lista)); } catch { /* */ }
+  };
   const [recetas, setRecetas] = useState(() => {
     try { return JSON.parse(localStorage.getItem('cooptech:multivac_recetas')) || RECETAS_DEFAULT; }
     catch { return RECETAS_DEFAULT; }
@@ -214,6 +223,22 @@ export default function Multivac() {
             ))}
             <div ref={finLog} />
           </div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+            {atajos.map((a) => (
+              <button key={a} onClick={() => conectado && enviarLinea(a)} disabled={!conectado}
+                className="text-xs font-mono border border-slate-300 px-2.5 py-1 rounded-full hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+                {a}
+              </button>
+            ))}
+            <button onClick={() => setEditAtajos((v2) => !v2)} title="Editar accesos rápidos"
+              className="text-xs text-slate-400 hover:text-coop-azul px-1">✎</button>
+          </div>
+          {editAtajos && (
+            <input defaultValue={atajos.join(', ')}
+              onBlur={(e) => { guardarAtajos(e.target.value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 12)); setEditAtajos(false); }}
+              placeholder="Comandos separados por coma (hasta 12)"
+              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono mt-1.5" autoFocus />
+          )}
           <div className="flex gap-2 mt-2">
             <input value={cmd} onChange={(e) => setCmd(e.target.value)}
               onKeyDown={(e) => {

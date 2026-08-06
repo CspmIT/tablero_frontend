@@ -16,6 +16,7 @@ export default function SwitchVista({ vista, setVista }) {
     <div className="inline-flex items-center gap-1 bg-slate-100 rounded-xl p-1">
       {tab('grilla', 'Grilla')}
       {tab('misemana', 'Mi semana')}
+      {tab('midia', 'Mi día')}
       {tab('mimes', 'Mi mes')}
     </div>
   );

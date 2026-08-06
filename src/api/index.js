@@ -115,6 +115,7 @@ export const api = {
     cancelar: (id) => http.del(`/reuniones/${id}`),
     responder: (id, respuesta) => http.post(`/reuniones/${id}/respuesta`, { respuesta }),
     syncOutlook: (desde, hasta) => http.post('/reuniones/sync-outlook', { desde, hasta }),
+    respuestasOutlook: (id) => http.get(`/reuniones/${id}/respuestas-outlook`),
   },
   push: {
     clavePublica: () => http.get('/push/clave-publica'),
