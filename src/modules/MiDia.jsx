@@ -98,7 +98,7 @@ export default function MiDia({ vista, setVista }) {
   const ahoraMin = new Date().getHours() * 60 + new Date().getMinutes();
 
   return (
-    <div className="p-4 max-w-3xl mx-auto" onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+    <div className="p-4" onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <SwitchVista vista={vista} setVista={setVista} />
         <div className="flex items-center gap-1.5">
@@ -109,11 +109,11 @@ export default function MiDia({ vista, setVista }) {
           <button onClick={() => setFecha(fmtISO(new Date()))} className="text-sm border border-slate-200 px-2.5 py-1.5 rounded-lg hover:bg-slate-50">Hoy</button>
         </div>
       </div>
-      <p className="text-xs text-slate-400 mb-2">
+      <p className="text-xs text-slate-400 mb-2 max-w-3xl">
         Arrastrá una reunión para moverla de horario, o estirá desde el borde inferior para cambiar su duración (solo las que organizás). Al soltar, se reprograma en Outlook.
       </p>
 
-      <div ref={contRef} className="relative bg-white border border-slate-200 rounded-xl overflow-hidden select-none"
+      <div ref={contRef} className="relative bg-white border border-slate-200 rounded-xl overflow-hidden select-none max-w-3xl"
         style={{ height: (H_FIN - H_INI) * PX_HORA + 20 }}>
         {horas.map((h) => (
           <div key={h} className="absolute left-0 right-0 border-t border-slate-100 text-[10px] text-slate-400 pl-1"
@@ -164,7 +164,7 @@ export default function MiDia({ vista, setVista }) {
           <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Sin reuniones este día 🎉</p>
         )}
       </div>
-      <p className="text-[11px] text-slate-400 mt-2">Mi día muestra tus reuniones (las tareas de la grilla no tienen horario: viven en la Grilla y Mi semana).</p>
+      <p className="text-[11px] text-slate-400 mt-2 max-w-3xl">Mi día muestra tus reuniones (las tareas de la grilla no tienen horario: viven en la Grilla y Mi semana).</p>
       {editando && (
         <ReunionModal
           reunion={editando}
