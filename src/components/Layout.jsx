@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Menu, X, ClipboardList, ChevronDown, LogOut, MonitorDown } from 'lucide-react';
+import { Menu, X, BarChart3, ChevronDown, LogOut, MonitorDown } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { VERSION } from '../version.js';
 import FotoImg from './FotoImg.jsx';
@@ -8,8 +8,8 @@ import { isTauri } from '../utils/isTauri.js';
 import iconUrl from '../assets/cooptech-icon.png';
 
 // Ítems de navegación compartidos entre el sidebar de escritorio y el drawer móvil.
-// `expandido`: si se muestran las etiquetas. `enMovil`: el grupo "Información
-// adicional" se despliega inline (acordeón) en vez de flyout.
+// `expandido`: si se muestran las etiquetas. `enMovil`: el grupo "Análisis"
+// (ex "Información adicional") se despliega inline (acordeón) en vez de flyout.
 function NavItems({ modulos, infoGrupo, configuracion, activo, onSelect, expandido, enMovil }) {
   const [infoAbierto, setInfoAbierto] = useState(false);
   const infoBtnRef = useRef(null);
@@ -51,12 +51,12 @@ function NavItems({ modulos, infoGrupo, configuracion, activo, onSelect, expandi
       {infoGrupo.length > 0 && (
         <div className="mt-1 border-t border-slate-100 pt-1">
           <button ref={infoBtnRef} onClick={toggleInfo}
-            title={!expandido ? 'Información adicional' : undefined}
+            title={!expandido ? 'Análisis' : undefined}
             className={`w-full flex items-center gap-3 px-5 py-2.5 text-sm relative
               ${infoActivo ? 'text-coop-azul bg-coop-azul/5 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}>
             {infoActivo && <span className="absolute left-0 top-0 bottom-0 w-1 bg-coop-azul rounded-r" />}
-            <ClipboardList size={20} className="shrink-0" />
-            {expandido && <span className="truncate">Información adicional</span>}
+            <BarChart3 size={20} className="shrink-0" />
+            {expandido && <span className="truncate">Análisis</span>}
             {expandido && <ChevronDown size={14} className={`ml-auto transition-transform ${infoAbierto ? 'rotate-180' : ''}`} />}
           </button>
 
