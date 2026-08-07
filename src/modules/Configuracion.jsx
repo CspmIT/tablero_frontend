@@ -3,18 +3,21 @@
 // los ajustes del sistema que antes vivían sueltos en Información adicional
 // (Equipo, Importar datos, Importar grilla).
 import { useEffect, useState, useCallback } from 'react';
-import { Settings, ShieldCheck } from 'lucide-react';
+import { Settings, ShieldCheck, Tags } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { SOLAPAS_GESTIONABLES, AJUSTES } from '../nav.js';
 import Equipo from './Equipo.jsx';
 import Importar from './Importar.jsx';
 import ImportarGrilla from './ImportarGrilla.jsx';
+import RevisionEtiquetas from './RevisionEtiquetas.jsx';
 import { Bell } from 'lucide-react';
 import { pushEstado, activarNotificaciones } from '../utils/pushClient.js';
 
 const PESTANIAS = [
   { id: 'permisos', label: 'Permisos de vistas', icon: ShieldCheck },
   ...AJUSTES,
+  // Ajuste sobre los datos de la propia app (antes vivía en Análisis/Reportes).
+  { id: 'etiquetas', label: 'Revisión de Etiquetas', icon: Tags },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
 ];
 
@@ -43,6 +46,7 @@ export default function Configuracion() {
       {pest === 'equipo' && <Equipo />}
       {pest === 'importar' && <Importar />}
       {pest === 'importar_grilla' && <ImportarGrilla />}
+      {pest === 'etiquetas' && <RevisionEtiquetas />}
       {pest === 'notificaciones' && <NotifPrefs />}
     </div>
   );
