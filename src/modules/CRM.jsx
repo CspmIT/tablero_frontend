@@ -87,7 +87,7 @@ export default function CRM() {
   const [productosCat, setProductosCat] = useState(PRODUCTOS_DEFAULT);
   const [menuAcciones, setMenuAcciones] = useState(false);
   const [productosOpen, setProductosOpen] = useState(false);
-  const [vistaCuentas, setVistaCuentas] = useState(false);
+  const [vista, setVista] = useState('embudo'); // 'embudo' | 'cuentas' | 'novedades'
   useEffect(() => {
     api.leads.productosCatalogo().then((r) => { if (Array.isArray(r?.productos) && r.productos.length) setProductosCat(r.productos); }).catch(() => {});
   }, [api]);
@@ -169,6 +169,25 @@ export default function CRM() {
     [leads, periodo, fechaAnclaLead]
   );
   const pipeline = leadsBase.filter((l) => !['ganado', 'perdido'].includes(l.etapa)).reduce((s, l) => s + Number(l.valorEstimadoUsd || 0), 0);
+
+  // Novedades: leads cuya fecha de referencia (primer contacto; si falta, la
+  // de carga) cae en la semana calendario ACTUAL (lunes a domingo). La fecha
+  // del lead manda sobre la de carga: backfillear hoy un lead viejo (p. ej.
+  // uno de 2025 que faltaba) NO lo convierte en novedad.
+  const fechaNovedad = (l) => String(l.fechaPrimerContacto || l.createdAt || '').slice(0, 10);
+  const semanaActual = useMemo(() => {
+    const fmtLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const d = new Date();
+    const lun = new Date(d);
+    lun.setDate(d.getDate() - ((d.getDay() || 7) - 1));
+    const dom = new Date(lun);
+    dom.setDate(lun.getDate() + 6);
+    return { desde: fmtLocal(lun), hasta: fmtLocal(dom) };
+  }, []);
+  const novedades = useMemo(() => leads
+    .filter((l) => { const f = fechaNovedad(l); return f && f >= semanaActual.desde && f <= semanaActual.hasta; })
+    .filter((l) => coincideBusqueda(l, busqueda) && (!filtroOwner || l.ownerId === Number(filtroOwner)))
+    .sort((a, b) => fechaNovedad(b).localeCompare(fechaNovedad(a))), [leads, semanaActual, busqueda, filtroOwner]);
 
   const mover = async (leadId, etapa) => {
     const l = leads.find((x) => x.id === leadId);
@@ -353,10 +372,10 @@ export default function CRM() {
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
           <div className="inline-flex items-center gap-1 bg-slate-100 rounded-xl p-1">
-            {[['embudo', 'Embudo'], ['cuentas', 'Cuentas']].map(([id, lbl]) => (
-              <button key={id} onClick={() => setVistaCuentas(id === 'cuentas')}
+            {[['embudo', 'Embudo'], ['cuentas', 'Cuentas'], ['novedades', 'Novedades']].map(([id, lbl]) => (
+              <button key={id} onClick={() => setVista(id)}
                 className={`text-sm sm:text-base font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors ${
-                  (vistaCuentas ? 'cuentas' : 'embudo') === id ? 'bg-coop-azul text-white' : 'text-slate-500 hover:bg-white'
+                  vista === id ? 'bg-coop-azul text-white' : 'text-slate-500 hover:bg-white'
                 }`}>
                 {lbl}
               </button>
@@ -423,7 +442,7 @@ export default function CRM() {
         </div>
       </div>
 
-      {vistaCuentas && (
+      {vista === 'cuentas' && (
         <div className="max-w-3xl">
           {(() => {
             const norm2 = (t) => String(t || '').trim().toLowerCase();
@@ -472,7 +491,41 @@ export default function CRM() {
           <p className="text-[11px] text-slate-400 mt-2">Las cuentas agrupan todas las oportunidades (activas, ganadas, perdidas y declinadas) por organización. Caso Colonia Caroya: una cuenta, dos leads — Reconecta ganado y Call Center en curso.</p>
         </div>
       )}
-      {!vistaCuentas && (
+      {vista === 'novedades' && (
+        <div className="max-w-3xl">
+          {novedades.length === 0 ? (
+            <p className="text-sm text-slate-400 bg-white border border-slate-200 rounded-xl p-4">
+              Sin leads nuevos esta semana ({semanaActual.desde.slice(8, 10)}/{semanaActual.desde.slice(5, 7)} al {semanaActual.hasta.slice(8, 10)}/{semanaActual.hasta.slice(5, 7)}).
+            </p>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+              {novedades.map((l) => {
+                const f = fechaNovedad(l);
+                const et = ETAPAS.find((e) => e.id === l.etapa);
+                const resp = colaboradores.find((c) => c.id === l.ownerId);
+                return (
+                  <button key={l.id} onClick={() => editar(l)}
+                    className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="text-xs text-slate-400 font-mono w-12 shrink-0">{f.slice(8, 10)}/{f.slice(5, 7)}</span>
+                    <span className="font-medium text-slate-800">{l.organizacion}</span>
+                    {l.contactoNombre && <span className="text-sm text-slate-500 truncate">{l.contactoNombre}{l.ciudad ? ` · ${l.ciudad}` : ''}</span>}
+                    {(l.productos || []).map((pr) => <span key={pr} className="text-[10px] px-1.5 py-0.5 rounded bg-coop-azul/10 text-coop-azul">{pr}</span>)}
+                    <span className="ml-auto flex items-center gap-2 shrink-0">
+                      {l.valorEstimadoUsd != null && Number(l.valorEstimadoUsd) > 0 && <span className="text-xs font-mono text-emerald-700">{fmtUSD(l.valorEstimadoUsd)}</span>}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${l.etapa === 'ganado' ? 'bg-emerald-100 text-emerald-700' : (l.etapa === 'perdido' || l.etapa === 'declinado') ? 'bg-slate-200 text-slate-500' : 'bg-slate-100 text-slate-600'}`}>{et?.label || l.etapa}</span>
+                      {resp && <span className="text-xs text-slate-400">{resp.nombre.split(' ')[0]}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 mt-2">
+            Leads con fecha de esta semana (lunes a domingo), según su fecha de primer contacto — o la de carga si no la tiene. Cargar hoy un lead con fecha vieja no lo convierte en novedad.
+          </p>
+        </div>
+      )}
+      {vista === 'embudo' && (
       <div className="flex gap-3 overflow-x-auto pb-3 snap-x snap-mandatory">
         {ETAPAS.filter((et) => (et.id !== 'perdido' && et.id !== 'declinado') || mostrarPerdidos).map((et) => {
           const items = visibles(et.id);
