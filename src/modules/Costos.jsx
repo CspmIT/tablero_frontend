@@ -215,17 +215,35 @@ export default function Costos() {
     return out;
   };
 
+  // Feedback de la exportación: sin esto el botón parecía muerto y se
+  // clickeaba dos veces (dos descargas). Deshabilita mientras genera y
+  // muestra un cartelito al terminar.
+  const [exportando, setExportando] = useState(false);
+  const [exportMsg, setExportMsg] = useState(null);
+  const exportarExcel = async () => {
+    if (exportando) return;
+    setExportando(true); setExportMsg(null);
+    try {
+      await descargarArchivo(`/costos/exportar-excel?anio=${anio}`, `Costos_Operacion_Cooptech_${anio}.xlsx`);
+      setExportMsg('✓ Excel descargado');
+      setTimeout(() => setExportMsg(null), 6000);
+    } catch (e) { alert(e.message || 'No se pudo exportar'); }
+    finally { setExportando(false); }
+  };
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h2 className="text-xl font-semibold text-coop-negro">Costos <span className="text-sm font-normal text-slate-400">{anio}</span></h2>
-        <button
-          onClick={() => descargarArchivo(`/costos/exportar-excel?anio=${anio}`, `Costos_Operacion_Cooptech_${anio}.xlsx`)
-            .catch((e) => alert(e.message || 'No se pudo exportar'))}
-          title="Descarga el anualizado en el formato exacto del Excel de administración: reemplazar y listo. Meses sin datos quedan en blanco."
-          className="text-sm border border-coop-azul text-coop-azul px-3 py-1.5 rounded-lg hover:bg-coop-azul/5">
-          ⬇ Exportar Excel anualizado
-        </button>
+        <span className="inline-flex items-center gap-2">
+          <button
+            onClick={exportarExcel} disabled={exportando}
+            title="Descarga el anualizado en el formato exacto del Excel de administración: reemplazar y listo. Meses sin datos quedan en blanco."
+            className="text-sm border border-coop-azul text-coop-azul px-3 py-1.5 rounded-lg hover:bg-coop-azul/5 disabled:opacity-50 disabled:cursor-wait">
+            {exportando ? '⏳ Generando…' : '⬇ Exportar Excel anualizado'}
+          </button>
+          {exportMsg && <span className="text-sm text-emerald-600 font-medium">{exportMsg}</span>}
+        </span>
         <div className="flex items-center gap-2 text-sm">
           <button onClick={() => setAnio(anio - 1)} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
           <span className="text-slate-600">{anio}</span>

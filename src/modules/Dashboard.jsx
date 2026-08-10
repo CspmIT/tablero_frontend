@@ -6,6 +6,7 @@ import { resolveObjetivoPct } from './objetivosUtils.js';
 import { useMetricasCRM } from './CRMMetricas.jsx';
 import ObjetivoDetalleModal from './ObjetivoDetalleModal.jsx';
 import { Eye } from 'lucide-react';
+import IngresosChart from '../components/IngresosChart.jsx';
 
 const fmtN = (n) => Math.round(Number(n || 0)).toLocaleString('es-AR');
 const fmtARS = (n) => '$ ' + fmtN(n);
@@ -52,7 +53,12 @@ export default function Dashboard() {
       })
       .catch(() => {});
   }, [api]);
+  // Ingresos por producto (ola 3): mismo endpoint y gráfico que la solapa Ingresos.
+  const [ingresos, setIngresos] = useState(null);
   const [anio, setAnio] = useState(() => new Date().getFullYear());
+  useEffect(() => {
+    api.leads.ingresos(anio).then(setIngresos).catch(() => setIngresos(null));
+  }, [api, anio]);
   const [periodMode, setPeriodMode] = useState('month');
   const [monthKey, setMonthKey] = useState(() => new Date().toISOString().slice(0, 7));
   const [feriadosMap, setFeriadosMap] = useState({});
@@ -269,6 +275,16 @@ export default function Dashboard() {
                 </>
               );
             })() : <p className="text-slate-400 text-sm">Sin datos de costo cargados para este año.</p>}
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 p-4 mt-4">
+            <div className="flex flex-wrap items-center justify-between gap-1 mb-3">
+              <span className="text-sm font-semibold text-slate-600">Ingresos por producto · {anio}</span>
+              <span className="text-xs text-slate-400">leads ganados: implementación + abonos · US$ por mes</span>
+            </div>
+            {ingresos
+              ? <IngresosChart serie={ingresos.serie} totalMes={ingresos.totalMes} mesLimite={ingresos.mesLimite} anio={anio} />
+              : <p className="text-slate-400 text-sm">Cargando ingresos…</p>}
           </div>
 
           {periodMode === 'month' && <p className="text-xs text-slate-400 mt-3">Variación de {mesLabel} respecto del mes anterior.</p>}
