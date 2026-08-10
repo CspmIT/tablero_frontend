@@ -6,7 +6,8 @@
 // comandos con variables {{asi}}, para cargar la config de un equipo entero
 // de una pasada (los comandos exactos los define el CLI de Lorenzo).
 import { useEffect, useRef, useState } from 'react';
-import { Bluetooth, Usb } from 'lucide-react';
+import { Bluetooth, Usb, Settings } from 'lucide-react';
+import { useData } from '../data/DataContext.jsx';
 
 // Servicios UART-BLE candidatos (Lorenzo confirmó BLE; el UUID exacto de su
 // stack se detecta probando en orden — y hay campo para pegar uno custom).
@@ -25,21 +26,37 @@ const RECETAS_DEFAULT = [
 ];
 
 export default function Multivac() {
+  const { api } = useData();
   const [transporte, setTransporte] = useState(null); // null | 'serial' | 'ble'
   const [conectado, setConectado] = useState(false);
   const [lineas, setLineas] = useState([]); // { t: 'in'|'out'|'sys', txt }
   const [cmd, setCmd] = useState('');
   const [historial, setHistorial] = useState([]);
   const [histIdx, setHistIdx] = useState(-1);
-  const [atajos, setAtajos] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('cooptech:multivac_atajos')) || ['help', 'login', 'status', 'save']; }
-    catch { return ['help', 'login', 'status', 'save']; }
-  });
-  const [editAtajos, setEditAtajos] = useState(false);
-  const guardarAtajos = (lista) => {
-    setAtajos(lista);
-    try { localStorage.setItem('cooptech:multivac_atajos', JSON.stringify(lista)); } catch { /* */ }
+  // Botonera compartida (ola 3): comandos precargados con nombre humanizado y
+  // producto, guardados en el servidor (clave multivac_botones) — Lorenzo los
+  // carga una vez y los ve todo el equipo. Reemplaza a los atajos localStorage.
+  const PRODUCTOS_BOTON = ['General', '+Agua', 'Reconecta', 'Centinela'];
+  const [botones, setBotones] = useState([]);
+  const [filtroProd, setFiltroProd] = useState('Todos');
+  const [abmOpen, setAbmOpen] = useState(false);
+  const [abmLista, setAbmLista] = useState([]);
+  const [abmGuardando, setAbmGuardando] = useState(false);
+  useEffect(() => {
+    api.multivac.botones().then((r) => setBotones(Array.isArray(r?.botones) ? r.botones : [])).catch(() => {});
+  }, [api]);
+  const guardarBotones = async () => {
+    setAbmGuardando(true);
+    try {
+      const limpios = abmLista.map((b) => ({ nombre: (b.nombre || '').trim(), comando: (b.comando || '').trim(), producto: PRODUCTOS_BOTON.includes(b.producto) ? b.producto : 'General' })).filter((b) => b.nombre && b.comando);
+      const r = await api.multivac.guardarBotones(limpios);
+      setBotones(Array.isArray(r?.botones) ? r.botones : limpios);
+      setAbmOpen(false);
+    } catch (e) { alert(e.message || 'No se pudieron guardar los botones'); }
+    finally { setAbmGuardando(false); }
   };
+  const botonesVisibles = filtroProd === 'Todos' ? botones : botones.filter((b) => b.producto === filtroProd);
+
   const [recetas, setRecetas] = useState(() => {
     try { return JSON.parse(localStorage.getItem('cooptech:multivac_recetas')) || RECETAS_DEFAULT; }
     catch { return RECETAS_DEFAULT; }
@@ -72,11 +89,23 @@ export default function Multivac() {
     try {
       const port = await navigator.serial.requestPort();
       await port.open({ baudRate: 115200 });
+      // Salida del modo bootloader (hotfix 07/08): al abrir, el navegador puede
+      // dejar DTR/RTS en un estado que resetea la placa con IO0 a masa → el
+      // ESP32 arranca en DOWNLOAD_BOOT y el CLI nunca corre (se veía el log de
+      // boot pero no respondía; en otro terminal sí). Secuencia esptool de
+      // reset a modo RUN: EN abajo con IO0 suelto, esperar, EN arriba.
+      try {
+        await port.setSignals({ dataTerminalReady: false, requestToSend: true });  // EN=0 (reset), IO0=1
+        await new Promise((r) => setTimeout(r, 120));
+        await port.setSignals({ dataTerminalReady: false, requestToSend: false }); // EN=1 → boot normal
+      } catch { /* adaptador sin señales cableadas: no molesta, seguir */ }
       const decoder = new TextDecoderStream();
-      port.readable.pipeTo(decoder.writable).catch(() => {});
+      // Guardar la promesa del pipe: para cerrar el puerto de verdad hay que
+      // esperar a que el pipe suelte port.readable (ver desconectar).
+      const pipe = port.readable.pipeTo(decoder.writable).catch(() => {});
       const reader = decoder.readable.getReader();
       const writer = port.writable.getWriter();
-      conexion.current = { port, reader, writer };
+      conexion.current = { port, reader, writer, pipe };
       setTransporte('serial'); setConectado(true);
       log('sys', 'Conectado por USB (115200). Probá "help" para ver los comandos del CLI.');
       (async () => {
@@ -132,9 +161,16 @@ export default function Multivac() {
 
   const desconectar = async () => {
     const c = conexion.current;
-    try { c.reader?.cancel(); c.writer?.releaseLock(); await c.port?.close(); } catch { /* */ }
-    try { c.device?.gatt?.disconnect(); } catch { /* */ }
     conexion.current = {}; setConectado(false); setTransporte(null);
+    // Cierre serial en orden y ESPERANDO cada paso (hotfix 07/08): antes se
+    // llamaba port.close() con los streams todavía bloqueados por el pipe →
+    // close() rechazaba en silencio y Chrome retenía el puerto ("Port Busy"
+    // en Arduino hasta desenchufar la placa o cerrar la pestaña).
+    try { await c.reader?.cancel(); } catch { /* */ }
+    try { await c.pipe; } catch { /* */ }             // suelta port.readable
+    try { c.writer?.releaseLock(); } catch { /* */ }  // suelta port.writable
+    try { await c.port?.close(); } catch { /* */ }
+    try { c.device?.gatt?.disconnect(); } catch { /* */ }
   };
 
   const enviarLinea = async (linea) => {
@@ -223,22 +259,28 @@ export default function Multivac() {
             ))}
             <div ref={finLog} />
           </div>
+          {/* Botonera compartida (ola 3): filtro por producto + comandos con nombre humanizado. */}
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            {atajos.map((a) => (
-              <button key={a} onClick={() => conectado && enviarLinea(a)} disabled={!conectado}
-                className="text-xs font-mono border border-slate-300 px-2.5 py-1 rounded-full hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
-                {a}
+            {['Todos', ...PRODUCTOS_BOTON].map((pr) => (
+              <button key={pr} onClick={() => setFiltroProd(pr)}
+                className={`text-[11px] px-2 py-0.5 rounded-full border ${filtroProd === pr ? 'bg-coop-negro text-white border-coop-negro' : 'text-slate-500 border-slate-200 hover:border-slate-400'}`}>
+                {pr}
               </button>
             ))}
-            <button onClick={() => setEditAtajos((v2) => !v2)} title="Editar accesos rápidos"
-              className="text-xs text-slate-400 hover:text-coop-azul px-1">✎</button>
+            <button onClick={() => { setAbmLista(botones.map((b) => ({ ...b }))); setAbmOpen(true); }}
+              title="Botones de comandos (compartidos por todo el equipo)"
+              className="text-slate-400 hover:text-coop-azul p-1"><Settings size={14} /></button>
           </div>
-          {editAtajos && (
-            <input defaultValue={atajos.join(', ')}
-              onBlur={(e) => { guardarAtajos(e.target.value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 12)); setEditAtajos(false); }}
-              placeholder="Comandos separados por coma (hasta 12)"
-              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono mt-1.5" autoFocus />
-          )}
+          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+            {botonesVisibles.map((b, i) => (
+              <button key={`${b.producto}-${b.comando}-${i}`} onClick={() => conectado && enviarLinea(b.comando)} disabled={!conectado}
+                title={`${b.comando}${b.producto !== 'General' ? ` · ${b.producto}` : ''}`}
+                className="text-xs border border-slate-300 px-2.5 py-1 rounded-full hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+                {b.nombre}
+              </button>
+            ))}
+            {botonesVisibles.length === 0 && <span className="text-xs text-slate-400">Sin botones para {filtroProd} — cargalos desde el engranaje.</span>}
+          </div>
           <div className="flex gap-2 mt-2">
             <input value={cmd} onChange={(e) => setCmd(e.target.value)}
               onKeyDown={(e) => {
@@ -321,6 +363,42 @@ export default function Multivac() {
           </p>
         </div>
       </div>
+
+      {/* ABM de botones (compartidos): nombre humanizado + comando + producto. */}
+      {abmOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setAbmOpen(false)}>
+          <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold mb-1">Botones de comandos</h3>
+            <p className="text-xs text-slate-400 mb-3">Compartidos por TODO el equipo (se guardan en el servidor). General = comunes a los 3 productos (nombre del equipo, red); lo específico de cada aplicación va bajo su producto.</p>
+            <div className="space-y-2">
+              {abmLista.map((b, i) => (
+                <div key={i} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                  <input value={b.nombre} onChange={(e) => setAbmLista((ls) => ls.map((x, xi) => xi === i ? { ...x, nombre: e.target.value } : x))}
+                    placeholder="Nombre (ej: Ver puertos)" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-full sm:w-44" />
+                  <input value={b.comando} onChange={(e) => setAbmLista((ls) => ls.map((x, xi) => xi === i ? { ...x, comando: e.target.value } : x))}
+                    placeholder="Comando del CLI" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-mono flex-1 min-w-[140px]" />
+                  <select value={b.producto} onChange={(e) => setAbmLista((ls) => ls.map((x, xi) => xi === i ? { ...x, producto: e.target.value } : x))}
+                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                    {PRODUCTOS_BOTON.map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+                  </select>
+                  <button onClick={() => setAbmLista((ls) => ls.filter((_, xi) => xi !== i))}
+                    title="Quitar" className="text-slate-400 hover:text-red-500 px-1 text-lg leading-none">×</button>
+                </div>
+              ))}
+              {abmLista.length === 0 && <p className="text-sm text-slate-400">Sin botones. Agregá el primero.</p>}
+            </div>
+            <button onClick={() => setAbmLista((ls) => [...ls, { nombre: '', comando: '', producto: filtroProd !== 'Todos' ? filtroProd : 'General' }])}
+              className="mt-3 text-sm text-coop-azul hover:underline">+ Agregar botón</button>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setAbmOpen(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">Cancelar</button>
+              <button onClick={guardarBotones} disabled={abmGuardando}
+                className="px-4 py-2 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-50">
+                {abmGuardando ? 'Guardando…' : 'Guardar para todos'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

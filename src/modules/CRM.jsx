@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Settings } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { buildVideollamadaICS, descargarICS, mailtoVideollamada } from './videollamadaUtils.js';
+import MisNotas from './MisNotas.jsx';
 import { isActiveCollab } from './grillaUtils.js';
 import PresupuestadorReconecta from './PresupuestadorReconecta.jsx';
 import AguaModal from './AguaModal.jsx';
@@ -34,7 +35,7 @@ const leadVacio = {
   organizacion: '', contactoNombre: '', cargo: '', telefono: '', email: '', ciudad: '', fechaPrimerContacto: '',
   productos: [], valorEstimadoUsd: '', esEvento: false, cantidadEquipos: '', equiposDetalle: '', ownerId: '',
   etapa: 'contacto', fuente: '', fuenteOtra: '', proximaAccion: '', proximaAccionFecha: '', notas: '',
-  trialVence: '', trialNotas: '', motivoPerdido: '', montoFacturadoUsd: '',
+  trialVence: '', trialNotas: '', motivoPerdido: '', montoFacturadoUsd: '', abonoMensualUsd: '', fechaGanado: '',
   presupuestoEnviadoFecha: '', presupuestoAprobadoFecha: '', presupuestoLink: '',
 };
 
@@ -245,7 +246,7 @@ export default function CRM() {
       fuente: strOrNull(form.fuente), fuenteOtra: strOrNull(form.fuenteOtra), proximaAccion: strOrNull(form.proximaAccion),
       proximaAccionFecha: strOrNull(form.proximaAccionFecha), notas: strOrNull(form.notas),
       trialVence: strOrNull(form.trialVence), trialNotas: strOrNull(form.trialNotas), motivoPerdido: strOrNull(form.motivoPerdido),
-      montoFacturadoUsd: numOrNull(form.montoFacturadoUsd), presupuestoEnviadoFecha: strOrNull(form.presupuestoEnviadoFecha),
+      montoFacturadoUsd: numOrNull(form.montoFacturadoUsd), abonoMensualUsd: numOrNull(form.abonoMensualUsd), fechaGanado: strOrNull(form.fechaGanado), presupuestoEnviadoFecha: strOrNull(form.presupuestoEnviadoFecha),
       presupuestoAprobadoFecha: strOrNull(form.presupuestoAprobadoFecha), presupuestoLink: strOrNull(form.presupuestoLink),
     };
     try {
@@ -270,7 +271,7 @@ export default function CRM() {
       ...leadVacio, ...l, productos: l.productos || [], valorEstimadoUsd: l.valorEstimadoUsd ?? '', esEvento: !!l.esEvento, cantidadEquipos: l.cantidadEquipos ?? '',
       ownerId: l.ownerId ?? '', equiposDetalle: l.equiposDetalle || '', fuente: l.fuente || '', fuenteOtra: l.fuenteOtra || '',
       cargo: l.cargo || '', proximaAccion: l.proximaAccion || '', notas: l.notas || '', trialNotas: l.trialNotas || '', motivoPerdido: l.motivoPerdido || '',
-      montoFacturadoUsd: l.montoFacturadoUsd ?? '', presupuestoLink: l.presupuestoLink || '',
+      montoFacturadoUsd: l.montoFacturadoUsd ?? '', abonoMensualUsd: l.abonoMensualUsd ?? '', fechaGanado: dstr(l.fechaGanado), presupuestoLink: l.presupuestoLink || '',
       fechaPrimerContacto: dstr(l.fechaPrimerContacto), proximaAccionFecha: dstr(l.proximaAccionFecha), trialVence: dstr(l.trialVence),
       presupuestoEnviadoFecha: dstr(l.presupuestoEnviadoFecha), presupuestoAprobadoFecha: dstr(l.presupuestoAprobadoFecha),
     });
@@ -523,6 +524,7 @@ export default function CRM() {
           <p className="text-[11px] text-slate-400 mt-2">
             Leads con fecha de esta semana (lunes a domingo), según su fecha de primer contacto — o la de carga si no la tiene. Cargar hoy un lead con fecha vieja no lo convierte en novedad.
           </p>
+          <MisNotas />
         </div>
       )}
       {vista === 'embudo' && (
@@ -741,6 +743,19 @@ export default function CRM() {
                   <Campo label="Vence trial"><Inp type="date" v={form.trialVence} on={(v) => up(setForm, 'trialVence', v)} /></Campo>
                   <Campo label="Notas de trial"><Inp v={form.trialNotas} on={(v) => up(setForm, 'trialNotas', v)} /></Campo>
                   <Campo label="Monto facturado (US$)"><Inp type="number" v={form.montoFacturadoUsd} on={(v) => up(setForm, 'montoFacturadoUsd', v)} /></Campo>
+                  <Campo label="Abono mensual (US$)">
+                    {/* Alimenta la solapa Ingresos. Si queda vacío y el lead tiene CoopCloud, Ingresos usa ese costo mensual solo (fallback de lectura). */}
+                    <input type="number" value={form.abonoMensualUsd}
+                      onChange={(e) => up(setForm, 'abonoMensualUsd', e.target.value)}
+                      placeholder={form.coopcloudCostoMensual != null && form.coopcloudCostoMensual !== '' ? `CoopCloud: ${form.coopcloudCostoMensual} (automático)` : 'p.ej. Call Center, ESET…'}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                  </Campo>
+                  {form.etapa === 'ganado' && (
+                    <Campo label="Fecha de ganado">
+                      {/* Se estampa sola al pasar a Ganado; editable para backfillear históricos. Define el mes del ingreso. */}
+                      <Inp type="date" v={form.fechaGanado} on={(v) => up(setForm, 'fechaGanado', v)} />
+                    </Campo>
+                  )}
                 </div>
                 {form.etapa === 'perdido' && <Campo label="Motivo de pérdida"><Inp v={form.motivoPerdido} on={(v) => up(setForm, 'motivoPerdido', v)} /></Campo>}
               </details>

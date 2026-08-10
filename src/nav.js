@@ -2,7 +2,7 @@
 // `roles`: si está, sólo esos tipos ven el ítem por defecto; si falta, todos.
 // El panel de Configuración puede otorgar (extra) u ocultar (ocultas) solapas
 // por usuario, por encima de estos defaults.
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Lightbulb, Settings, Wrench } from 'lucide-react';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Lightbulb, Settings, Wrench } from 'lucide-react';
 
 export const MODULOS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true, roles: ['manager', 'gerencial'] },
@@ -20,6 +20,7 @@ export const MODULOS = [
 // OJO: los ids NO se tocan (los permisos extra/ocultas se guardan por id);
 // solo cambian labels y orden. "Ingresos" se suma acá en la ola 3.
 export const INFO = [
+  { id: 'ingresos', label: 'Ingresos', icon: TrendingUp, listo: true, roles: ['manager', 'gerencial'] },
   { id: 'costos', label: 'Costos op.', icon: Wallet, listo: true, roles: ['manager'] },
   { id: 'francos', label: 'Francos', icon: CalendarMinus, listo: true },
   { id: 'feriados', label: 'Fechas especiales', icon: CalendarCheck, listo: true, roles: ['manager'] },
