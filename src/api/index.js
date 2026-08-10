@@ -54,6 +54,7 @@ export const api = {
     guardarProductos: (productos) => http.put('/leads/productos-catalogo', { productos }),
     relevamientoAgua: (id) => http.get(`/leads/${id}/relevamiento-agua`),
     guardarRelevamientoAgua: (id, estado) => http.put(`/leads/${id}/relevamiento-agua`, { estado }),
+    ingresos: (anio) => http.get('/leads/ingresos', { anio }),
     tareas: (id) => http.get(`/leads/${id}/tareas`),
     addTarea: (id, body) => http.post(`/leads/${id}/tareas`, body),
     setTarea: (id, tareaId, body) => http.patch(`/leads/${id}/tareas/${tareaId}`, body),
@@ -81,6 +82,18 @@ export const api = {
   },
 
   plantillas: { list: () => http.get('/plantillas') },
+
+  // Mis notas semanales (ola 3): todos leen, cada uno escribe la suya.
+  notas: {
+    list: (anio, semanaIso) => http.get('/notas', { anio, semanaIso }),
+    set: (body) => http.put('/notas', body),
+  },
+
+  // Botones compartidos del terminal Multivac (ola 3).
+  multivac: {
+    botones: () => http.get('/multivac/botones'),
+    guardarBotones: (botones) => http.put('/multivac/botones', { botones }),
+  },
 
   costos: {
     list: () => http.get('/costos'),
