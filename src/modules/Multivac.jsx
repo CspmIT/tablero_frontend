@@ -23,6 +23,37 @@ const SERVICIOS_UART = [
   0xABF0,                                  // BLE-SPP de ejemplos Espressif
 ];
 
+// Depósito LOCAL de capturas del Terminal Sniffer (12/08, elección de
+// Leonardo): IndexedDB del navegador — sobreviven a cerrar la pestaña y a
+// reiniciar la PC, sin tocar backend ni gateway. Quedan en ESTA computadora.
+const snDb = () => new Promise((res, rej) => {
+  const req = indexedDB.open('cooptech_sniffer', 1);
+  req.onupgradeneeded = () => { req.result.createObjectStore('capturas', { keyPath: 'id', autoIncrement: true }); };
+  req.onsuccess = () => res(req.result);
+  req.onerror = () => rej(req.error);
+});
+const snIdbTodas = async () => {
+  const db = await snDb();
+  return new Promise((res, rej) => {
+    const rq = db.transaction('capturas', 'readonly').objectStore('capturas').getAll();
+    rq.onsuccess = () => res(rq.result || []); rq.onerror = () => rej(rq.error);
+  });
+};
+const snIdbGuardar = async (rec) => {
+  const db = await snDb();
+  return new Promise((res, rej) => {
+    const rq = db.transaction('capturas', 'readwrite').objectStore('capturas').add(rec);
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  });
+};
+const snIdbBorrar = async (id) => {
+  const db = await snDb();
+  return new Promise((res, rej) => {
+    const rq = db.transaction('capturas', 'readwrite').objectStore('capturas').delete(id);
+    rq.onsuccess = () => res(); rq.onerror = () => rej(rq.error);
+  });
+};
+
 const RECETAS_DEFAULT = [
   {
     nombre: 'Ejemplo — identidad y red (completar con el CLI real)',
@@ -32,7 +63,15 @@ const RECETAS_DEFAULT = [
 ];
 
 export default function Multivac() {
-  const { api } = useData();
+  const { api, me } = useData();
+  // Rediseño 12/08 (mockup de Leonardo): el módulo se ordena en solapas.
+  // "Actualizaciones de firmware" = la vista de TODOS los usuarios habilitados
+  // (solo releases APROBADOS, tablas por equipo, botones grandes, terminal).
+  // "Configuraciones" = el CLI completo (terminal + botonera + recetas + CriterIA).
+  // "Gestión de versiones" = uso interno del área: TODOS los releases subidos,
+  // tilde para aprobar (habilita hacia la vista pública), borrar y subir.
+  const [solapa, setSolapa] = useState('firmware');
+  const puedeGestionar = me?.tipo !== 'externo';
   const [transporte, setTransporte] = useState(null); // null | 'serial' | 'ble'
   const [conectado, setConectado] = useState(false);
   const [lineas, setLineas] = useState([]); // { t: 'in'|'out'|'sys', txt }
@@ -195,6 +234,13 @@ export default function Multivac() {
   const [fwIdxSel, setFwIdxSel] = useState(-1);
   const [flasheando, setFlasheando] = useState(false);
   const [flashProg, setFlashProg] = useState(null); // { seg, total, pct }
+  // Confirmación PROPIA de la app (pedido de Leonardo 12/08): el confirm()
+  // nativo mete el encabezado "tauri://localhost dice…" / "localhost:… says"
+  // que asusta a los usuarios no especializados y no se puede quitar. Este
+  // modal es nuestro: mensaje simple, sin ninguna línea técnica del webview.
+  const [fwConfirm, setFwConfirm] = useState(null); // { titulo, lineas, boton, peligro, resolve }
+  const pedirConfirmacion = (opts) => new Promise((resolve) => setFwConfirm({ ...opts, resolve }));
+  const responderConfirm = (ok) => { setFwConfirm((c) => { c?.resolve(ok); return null; }); };
   const [fwAbmOpen, setFwAbmOpen] = useState(false);
   const [fwForm, setFwForm] = useState(null);
   const [fwSubiendo, setFwSubiendo] = useState(false);
@@ -229,18 +275,47 @@ export default function Multivac() {
     if (n.includes('S2') || n.includes('C6') || n.includes('H2')) return 'otro';
     return n.includes('ESP32') ? 'esp32' : 'otro';
   };
-  const fwModelos = [...new Set(firmwares.map((f) => f.modelo))];
-  const fwVersiones = firmwares
-    .map((f, i) => ({ ...f, _i: i }))
-    .filter((f) => f.modelo === fwModeloSel)
-    .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
   const fwSel = firmwares[fwIdxSel] || null;
+  // Agrupado por equipo para las tablas colapsables del mockup (12/08). El _i
+  // conserva el índice REAL en el catálogo (selección, aprobación y borrado).
+  const fwConIdx = firmwares.map((f, i) => ({ ...f, _i: i }));
+  const agruparPorEquipo = (lista) => {
+    const conocidos = new Set(EQUIPOS_FW.map((e) => e.modelo));
+    const orden = (rs) => rs.sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
+    const grupos = EQUIPOS_FW.map((eq) => ({ modelo: eq.modelo, chip: eq.chip, releases: orden(lista.filter((f) => f.modelo === eq.modelo)) }));
+    const otros = lista.filter((f) => !conocidos.has(f.modelo));
+    if (otros.length) grupos.push({ modelo: 'Otros equipos', chip: null, releases: orden(otros) });
+    return grupos.filter((g) => g.releases.length);
+  };
+  const gruposAprobados = agruparPorEquipo(fwConIdx.filter((f) => f.aprobado === true));
+  const gruposTodos = agruparPorEquipo(fwConIdx);
+  const descArchivos = (f) => `${f.segmentos?.length || 0} bin${f.merged ? ' + fábrica' : ''}${f.fuente ? ' + código' : ''}`;
+  // Tilde de aprobación (gestión → vista pública). Guardado optimista con
+  // vuelta atrás si el servidor rechaza.
+  const fwToggleAprobado = async (idx) => {
+    const nuevos = firmwares.map((f, i) => (i === idx ? { ...f, aprobado: f.aprobado !== true } : f));
+    setFirmwares(nuevos);
+    try {
+      const r = await api.multivac.guardarFirmwares(nuevos);
+      if (Array.isArray(r?.firmwares)) {
+        setFirmwares(r.firmwares);
+        // Si el servidor filtró alguna entrada inválida, los índices corren:
+        // soltar la selección antes de que apunte a otro release.
+        if (r.firmwares.length !== nuevos.length) setFwIdxSel(-1);
+      }
+    } catch (e) {
+      alert(e.message || 'No se pudo actualizar la aprobación');
+      api.multivac.firmwares().then((r) => setFirmwares(Array.isArray(r?.firmwares) ? r.firmwares : [])).catch(() => {});
+    }
+  };
 
   const fwProgramar = async (modo = 'actualizar') => {
     if (!fwSel || flasheando) return;
     if (modo === 'fabrica' && !fwSel.merged?.key) return;
-    // El flasheo necesita el puerto para él solo: cerrar la sesión CLI si está abierta.
+    // El flasheo necesita el puerto para él solo: cerrar la sesión CLI y el
+    // sniffer si están abiertos (mismo trato para ambos).
     if (conectado) { log('sys', 'Cerrando la sesión del CLI para programar…'); await desconectar(); }
+    if (snRef.current.canales.some((c) => c.port)) { log('sys', 'Cerrando el Terminal Sniffer para programar…'); await snCerrarTodos(); }
     let transport = null;
     try {
       const port = await navigator.serial.requestPort();
@@ -281,16 +356,39 @@ export default function Multivac() {
       if (fwActual && fwSel.flash?.mode && fwSel.flash.mode !== 'keep' && fwActual.mode !== '?' && fwActual.mode !== fwSel.flash.mode) {
         log('sys', `⚠ Aviso: el firmware actual está en ${MODE_LABEL[fwActual.mode]} y el release usa ${MODE_LABEL[fwSel.flash.mode]} — manda el release (lo validado por Lorenzo).`);
       }
+      // Confirmaciones con modal PROPIO (sin el "tauri://localhost dice…" del
+      // confirm() nativo). Mensaje simple para el usuario de campo; el detalle
+      // técnico (tabla sagrada offset→archivo) sigue visible en la tarjeta de
+      // la versión seleccionada, detrás del modal.
       if (modo === 'fabrica') {
         // Doble confirmación: fábrica borra config, LittleFS y el spool de mediciones.
-        if (!confirm(`🏭 VOLVER A FÁBRICA\n\n${fwSel.modelo} · versión ${fwSel.version}\nChip detectado: ${chipNombre} ✓\n\n⚠ Esto BORRA TODO: configuración, red, y las MEDICIONES pendientes de subir.\nEl equipo queda como recién salido de fábrica.\n\n¿Continuar?`)
-          || !confirm('Última confirmación: ¿seguro que querés BORRAR TODO y volver a fábrica?')) {
-          log('sys', 'Vuelta a fábrica cancelada.');
-          return;
-        }
-      } else if (!confirm(`Vas a ACTUALIZAR:\n\n${fwSel.modelo} · versión ${fwSel.version}\nChip detectado: ${chipNombre} ✓\n\n${fwSel.segmentos.map((sg) => `${sg.offset}  ${sg.nombre}`).join('\n')}\n\nSIN borrar configuración ni mediciones.\n¿Continuar?`)) {
-        log('sys', 'Programación cancelada por el usuario.');
-        return;
+        const ok1 = await pedirConfirmacion({
+          titulo: '🏭 Volver a fábrica',
+          lineas: [
+            `${fwSel.modelo} · versión ${fwSel.version}${fwSel.nombre ? ` · ${fwSel.nombre}` : ''}`,
+            'La placa conectada es la correcta ✓',
+            '⚠ Esto borra TODO: la configuración, la red y las mediciones que todavía no se subieron. El equipo queda como recién salido de fábrica.',
+          ],
+          boton: 'Continuar', peligro: true,
+        });
+        const ok2 = ok1 && await pedirConfirmacion({
+          titulo: 'Última confirmación',
+          lineas: ['¿Seguro que querés borrar todo y volver a fábrica?'],
+          boton: 'Sí, borrar todo', peligro: true,
+        });
+        if (!ok2) { log('sys', 'Vuelta a fábrica cancelada.'); return; }
+      } else {
+        const ok = await pedirConfirmacion({
+          titulo: '⬆ Actualizar firmware',
+          lineas: [
+            `${fwSel.modelo} · versión ${fwSel.version}${fwSel.nombre ? ` · ${fwSel.nombre}` : ''}`,
+            'La placa conectada es la correcta ✓',
+            'La configuración y las mediciones del equipo se conservan.',
+            'No desconectes el cable durante la actualización.',
+          ],
+          boton: 'Actualizar', peligro: false,
+        });
+        if (!ok) { log('sys', 'Programación cancelada por el usuario.'); return; }
       }
       const aBajar = modo === 'fabrica'
         ? [{ key: fwSel.merged.key, nombre: fwSel.merged.nombre || 'merged.bin', offset: '0x0', tamano: fwSel.merged.tamano }]
@@ -332,7 +430,18 @@ export default function Multivac() {
         // script de Lorenzo. Si no coincide, esptool-js lo reporta como error.
         calculateMD5Hash: (image) => md5(image),
       });
-      await loader.after('hard_reset');
+      // Reinicio a modo RUN (hotfix 12/08, observación de Leonardo en la prueba
+      // de campo: tras programar, la placa quedaba en bootloader y había que
+      // reiniciarla a mano para que publique MQTT). El hard_reset de esptool-js
+      // solo hace setRTS(false) — si RTS ya estaba baja NO hay pulso de reset.
+      // Secuencia completa (la misma del conectar): IO0 suelto (DTR=0), pulso
+      // de EN (RTS=1 → esperar → RTS=0) ⇒ la placa arranca sola en RUN.
+      try {
+        await transport.setDTR(false);
+        await transport.setRTS(true);   // EN=0 (reset), IO0=1 (run)
+        await new Promise((r) => setTimeout(r, 150));
+        await transport.setRTS(false);  // EN=1 → boot normal
+      } catch { /* adaptador sin señales: reiniciar a mano como hasta ahora */ }
       log('sys', modo === 'fabrica'
         ? `✅ ${fwSel.modelo} ${fwSel.version} — vuelta a fábrica completa. El equipo arranca SIN configuración: aprovisionalo con las recetas o desde CriterIA.`
         : `✅ ${fwSel.modelo} ${fwSel.version} actualizado (config y mediciones intactas). Reconectá el CLI y verificá con "info".`);
@@ -397,7 +506,7 @@ export default function Multivac() {
   const fwAbrirAlta = () => {
     const eq = EQUIPOS_FW.find((e) => e.modelo === fwModeloSel) || EQUIPOS_FW[0];
     setFwForm({
-      modelo: eq.modelo, chip: eq.chip, version: '', notas: '',
+      modelo: eq.modelo, chip: eq.chip, producto: 'General', version: '', nombre: '', notas: '',
       flash: { mode: 'dio', freq: '80m', size: '4MB' },
       filas: SEGMENTOS_TIPICOS.map((sg) => ({ ...sg, archivo: null })),
       fuenteArchivo: null,   // proyecto completo (.zip/.rar) — backup del código
@@ -495,8 +604,12 @@ export default function Multivac() {
       let merged = null;
       if (fwForm.mergedArchivo) { const r1 = await subir(fwForm.mergedArchivo); merged = { key: r1.key, sha256: r1.sha256, nombre: fwForm.mergedArchivo.name, tamano: fwForm.mergedArchivo.size }; }
       const release = {
-        modelo: fwForm.modelo.trim(), chip: fwForm.chip, version: fwForm.version.trim(),
+        modelo: fwForm.modelo.trim(), chip: fwForm.chip, producto: fwForm.producto || 'General',
+        version: fwForm.version.trim(), nombre: (fwForm.nombre || '').trim(),
         notas: fwForm.notas.trim(), flash: fwForm.flash, segmentos, fuente, merged,
+        // Nace SIN aprobar: queda en Gestión de versiones hasta que el área lo
+        // habilite con el tilde — recién ahí aparece en Actualizaciones (todos).
+        aprobado: false,
       };
       const r = await api.multivac.guardarFirmwares([...firmwares, release]);
       setFirmwares(Array.isArray(r?.firmwares) ? r.firmwares : [...firmwares, release]);
@@ -505,27 +618,265 @@ export default function Multivac() {
     } catch (e) { alert(e.message || 'No se pudo subir el release'); }
     finally { setFwSubiendo(false); }
   };
-  const fwDescargarFuente = async () => {
-    if (!fwSel?.fuente?.key) return;
+  const fwDescargarFuente = async (rel = fwSel) => {
+    if (!rel?.fuente?.key) return;
     try {
-      log('sys', `Descargando backup del proyecto (${fwSel.fuente.nombre})…`);
-      const objUrl = await getImage(fwSel.fuente.key);
+      log('sys', `Descargando backup del proyecto (${rel.fuente.nombre})…`);
+      const objUrl = await getImage(rel.fuente.key);
       const a = document.createElement('a');
-      a.href = objUrl; a.download = fwSel.fuente.nombre || 'proyecto.zip';
+      a.href = objUrl; a.download = rel.fuente.nombre || 'proyecto.zip';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
     } catch (e) { alert(e.message || 'No se pudo descargar el proyecto'); }
   };
 
   const fwBorrarRelease = async (idx) => {
-    if (!confirm('¿Quitar este release del catálogo? (los binarios quedan en el almacenamiento)')) return;
+    const f = firmwares[idx];
+    if (!confirm(`¿Eliminar del catálogo el release "${f?.modelo} · ${f?.version}"?\n(Los binarios quedan en el almacenamiento; solo desaparece de las listas.)`)) return;
     const nuevos = firmwares.filter((_, i) => i !== idx);
     try {
       const r = await api.multivac.guardarFirmwares(nuevos);
       setFirmwares(Array.isArray(r?.firmwares) ? r.firmwares : nuevos);
-      if (fwIdxSel === idx) setFwIdxSel(-1);
+      setFwIdxSel(-1); // los índices corren al borrar: soltar la selección siempre
     } catch (e) { alert(e.message || 'No se pudo actualizar el catálogo'); }
   };
+  // --- TERMINAL SNIFFER (4ta solapa, 12/08): reemplazo del Hercules ---------
+  // Lo que Hercules no podía: capturas largas SIN pisar datos viejos (todo
+  // queda en memoria, separado del render — la pantalla muestra las últimas
+  // entradas, el archivo guarda TODO) y guardado a archivo con un click, sin
+  // portapapeles. Buffer del puerto de 1MB para no perder ráfagas rápidas.
+  // Framing por SILENCIO (elección de Leonardo 12/08): una ráfaga = una
+  // entrada con timestamp y dirección TX/RX. El timestamp es de llegada al
+  // host (como Arduino/Hercules): en ráfagas muy rápidas varios bytes lo
+  // comparten, pero el ORDEN es inviolable (un solo lector secuencial).
+  // Campos de envío estilo Hercules (captura de Leonardo 12/08): cada uno con
+  // su tilde HEX y su botón Enviar; efímeros (precarga para responder rápido
+  // antes de que caduque la comunicación). DTR/RTS a mano como en Hercules —
+  // por defecto APAGADOS: así abrir el puerto no resetea una ESP32.
+  const SN_BAUDIOS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+  // MULTI-CANAL (12/08, "subo la apuesta" de Leonardo): su placa sniffer de 3
+  // USB abre 3 COM — uno ve la conversación completa y los otros dos escuchan
+  // una dirección cada uno. Web Serial banca varios puertos abiertos a la vez
+  // (cada uno se elige con su propio click). Cada canal tiene SU captura y SU
+  // archivo; la vista y el archivo combinado intercalan por timestamp. Dentro
+  // de un canal el orden es exacto; entre canales manda el reloj del host
+  // (jitter USB de pocos ms — por eso el archivo por canal es la verdad de
+  // cada boca y el combinado es la vista de análisis).
+  const SN_ETIQUETAS_DEF = ['Completo', 'A→B', 'B→A'];
+  const SN_COLORES = ['text-violet-300', 'text-amber-300', 'text-pink-300'];
+  const canalNuevo = () => ({ port: null, reader: null, writer: null, lector: null, vivo: false, entradas: [], actual: null, ultimo: 0, bytes: 0, gap: 30 });
+  const snRef = useRef({ canales: SN_ETIQUETAS_DEF.map(canalNuevo) });
+  const [snEtiquetas, setSnEtiquetas] = useState([...SN_ETIQUETAS_DEF]);
+  const [snAbiertos, setSnAbiertos] = useState([false, false, false]);
+  const [snFiltro, setSnFiltro] = useState(-1); // -1 = todos los canales
+  const [snEnvioCanal, setSnEnvioCanal] = useState(0);
+  const [snOpc, setSnOpc] = useState({ baud: 19200, dataBits: 8, parity: 'none', stopBits: 1, gap: 30 });
+  const [snSenales, setSnSenales] = useState({ dtr: false, rts: false });
+  const [snHex, setSnHex] = useState(true); // vista (y archivo): HEX | ASCII
+  const [snFin, setSnFin] = useState('\r\n'); // fin de línea al enviar ASCII
+  const [snCmds, setSnCmds] = useState([{ texto: '', hex: true }, { texto: '', hex: true }, { texto: '', hex: true }]);
+  const [, setSnTick] = useState(0); // refresco throttled de la captura
+  const snCaja = useRef(null);
+  const snHayAbierto = snAbiertos.some(Boolean);
+  useEffect(() => {
+    if (!snHayAbierto) return undefined;
+    // Render desacoplado de la captura: un tick cada 150ms (por más brutal que
+    // sea la ráfaga, el DOM se toca 6 veces por segundo — la captura no se frena).
+    const id = setInterval(() => {
+      setSnTick((t) => t + 1);
+      const el = snCaja.current;
+      // autoscroll solo si ya estabas abajo (no pelea si estás revisando arriba)
+      if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 60) el.scrollTop = el.scrollHeight;
+    }, 150);
+    return () => clearInterval(id);
+  }, [snHayAbierto]);
+
+  const snAbrir = async (i) => {
+    try {
+      const port = await navigator.serial.requestPort();
+      await port.open({
+        baudRate: Number(snOpc.baud) || 19200, dataBits: Number(snOpc.dataBits) || 8,
+        parity: snOpc.parity, stopBits: Number(snOpc.stopBits) || 1,
+        bufferSize: 1024 * 1024, flowControl: 'none',
+      });
+      try { await port.setSignals({ dataTerminalReady: snSenales.dtr, requestToSend: snSenales.rts }); } catch { /* adaptador sin señales */ }
+      const s = snRef.current.canales[i];
+      s.port = port; s.vivo = true; s.gap = Number(snOpc.gap) || 30;
+      s.writer = port.writable.getWriter();
+      setSnAbiertos((a) => a.map((v, vi) => (vi === i ? true : v)));
+      // Si el canal de envío apunta a uno cerrado, pasarlo al recién abierto.
+      setSnEnvioCanal((prev) => (snRef.current.canales[prev]?.port ? prev : i));
+      // Mismo lector canónico resiliente del CLI (lección 12/08), pero en CRUDO:
+      // acá no se decodifica nada al capturar — bytes tal cual llegan. Un lector
+      // por canal, cada uno con su framing por silencio independiente.
+      s.lector = (async () => {
+        while (s.port === port && s.vivo && port.readable) {
+          const reader = port.readable.getReader();
+          s.reader = reader;
+          try {
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (value?.length) {
+                const ahora = Date.now();
+                if (!s.actual || s.actual.dir !== 'RX' || ahora - s.ultimo > s.gap) {
+                  s.actual = { t: ahora, dir: 'RX', partes: [] };
+                  s.entradas.push(s.actual);
+                }
+                s.actual.partes.push(value);
+                s.bytes += value.length; s.ultimo = ahora;
+              }
+            }
+          } catch { /* glitch de línea: retomar con el stream nuevo */ }
+          finally { try { reader.releaseLock(); } catch { /* */ } }
+          if (!s.vivo || s.port !== port) break;
+        }
+        if (s.port === port) setSnAbiertos((a) => a.map((v, vi) => (vi === i ? false : v)));
+      })();
+    } catch (e) { if (e?.name !== 'NotFoundError') alert('Sniffer: ' + (e.message || e)); }
+  };
+
+  const snCerrar = async (i) => {
+    const s = snRef.current.canales[i];
+    s.vivo = false;
+    // Cierre en orden y esperando cada paso (lección "Port Busy" del 07/08).
+    try { await s.reader?.cancel(); } catch { /* */ }
+    try { await s.lector; } catch { /* */ }
+    try { s.writer?.releaseLock(); } catch { /* */ }
+    try { await s.port?.close(); } catch { /* */ }
+    s.port = null; s.writer = null; s.reader = null; s.actual = null;
+    setSnAbiertos((a) => a.map((v, vi) => (vi === i ? false : v)));
+  };
+  const snCerrarTodos = async () => {
+    for (let i = 0; i < snRef.current.canales.length; i += 1) {
+      if (snRef.current.canales[i].port) await snCerrar(i);
+    }
+  };
+
+  const snSetSenal = async (clave, valor) => {
+    const nuevas = { ...snSenales, [clave]: valor };
+    setSnSenales(nuevas);
+    for (const c of snRef.current.canales) {
+      if (c.port) { try { await c.port.setSignals({ dataTerminalReady: nuevas.dtr, requestToSend: nuevas.rts }); } catch { /* */ } }
+    }
+  };
+
+  const snEnviar = async (cmd) => {
+    const s = snRef.current.canales[snEnvioCanal];
+    if (!s?.writer || !cmd.texto.trim()) return;
+    let bytes;
+    if (cmd.hex) {
+      const limpio = cmd.texto.replace(/0x/gi, '').replace(/[^0-9a-fA-F]/g, '');
+      if (!limpio || limpio.length % 2) { alert('HEX inválido: cantidad impar de dígitos (formato: 7E A0 21 …)'); return; }
+      bytes = new Uint8Array(limpio.match(/../g).map((h) => parseInt(h, 16)));
+    } else {
+      bytes = new TextEncoder().encode(cmd.texto + snFin);
+    }
+    s.actual = null; // la próxima RX arranca entrada nueva (respuesta separada del envío)
+    s.entradas.push({ t: Date.now(), dir: 'TX', partes: [bytes] });
+    s.bytes += bytes.length;
+    try { await s.writer.write(bytes); } catch (e) { alert('No se pudo enviar: ' + (e.message || e)); }
+    setSnTick((t) => t + 1);
+  };
+
+  const snBytesDe = (e) => {
+    const total = e.partes.reduce((a, p) => a + p.length, 0);
+    const u = new Uint8Array(total); let o = 0;
+    for (const p of e.partes) { u.set(p, o); o += p.length; }
+    return u;
+  };
+  const snTexto = (e) => snHex
+    ? Array.from(snBytesDe(e)).map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')
+    : new TextDecoder('latin1').decode(snBytesDe(e)).replace(/\r/g, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '·');
+  const snSello = (t, conFecha) => {
+    const d = new Date(t); const p = (n, l = 2) => String(n).padStart(l, '0');
+    const hora = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+    return conFecha ? `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hora}` : hora;
+  };
+
+  // Totales y vista combinada (los canales se intercalan por timestamp; para
+  // el render solo se mergean las últimas entradas de cada canal — liviano).
+  const snTotales = () => snRef.current.canales.reduce((a, c) => ({ entradas: a.entradas + c.entradas.length, bytes: a.bytes + c.bytes }), { entradas: 0, bytes: 0 });
+  const snCanalesConDatos = () => snRef.current.canales.map((c, i) => ({ c, i })).filter((x) => x.c.entradas.length);
+  const snVisibles = () => {
+    const idxs = snFiltro >= 0 ? [snFiltro] : snRef.current.canales.map((_, i) => i);
+    const merged = [];
+    for (const i of idxs) for (const e of snRef.current.canales[i].entradas.slice(-250)) merged.push({ e, canal: i });
+    merged.sort((a, b) => a.e.t - b.e.t);
+    return merged.slice(-250);
+  };
+
+  // Genera los TXT de la captura actual: uno POR CANAL (la verdad de cada
+  // boca de la placa sniffer) + el COMBINADO si hay ≥2 (streams intercalados
+  // por timestamp con el canal identificado — la conversación con dirección).
+  const snArmarArchivos = () => {
+    const conDatos = snCanalesConDatos();
+    if (!conDatos.length) return [];
+    const par = snOpc.parity === 'none' ? 'N' : snOpc.parity === 'even' ? 'E' : 'O';
+    const marco = `${snOpc.baud} ${snOpc.dataBits}${par}${snOpc.stopBits}`;
+    const d = new Date(); const p = (n) => String(n).padStart(2, '0');
+    const ts = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    const sane = (s) => String(s).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'canal';
+    const archivos = conDatos.map(({ c, i }) => ({
+      nombre: `sniffer_${sane(snEtiquetas[i])}_${ts}.txt`,
+      contenido: [
+        `# Captura Terminal Sniffer — AutonomIA · canal "${snEtiquetas[i]}" · ${snSello(Date.now(), true)} · ${marco} · ${c.entradas.length} entradas · ${c.bytes} bytes · vista ${snHex ? 'HEX' : 'ASCII'}`,
+        ...c.entradas.map((e) => `${snSello(e.t, true)}  ${e.dir}  ${snTexto(e)}`),
+      ].join('\n'),
+    }));
+    if (conDatos.length > 1) {
+      const ancho = Math.max(...conDatos.map(({ i }) => snEtiquetas[i].length));
+      const todas = conDatos.flatMap(({ c, i }) => c.entradas.map((e) => ({ e, i }))).sort((a, b) => a.e.t - b.e.t);
+      archivos.push({
+        nombre: `sniffer_combinado_${ts}.txt`,
+        contenido: [
+          `# Captura COMBINADA Terminal Sniffer — AutonomIA · ${snSello(Date.now(), true)} · ${marco} · canales: ${conDatos.map(({ i }) => snEtiquetas[i]).join(' | ')} · orden por reloj del host (jitter USB de pocos ms entre canales)`,
+          ...todas.map(({ e, i }) => `${snSello(e.t, true)}  ${snEtiquetas[i].padEnd(ancho)}  ${e.dir}  ${snTexto(e)}`),
+        ].join('\n'),
+      });
+    }
+    return archivos;
+  };
+  const snBajar = (nombre, contenido) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([contenido], { type: 'text/plain;charset=utf-8' }));
+    a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  const snGuardar = () => { for (const f of snArmarArchivos()) snBajar(f.nombre, f.contenido); };
+  // Archivar EN ESTA PC (IndexedDB): la captura queda guardada aunque cierres
+  // la pestaña o reinicies — se descarga o borra después, desde la lista.
+  const [snArchivadas, setSnArchivadas] = useState([]);
+  const [snArchivando, setSnArchivando] = useState(false);
+  useEffect(() => {
+    if (solapa === 'sniffer') snIdbTodas().then(setSnArchivadas).catch(() => {});
+  }, [solapa]);
+  const snArchivar = async () => {
+    const archivos = snArmarArchivos();
+    if (!archivos.length) return;
+    setSnArchivando(true);
+    try {
+      const tot = snTotales();
+      await snIdbGuardar({
+        fecha: new Date().toISOString(),
+        resumen: `${snCanalesConDatos().map(({ i }) => snEtiquetas[i]).join(' | ')} · ${tot.entradas} entradas · ${tot.bytes >= 10240 ? `${(tot.bytes / 1024).toFixed(1)} KB` : `${tot.bytes} bytes`} · ${snHex ? 'HEX' : 'ASCII'}`,
+        archivos,
+      });
+      setSnArchivadas(await snIdbTodas());
+    } catch (e) { alert('No se pudo archivar en esta PC: ' + (e?.message || e)); }
+    finally { setSnArchivando(false); }
+  };
+  const snBorrarArchivada = async (id) => {
+    if (!confirm('¿Borrar esta captura archivada de esta PC?')) return;
+    try { await snIdbBorrar(id); setSnArchivadas(await snIdbTodas()); } catch { /* */ }
+  };
+  const snLimpiar = () => {
+    if (snTotales().entradas && !confirm('¿Borrar la captura de TODOS los canales? (si no la guardaste, se pierde)')) return;
+    for (const c of snRef.current.canales) { c.entradas = []; c.actual = null; c.bytes = 0; }
+    setSnTick((t) => t + 1);
+  };
+
   const conexion = useRef({}); // { port, reader, writer } | { device, rxChar }
   const bufferRx = useRef('');
   const finLog = useRef(null);
@@ -561,25 +912,36 @@ export default function Multivac() {
         await new Promise((r) => setTimeout(r, 120));
         await port.setSignals({ dataTerminalReady: false, requestToSend: false }); // EN=1 → boot normal
       } catch { /* adaptador sin señales cableadas: no molesta, seguir */ }
-      const decoder = new TextDecoderStream();
-      // Guardar la promesa del pipe: para cerrar el puerto de verdad hay que
-      // esperar a que el pipe suelte port.readable (ver desconectar).
-      const pipe = port.readable.pipeTo(decoder.writable).catch(() => {});
-      const reader = decoder.readable.getReader();
       const writer = port.writable.getWriter();
-      conexion.current = { port, reader, writer, pipe };
+      conexion.current = { port, writer, vivo: true };
       setTransporte('serial'); setConectado(true);
       log('sys', 'Conectado por USB (115200). Probá "help" para ver los comandos del CLI.');
-      (async () => {
-        try {
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            if (value) procesarEntrada(value);
-          }
-        } catch { /* puerto cerrado */ }
-        setConectado(false); log('sys', 'Conexión USB cerrada.');
+      // LECTOR ROBUSTO (hotfix 12/08): el reset a modo RUN que hacemos al
+      // conectar genera un glitch en la línea → Web Serial lo reporta como
+      // framing error y ERRA el stream de lectura (el puerto sigue abierto).
+      // El pipe único de antes moría ahí ("Conexión USB cerrada" instantánea).
+      // Patrón canónico: while (port.readable) — tras un error no fatal el
+      // puerto expone un stream NUEVO y se sigue leyendo; si el puerto se
+      // cierra de verdad (desconectar o desenchufe), readable queda null.
+      const lector = (async () => {
+        const dec = new TextDecoder();
+        while (conexion.current.port === port && conexion.current.vivo && port.readable) {
+          const reader = port.readable.getReader();
+          conexion.current.reader = reader;
+          try {
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (value) procesarEntrada(dec.decode(value, { stream: true }));
+            }
+          } catch { /* glitch de línea (framing/break, típico del reset): reintentar */ }
+          finally { try { reader.releaseLock(); } catch { /* */ } }
+          if (!conexion.current.vivo || conexion.current.port !== port) break;
+        }
+        if (conexion.current.port === port) setConectado(false);
+        log('sys', 'Conexión USB cerrada.');
       })();
+      conexion.current.lector = lector;
     } catch (e) { if (e?.name !== 'NotFoundError') log('sys', 'USB: ' + (e.message || e)); }
   };
 
@@ -628,8 +990,11 @@ export default function Multivac() {
     // llamaba port.close() con los streams todavía bloqueados por el pipe →
     // close() rechazaba en silencio y Chrome retenía el puerto ("Port Busy"
     // en Arduino hasta desenchufar la placa o cerrar la pestaña).
+    // (12/08: el lector ahora es un loop con reintento; vivo=false le avisa
+    // que el cierre es DESEADO y no un glitch a reintentar.)
+    c.vivo = false;
     try { await c.reader?.cancel(); } catch { /* */ }
-    try { await c.pipe; } catch { /* */ }             // suelta port.readable
+    try { await c.lector; } catch { /* */ }           // espera a que suelte port.readable
     try { c.writer?.releaseLock(); } catch { /* */ }  // suelta port.writable
     try { await c.port?.close(); } catch { /* */ }
     try { c.device?.gatt?.disconnect(); } catch { /* */ }
@@ -681,6 +1046,71 @@ export default function Multivac() {
   };
   const guardarRecetas = (rs) => { setRecetas(rs); setRecetasDirty(true); };
 
+  // ---------- Piezas de UI compartidas entre solapas (rediseño 12/08) ----------
+  // La caja de terminal es UNA sola (mismo log `lineas`): en "Actualizaciones"
+  // muestra el paso a paso del flasheo; en "Configuraciones" es el CLI completo.
+  // Solo se monta una a la vez, así que el ref de autoscroll no se pisa.
+  const cajaTerminal = (altura, vacio) => (
+    <div className={`bg-slate-900 text-slate-100 rounded-xl p-3 ${altura} overflow-y-auto font-mono text-[12.5px] leading-relaxed`}>
+      {lineas.length === 0 && <p className="text-slate-500">{vacio || '— Conectá un equipo y escribí «help» —'}</p>}
+      {lineas.map((l, i) => (
+        <div key={i} className={l.t === 'out' ? 'text-emerald-300' : l.t === 'sys' ? 'text-amber-300' : 'text-slate-100'}>
+          {l.t === 'out' ? '› ' : ''}{l.txt}
+        </div>
+      ))}
+      <div ref={finLog} />
+    </div>
+  );
+
+  // Tabla de releases del mockup: Producto | Versión | Nombre | Archivos |
+  // Comentario. Click en la fila = seleccionar. En modo gestión suma el tilde
+  // de aprobación, la fecha/autor y las acciones (descargar código, eliminar).
+  const tablaReleases = (releases, gestion) => (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-left text-slate-400 bg-slate-50">
+          {gestion && <th className="px-2 py-1.5 font-medium" title="Aprobado: visible en «Actualizaciones de firmware» para todos">✓</th>}
+          <th className="px-2 py-1.5 font-medium">Producto</th>
+          <th className="px-2 py-1.5 font-medium">Versión</th>
+          <th className="px-2 py-1.5 font-medium">Nombre</th>
+          <th className="px-2 py-1.5 font-medium">Archivos</th>
+          <th className="px-2 py-1.5 font-medium">Comentario de la versión</th>
+          {gestion && <th className="px-2 py-1.5 font-medium">Subido</th>}
+          {gestion && <th />}
+        </tr>
+      </thead>
+      <tbody>
+        {releases.map((f) => (
+          <tr key={f._i} onClick={() => { setFwIdxSel(f._i); setFwModeloSel(f.modelo); }}
+            className={`border-t border-slate-100 cursor-pointer ${fwIdxSel === f._i ? 'bg-coop-azul/10' : 'hover:bg-slate-50'}`}>
+            {gestion && (
+              <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={f.aprobado === true} onChange={() => fwToggleAprobado(f._i)}
+                  title="Aprobado: visible en «Actualizaciones de firmware» para todos" className="accent-coop-azul cursor-pointer" />
+              </td>
+            )}
+            <td className="px-2 py-1.5 whitespace-nowrap">{f.producto || '—'}</td>
+            <td className="px-2 py-1.5 font-mono whitespace-nowrap">{f.version}</td>
+            <td className="px-2 py-1.5">{f.nombre || '—'}</td>
+            <td className="px-2 py-1.5 whitespace-nowrap text-slate-500" title={(f.segmentos || []).map((sg) => `${sg.offset}  ${sg.nombre}`).join('\n')}>{descArchivos(f)}</td>
+            <td className="px-2 py-1.5 text-slate-500 max-w-[260px] truncate" title={f.notas || ''}>{f.notas || ''}</td>
+            {gestion && <td className="px-2 py-1.5 whitespace-nowrap text-slate-400">{String(f.fecha || '').slice(0, 10)}{f.subidoPor ? ` · ${f.subidoPor}` : ''}</td>}
+            {gestion && (
+              <td className="px-2 py-1.5 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                {f.fuente?.key && (
+                  <button onClick={() => fwDescargarFuente(f)} title={`Descargar proyecto completo (${f.fuente.nombre})`}
+                    className="text-slate-400 hover:text-coop-azul px-1">⬇</button>
+                )}
+                <button onClick={() => fwBorrarRelease(f._i)} title="Eliminar release del catálogo"
+                  className="text-slate-400 hover:text-red-500 px-1 text-sm leading-none">×</button>
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
   return (
     <div className="p-4 max-w-5xl">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
@@ -701,6 +1131,102 @@ export default function Multivac() {
           )}
         </div>
       </div>
+      {/* Solapas del rediseño 12/08 (mockup de Leonardo). Gestión de versiones
+          es de uso interno del área — los usuarios externos no la ven. */}
+      <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4 mt-1">
+        {[
+          { id: 'firmware', label: 'Actualizaciones de firmware' },
+          { id: 'config', label: 'Configuraciones' },
+          { id: 'sniffer', label: 'Terminal Sniffer' },
+          ...(puedeGestionar ? [{ id: 'gestion', label: 'Gestión de versiones' }] : []),
+        ].map((s) => (
+          <button key={s.id} onClick={() => setSolapa(s.id)}
+            className={`px-3 py-2 text-sm rounded-t-lg -mb-px border ${solapa === s.id ? 'bg-white border-slate-200 border-b-white text-coop-negro font-medium' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ============ SOLAPA: ACTUALIZACIONES DE FIRMWARE (todos) ============ */}
+      {solapa === 'firmware' && (
+        <div className="max-w-4xl">
+          <p className="text-sm text-slate-500 mb-3">
+            Elegí el equipo, tocá una versión en la tabla y programá. Acá aparecen solo las versiones <b>aprobadas</b> por el área.
+            {!soportaSerial && ' Este navegador no soporta Web Serial: usá Chrome/Edge de PC.'}
+          </p>
+          {gruposAprobados.length === 0 && (
+            <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-sm text-slate-400 mb-3">
+              Todavía no hay versiones aprobadas.{puedeGestionar ? ' Subilas y aprobalas con el tilde en «Gestión de versiones».' : ' El área está preparando el catálogo.'}
+            </div>
+          )}
+          {gruposAprobados.map((g) => (
+            <details key={g.modelo} open className="bg-white border border-slate-200 rounded-xl mb-2 overflow-hidden">
+              <summary className="px-3 py-2 cursor-pointer select-none text-sm font-medium text-slate-700 hover:bg-slate-50">
+                {g.modelo} <span className="font-normal text-slate-400">{g.chip ? `· ${CHIP_LABEL[g.chip]} ` : ''}· {g.releases.length} versión{g.releases.length === 1 ? '' : 'es'}</span>
+              </summary>
+              <div className="overflow-x-auto border-t border-slate-100">{tablaReleases(g.releases, false)}</div>
+            </details>
+          ))}
+
+          {/* Detalle de la versión seleccionada: la "tabla sagrada" offset→archivo
+              SIEMPRE visible antes de tocar nada (pedido puntual de Lorenzo). */}
+          {fwSel && (
+            <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
+              <div className="flex items-center justify-between flex-wrap gap-1 mb-1">
+                <p className="text-sm font-medium text-slate-700">
+                  {fwSel.modelo} · {fwSel.version}{fwSel.nombre ? ` · ${fwSel.nombre}` : ''}
+                  {fwSel.aprobado !== true && <span className="ml-2 text-[11px] text-amber-600 font-normal">sin aprobar — prueba interna</span>}
+                </p>
+                <span className="text-[11px] text-slate-400">Chip: {CHIP_LABEL[fwSel.chip] || fwSel.chip} · flash {MODE_LABEL[fwSel.flash?.mode] || fwSel.flash?.mode} / {FREQ_LABEL[fwSel.flash?.freq] || fwSel.flash?.freq} / {fwSel.flash?.size}</span>
+              </div>
+              {fwSel.segmentos.length > 0 && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono text-[10.5px] text-slate-600">
+                  {fwSel.segmentos.map((sg, i) => (
+                    <div key={i} className="flex justify-between gap-2">
+                      <span className="text-coop-azul shrink-0">{sg.offset}</span>
+                      <span className="truncate">{sg.nombre}</span>
+                      {sg.sha256 && <span className="text-slate-400 shrink-0" title={`SHA-256: ${sg.sha256}`}>✓{sg.sha256.slice(0, 8)}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid sm:grid-cols-2 gap-2 mt-3">
+            <button onClick={() => fwProgramar('actualizar')} disabled={!fwSel?.segmentos?.length || flasheando || !soportaSerial}
+              className="px-4 py-3 text-sm font-medium bg-coop-naranja text-white rounded-xl hover:opacity-90 disabled:opacity-40">
+              {flasheando ? 'Programando…' : '⬆ Actualizar con la versión seleccionada (conserva config)'}
+            </button>
+            <button onClick={() => fwProgramar('fabrica')} disabled={!fwSel?.merged?.key || flasheando || !soportaSerial}
+              className="px-4 py-3 text-sm font-medium border border-red-300 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-40">
+              🏭 Volver a fábrica (borra TODO)
+            </button>
+          </div>
+          {!fwSel && <p className="text-[11px] text-slate-400 mt-1.5">Seleccioná una versión en la tabla para habilitar los botones.</p>}
+          {fwSel && !fwSel.merged?.key && <p className="text-[11px] text-slate-400 mt-1.5">Esta versión no incluye imagen de fábrica (merged): solo actualización.</p>}
+          {flashProg && (
+            <div className="mt-3">
+              <div className="flex justify-between text-[11px] text-slate-500 mb-0.5">
+                <span>Segmento {flashProg.seg}/{flashProg.total}</span><span>{flashProg.pct}%</span>
+              </div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-coop-naranja transition-all" style={{ width: `${flashProg.pct}%` }} />
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4">
+            <h3 className="text-sm font-medium text-slate-700 mb-1.5">Terminal de comunicaciones</h3>
+            {cajaTerminal('h-56', '— Acá vas a ver el paso a paso de la programación —')}
+            <p className="text-[11px] text-slate-400 mt-1.5">La placa entra al bootloader por auto-reset (DTR/RTS), el chip se verifica ANTES de escribir y al terminar se reinicia sola a modo run. Si el CLI está conectado, se cierra solo.</p>
+          </div>
+        </div>
+      )}
+
+      {/* ============ SOLAPA: CONFIGURACIONES (el CLI completo) ============ */}
+      {solapa === 'config' && (
+      <>
       <p className="text-sm text-slate-500 mb-3">
         Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.
         {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
@@ -709,15 +1235,7 @@ export default function Multivac() {
       <div className="grid lg:grid-cols-5 gap-4">
         {/* Terminal */}
         <div className="lg:col-span-3">
-          <div className="bg-slate-900 text-slate-100 rounded-xl p-3 h-96 overflow-y-auto font-mono text-[12.5px] leading-relaxed">
-            {lineas.length === 0 && <p className="text-slate-500">— Conectá un equipo y escribí «help» —</p>}
-            {lineas.map((l, i) => (
-              <div key={i} className={l.t === 'out' ? 'text-emerald-300' : l.t === 'sys' ? 'text-amber-300' : 'text-slate-100'}>
-                {l.t === 'out' ? '› ' : ''}{l.txt}
-              </div>
-            ))}
-            <div ref={finLog} />
-          </div>
+          {cajaTerminal('h-96')}
           {/* Botonera compartida (ola 3): filtro por producto + comandos con nombre humanizado. */}
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
             {['Todos', ...PRODUCTOS_BOTON].map((pr) => (
@@ -878,82 +1396,258 @@ export default function Multivac() {
           <p className="text-[11px] text-slate-400 mt-2">
             USB: Chrome/Edge de PC (el CLI por serie, sin cambios). Bluetooth: Chrome de PC y Android — el servicio UART se detecta solo por propiedades write/notify.
           </p>
-
-          {/* GESTOR DE FIRMWARES (ola C): programar sin Arduino */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 mt-4">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="font-medium text-slate-700 text-sm flex items-center gap-1.5"><HardDriveDownload size={15} className="text-coop-naranja" /> Firmware</h3>
-              <button onClick={fwAbrirAlta} className="text-xs text-coop-azul hover:underline">+ Subir release</button>
-            </div>
-            <p className="text-[11px] text-slate-400 mb-2">Programá la placa desde acá, sin Arduino: elegí equipo y versión. No borra configuración ni mediciones (escribe solo los segmentos del release).</p>
-            {fwModelos.length === 0 && <p className="text-xs text-slate-400">Catálogo vacío. Subí el primer release con los .bin por partición (los exporta Lorenzo).</p>}
-            {fwModelos.length > 0 && (
-              <>
-                <select value={fwModeloSel} onChange={(e) => { setFwModeloSel(e.target.value); setFwIdxSel(-1); }}
-                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mb-2">
-                  <option value="">— Equipo —</option>
-                  {fwModelos.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-                {fwModeloSel && (
-                  <select value={fwIdxSel} onChange={(e) => setFwIdxSel(Number(e.target.value))}
-                    className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mb-2">
-                    <option value={-1}>— Versión —</option>
-                    {fwVersiones.map((f) => <option key={f._i} value={f._i}>{f.version} · {String(f.fecha || '').slice(0, 10)}{f.subidoPor ? ` · ${f.subidoPor}` : ''}</option>)}
-                  </select>
-                )}
-                {fwSel && (
-                  <>
-                    {fwSel.notas && <p className="text-xs text-slate-500 mb-2 whitespace-pre-wrap">{fwSel.notas}</p>}
-                    <p className="text-[11px] text-slate-400 mb-1">Chip: {CHIP_LABEL[fwSel.chip] || fwSel.chip} · flash {MODE_LABEL[fwSel.flash?.mode] || fwSel.flash?.mode} / {FREQ_LABEL[fwSel.flash?.freq] || fwSel.flash?.freq} / {fwSel.flash?.size}</p>
-                    {/* La "tabla sagrada" del release (miedo puntual de Lorenzo): el mapa
-                        offset → archivo, visible ANTES de tocar nada, tal cual se grabará. */}
-                    {fwSel.segmentos.length > 0 && (
-                      <div className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 mb-2 font-mono text-[10.5px] text-slate-600">
-                        {fwSel.segmentos.map((sg, i) => (
-                          <div key={i} className="flex justify-between gap-2">
-                            <span className="text-coop-azul shrink-0">{sg.offset}</span>
-                            <span className="truncate">{sg.nombre}</span>
-                            {sg.sha256 && <span className="text-slate-400 shrink-0" title={`SHA-256: ${sg.sha256}`}>✓{sg.sha256.slice(0, 8)}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {fwSel.segmentos.length > 0 && (
-                      <button onClick={() => fwProgramar('actualizar')} disabled={flasheando || !soportaSerial}
-                        className="w-full px-3 py-2 text-sm font-medium bg-coop-naranja text-white rounded-lg hover:opacity-90 disabled:opacity-40">
-                        {flasheando ? 'Programando…' : `⬆ Actualizar a ${fwSel.version} (conserva config)`}
-                      </button>
-                    )}
-                    {fwSel.merged?.key && (
-                      <button onClick={() => fwProgramar('fabrica')} disabled={flasheando || !soportaSerial}
-                        className="w-full mt-1.5 px-3 py-2 text-sm font-medium border border-red-300 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-40">
-                        🏭 Volver a fábrica (borra TODO)
-                      </button>
-                    )}
-                    {fwSel.fuente?.key && (
-                      <button onClick={fwDescargarFuente} disabled={flasheando}
-                        className="w-full mt-1.5 px-3 py-1.5 text-xs border border-slate-300 text-slate-600 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
-                        ⬇ Descargar proyecto completo ({fwSel.fuente.nombre})
-                      </button>
-                    )}
-                    {flashProg && (
-                      <div className="mt-2">
-                        <div className="flex justify-between text-[11px] text-slate-500 mb-0.5">
-                          <span>Segmento {flashProg.seg}/{flashProg.total}</span><span>{flashProg.pct}%</span>
-                        </div>
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-coop-naranja transition-all" style={{ width: `${flashProg.pct}%` }} />
-                        </div>
-                      </div>
-                    )}
-                    <p className="text-[11px] text-slate-400 mt-1.5">La placa entra al bootloader por auto-reset (DTR/RTS): se verifica el chip ANTES de escribir. Si el CLI está conectado, se cierra solo.</p>
-                  </>
-                )}
-              </>
-            )}
-          </div>
         </div>
       </div>
+      </>
+      )}
+
+      {/* ============ SOLAPA: TERMINAL SNIFFER (reemplazo del Hercules) ============ */}
+      {solapa === 'sniffer' && (
+        <div className="max-w-4xl">
+          <p className="text-sm text-slate-500 mb-3">
+            Monitor serie crudo con timestamp y dirección, estilo Hercules — pero acá la captura <b>no pisa datos viejos</b>: queda entera en memoria y se guarda completa a archivo. Hasta <b>3 canales a la vez</b> (para la placa sniffer de 3 USB: el completo + uno por dirección) — cada canal baja su propio TXT, y si hay más de uno, también el combinado. Independiente del CLI y del flasheo.
+          </p>
+
+          {/* Opciones compartidas del puerto (los 3 COM escuchan el mismo bus) */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-0.5">Baudrate</label>
+                <select value={snOpc.baud} disabled={snHayAbierto} onChange={(e) => setSnOpc((o) => ({ ...o, baud: Number(e.target.value) }))}
+                  className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50">
+                  {SN_BAUDIOS.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-0.5">Datos</label>
+                <select value={snOpc.dataBits} disabled={snHayAbierto} onChange={(e) => setSnOpc((o) => ({ ...o, dataBits: Number(e.target.value) }))}
+                  className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50">
+                  <option value={8}>8</option><option value={7}>7</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-0.5">Paridad</label>
+                <select value={snOpc.parity} disabled={snHayAbierto} onChange={(e) => setSnOpc((o) => ({ ...o, parity: e.target.value }))}
+                  className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50">
+                  <option value="none">none</option><option value="even">even</option><option value="odd">odd</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-0.5">Stop</label>
+                <select value={snOpc.stopBits} disabled={snHayAbierto} onChange={(e) => setSnOpc((o) => ({ ...o, stopBits: Number(e.target.value) }))}
+                  className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50">
+                  <option value={1}>1</option><option value={2}>2</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-0.5" title="Una pausa mayor a este tiempo separa dos ráfagas (dos entradas)">Silencio (ms)</label>
+                <input type="number" min="5" max="1000" value={snOpc.gap} disabled={snHayAbierto}
+                  onChange={(e) => setSnOpc((o) => ({ ...o, gap: Number(e.target.value) }))}
+                  className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50" />
+              </div>
+              <div className="flex items-center gap-3 pb-1.5 px-1" title="Señales de módem (como en Hercules), aplicadas a todos los canales abiertos. APAGADAS, abrir el puerto no resetea una ESP32.">
+                <label className="flex items-center gap-1 text-xs text-slate-500 cursor-pointer">
+                  <input type="checkbox" checked={snSenales.dtr} onChange={(e) => snSetSenal('dtr', e.target.checked)} className="accent-coop-azul" /> DTR
+                </label>
+                <label className="flex items-center gap-1 text-xs text-slate-500 cursor-pointer">
+                  <input type="checkbox" checked={snSenales.rts} onChange={(e) => snSetSenal('rts', e.target.checked)} className="accent-coop-azul" /> RTS
+                </label>
+              </div>
+            </div>
+            {/* Canales: uno por COM de la placa sniffer. Cada "Abrir" pide SU
+                puerto (regla del navegador: un click por puerto). */}
+            <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-2.5">
+              {snEtiquetas.map((et, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${snAbiertos[i] ? 'bg-emerald-500' : 'bg-slate-300'}`} title={snAbiertos[i] ? 'Puerto abierto' : 'Puerto cerrado'} />
+                  <input value={et} onChange={(e) => setSnEtiquetas((ls) => ls.map((x, xi) => (xi === i ? e.target.value : x)))}
+                    className="w-36 border border-slate-300 rounded-lg px-2 py-1.5 text-xs" placeholder={`Canal ${i + 1}`} />
+                  <span className="text-[11px] text-slate-400 flex-1">
+                    {snRef.current.canales[i].entradas.length ? `${snRef.current.canales[i].entradas.length} entradas · ${snRef.current.canales[i].bytes >= 10240 ? `${(snRef.current.canales[i].bytes / 1024).toFixed(1)} KB` : `${snRef.current.canales[i].bytes} bytes`}` : (snAbiertos[i] ? 'escuchando…' : 'sin datos')}
+                  </span>
+                  {!snAbiertos[i] && (
+                    <button onClick={() => snAbrir(i)} disabled={!soportaSerial}
+                      className="px-3 py-1.5 text-xs font-medium bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40 shrink-0">▶ Abrir puerto</button>
+                  )}
+                  {snAbiertos[i] && (
+                    <button onClick={() => snCerrar(i)}
+                      className="px-3 py-1.5 text-xs font-medium border border-red-300 text-red-500 rounded-lg hover:bg-red-50 shrink-0">■ Cerrar</button>
+                  )}
+                </div>
+              ))}
+              <p className="text-[10.5px] text-slate-400">Para escuchar entre 2 equipos con la placa sniffer: abrí un canal por COM (un click cada uno). Usás solo el primero si es una conexión directa común.</p>
+            </div>
+          </div>
+
+          {/* Captura (vista combinada de los canales, intercalada por hora) */}
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            <div className="flex rounded-lg border border-slate-300 overflow-hidden text-xs">
+              <button onClick={() => setSnHex(true)} className={`px-2.5 py-1 ${snHex ? 'bg-coop-negro text-white' : 'text-slate-500 hover:bg-slate-50'}`}>HEX</button>
+              <button onClick={() => setSnHex(false)} className={`px-2.5 py-1 ${!snHex ? 'bg-coop-negro text-white' : 'text-slate-500 hover:bg-slate-50'}`}>ASCII</button>
+            </div>
+            {snCanalesConDatos().length > 1 && (
+              <div className="flex items-center gap-1">
+                {[-1, ...snCanalesConDatos().map(({ i }) => i)].map((fi) => (
+                  <button key={fi} onClick={() => setSnFiltro(fi)}
+                    className={`text-[11px] px-2 py-0.5 rounded-full border ${snFiltro === fi ? 'bg-coop-negro text-white border-coop-negro' : 'text-slate-500 border-slate-200 hover:border-slate-400'}`}>
+                    {fi === -1 ? 'Todos' : snEtiquetas[fi]}
+                  </button>
+                ))}
+              </div>
+            )}
+            <span className="text-[11px] text-slate-400">{snTotales().entradas} entrada{snTotales().entradas === 1 ? '' : 's'} · {snTotales().bytes >= 10240 ? `${(snTotales().bytes / 1024).toFixed(1)} KB` : `${snTotales().bytes} bytes`} (completos, nada se pisa)</span>
+            <div className="flex-1" />
+            <button onClick={snGuardar} disabled={!snTotales().entradas}
+              title="Baja un TXT por canal con datos; si hay más de uno, también el combinado"
+              className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">💾 Guardar TXT{snCanalesConDatos().length > 1 ? ` (${snCanalesConDatos().length} + combinado)` : ''}</button>
+            <button onClick={snArchivar} disabled={!snTotales().entradas || snArchivando}
+              title="Guarda la captura en esta computadora (sobrevive a cerrar la pestaña): la descargás cuando quieras desde la lista de abajo"
+              className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">{snArchivando ? '⏳ Archivando…' : '🗃 Archivar en esta PC'}</button>
+            <button onClick={snLimpiar} disabled={!snTotales().entradas}
+              className="px-3 py-1.5 text-xs border border-slate-300 rounded-lg hover:border-red-300 hover:text-red-500 disabled:opacity-40">🧹 Limpiar</button>
+          </div>
+          <div ref={snCaja} className="bg-slate-900 text-slate-100 rounded-xl p-3 h-72 overflow-y-auto font-mono text-[12px] leading-relaxed">
+            {snTotales().entradas === 0 && <p className="text-slate-500">— Abrí un canal (o los 3 de la placa sniffer): todo lo que entre y salga queda acá, con hora, canal y dirección —</p>}
+            {snVisibles().map(({ e, canal }, i) => (
+              <div key={i} className="flex gap-2 items-baseline">
+                <span className="text-slate-500 shrink-0">{snSello(e.t)}</span>
+                {snCanalesConDatos().length > 1 && snFiltro === -1 && (
+                  <span className={`shrink-0 ${SN_COLORES[canal] || 'text-slate-400'}`}>{snEtiquetas[canal]}</span>
+                )}
+                <span className={`shrink-0 font-semibold ${e.dir === 'TX' ? 'text-emerald-300' : 'text-sky-300'}`}>{e.dir}</span>
+                <span className={`whitespace-pre-wrap break-all ${e.dir === 'TX' ? 'text-emerald-200' : ''}`}>{snTexto(e)}</span>
+              </div>
+            ))}
+            {snTotales().entradas > 250 && <p className="text-slate-500 text-[10.5px] mt-1">(la vista muestra las últimas 250 entradas — los archivos guardan TODAS)</p>}
+          </div>
+
+          {/* Capturas archivadas EN ESTA PC (IndexedDB): descargar/borrar después */}
+          {snArchivadas.length > 0 && (
+            <details open className="bg-white border border-slate-200 rounded-xl mt-3 overflow-hidden">
+              <summary className="px-3 py-2 cursor-pointer select-none text-sm font-medium text-slate-700 hover:bg-slate-50">
+                🗃 Capturas guardadas en esta PC <span className="font-normal text-slate-400">· {snArchivadas.length}</span>
+              </summary>
+              <div className="border-t border-slate-100 divide-y divide-slate-100">
+                {[...snArchivadas].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))).map((r) => (
+                  <div key={r.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                    <span className="text-slate-500 whitespace-nowrap shrink-0">{String(r.fecha).slice(0, 10)} {String(r.fecha).slice(11, 19)}</span>
+                    <span className="text-slate-600 flex-1 truncate" title={(r.archivos || []).map((f) => f.nombre).join('\n')}>{r.resumen} · {(r.archivos || []).length} archivo{(r.archivos || []).length === 1 ? '' : 's'}</span>
+                    <button onClick={() => (r.archivos || []).forEach((f) => snBajar(f.nombre, f.contenido))}
+                      className="px-2.5 py-1 border border-slate-300 rounded-lg hover:border-coop-azul hover:text-coop-azul shrink-0">⬇ Descargar</button>
+                    <button onClick={() => snBorrarArchivada(r.id)} title="Borrar de esta PC"
+                      className="text-slate-400 hover:text-red-500 px-1 text-sm leading-none shrink-0">×</button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10.5px] text-slate-400 px-3 py-1.5 border-t border-slate-100">Guardadas en el navegador de ESTA computadora (no en el servidor): sobreviven a cerrar la pestaña y reiniciar. Para compartirlas, descargalas y envialas.</p>
+            </details>
+          )}
+
+          {/* Envío precargado estilo Hercules: HEX por campo + Enviar por campo */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <h3 className="text-sm font-medium text-slate-700">Envío (precargá las respuestas antes de que caduque la comunicación)</h3>
+              <div className="flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">
+                {snAbiertos.filter(Boolean).length > 1 && (
+                  <span className="flex items-center gap-1.5">
+                    Enviar por:
+                    <select value={snEnvioCanal} onChange={(e) => setSnEnvioCanal(Number(e.target.value))}
+                      className="border border-slate-300 rounded-lg px-1.5 py-1 text-[11px]">
+                      {snEtiquetas.map((et, i) => snAbiertos[i] ? <option key={i} value={i}>{et}</option> : null)}
+                    </select>
+                  </span>
+                )}
+                <span className="flex items-center gap-1.5">
+                  Fin de línea ASCII:
+                  <select value={snFin} onChange={(e) => setSnFin(e.target.value)} className="border border-slate-300 rounded-lg px-1.5 py-1 text-[11px]">
+                    <option value="">Nada</option>
+                    <option value={'\n'}>\n</option>
+                    <option value={'\r\n'}>\r\n</option>
+                    <option value={'\r'}>\r</option>
+                  </select>
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {snCmds.map((c, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={c.texto} onChange={(e) => setSnCmds((ls) => ls.map((x, xi) => xi === i ? { ...x, texto: e.target.value } : x))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') snEnviar(c); }}
+                    placeholder={c.hex ? '7E A0 21 00 02 00 23 03 93 …' : 'comando en texto'}
+                    className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
+                  <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer shrink-0" title="Interpretar el campo como bytes en hexadecimal">
+                    <input type="checkbox" checked={c.hex} onChange={(e) => setSnCmds((ls) => ls.map((x, xi) => xi === i ? { ...x, hex: e.target.checked } : x))} className="accent-coop-azul" /> HEX
+                  </label>
+                  <button onClick={() => snEnviar(c)} disabled={!snAbiertos[snEnvioCanal] || !c.texto.trim()}
+                    className="px-3 py-1.5 text-xs bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40 shrink-0">Enviar</button>
+                  {snCmds.length > 3 && (
+                    <button onClick={() => setSnCmds((ls) => ls.filter((_, xi) => xi !== i))}
+                      title="Quitar campo" className="text-slate-400 hover:text-red-500 px-1 text-lg leading-none shrink-0">×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {snCmds.length < 20 && (
+              <button onClick={() => setSnCmds((ls) => [...ls, { texto: '', hex: true }])}
+                className="mt-2 text-xs text-coop-azul hover:underline">+ Agregar campo (hasta 20)</button>
+            )}
+            <p className="text-[11px] text-slate-400 mt-2">
+              Los campos son de precarga (no se guardan). HEX acepta bytes con o sin espacios (7EA021… o 7E A0 21…). El timestamp es de llegada al host: en ráfagas muy rápidas varios bytes lo comparten, pero el orden es siempre el real.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ============ SOLAPA: GESTIÓN DE VERSIONES (uso interno del área) ============ */}
+      {solapa === 'gestion' && puedeGestionar && (
+        <div className="max-w-4xl">
+          <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+            <p className="text-sm text-slate-500 flex-1 min-w-[260px]">
+              Todos los releases subidos, aprobados o no. El tilde <b>✓ habilita</b> la versión hacia «Actualizaciones de firmware» (la vista de todos los usuarios). Para probar una versión sin aprobar: seleccionala acá y programala desde esa solapa.
+            </p>
+            <button onClick={fwAbrirAlta} className="px-3 py-1.5 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90 flex items-center gap-1.5 shrink-0">
+              <HardDriveDownload size={15} /> + Subir release
+            </button>
+          </div>
+          {gruposTodos.length === 0 && (
+            <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-sm text-slate-400">
+              Catálogo vacío. Subí el primer release con los .bin por partición (los exporta Lorenzo).
+            </div>
+          )}
+          {gruposTodos.map((g) => (
+            <details key={g.modelo} open className="bg-white border border-slate-200 rounded-xl mb-2 overflow-hidden">
+              <summary className="px-3 py-2 cursor-pointer select-none text-sm font-medium text-slate-700 hover:bg-slate-50">
+                {g.modelo} <span className="font-normal text-slate-400">{g.chip ? `· ${CHIP_LABEL[g.chip]} ` : ''}· {g.releases.length} release{g.releases.length === 1 ? '' : 's'} · {g.releases.filter((f) => f.aprobado === true).length} aprobado{g.releases.filter((f) => f.aprobado === true).length === 1 ? '' : 's'}</span>
+              </summary>
+              <div className="overflow-x-auto border-t border-slate-100">{tablaReleases(g.releases, true)}</div>
+            </details>
+          ))}
+          <p className="text-[11px] text-slate-400 mt-2">
+            × elimina el release del catálogo (los binarios quedan en el almacenamiento — sirve para sacar cargas fallidas o versiones retiradas). ⬇ descarga el backup del proyecto completo si la versión lo incluye.
+          </p>
+        </div>
+      )}
+
+      {/* Confirmación propia del flasheo: reemplaza al confirm() nativo para
+          que el usuario de campo NO vea el encabezado "tauri://localhost dice…". */}
+      {fwConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]" onClick={() => responderConfirm(false)}>
+          <div className="bg-white rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold mb-2">{fwConfirm.titulo}</h3>
+            {(fwConfirm.lineas || []).map((l, i) => (
+              <p key={i} className={`text-sm mb-1.5 ${i === 0 ? 'font-medium text-slate-700' : 'text-slate-500'}`}>{l}</p>
+            ))}
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => responderConfirm(false)}
+                className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">Cancelar</button>
+              <button onClick={() => responderConfirm(true)}
+                className={`px-4 py-2 text-sm font-medium text-white rounded-lg hover:opacity-90 ${fwConfirm.peligro ? 'bg-red-600' : 'bg-coop-naranja'}`}>
+                {fwConfirm.boton || 'Continuar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ABM de releases de firmware (ola C) */}
       {fwAbmOpen && fwForm && (
@@ -971,9 +1665,21 @@ export default function Multivac() {
                 </select>
               </div>
               <div>
+                <label className="block text-xs text-slate-500 mb-0.5">Producto (aplicación que corre)</label>
+                <select value={fwForm.producto} onChange={(e) => setFwForm((f) => ({ ...f, producto: e.target.value }))}
+                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                  {PRODUCTOS_BOTON.map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs text-slate-500 mb-0.5">Versión</label>
                 <input value={fwForm.version} onChange={(e) => setFwForm((f) => ({ ...f, version: e.target.value }))}
                   placeholder="agua_0.3.0" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-0.5">Nombre (para la tabla — opcional)</label>
+                <input value={fwForm.nombre} onChange={(e) => setFwForm((f) => ({ ...f, nombre: e.target.value }))}
+                  placeholder="DNP3 Universal FW" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
               </div>
               <div>
                 <label className="block text-xs text-slate-500 mb-0.5">Flash (mode · freq · size)</label>
@@ -1040,19 +1746,7 @@ export default function Multivac() {
               </div>
             </div>
 
-            {firmwares.length > 0 && (
-              <details className="mt-3">
-                <summary className="text-xs text-slate-500 cursor-pointer">Releases existentes ({firmwares.length})</summary>
-                <div className="mt-1 space-y-1">
-                  {firmwares.map((f, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-100 py-1">
-                      <span>{f.modelo} · {f.version} · {f.chip} · {String(f.fecha || '').slice(0, 10)}</span>
-                      <button onClick={() => fwBorrarRelease(i)} className="text-slate-400 hover:text-red-500 px-1">×</button>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
+            <p className="text-[11px] text-slate-400 mt-3">El release se publica <b>sin aprobar</b>: queda solo en esta gestión hasta que lo habilites con el tilde ✓ — recién ahí lo ven todos en «Actualizaciones de firmware».</p>
 
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setFwAbmOpen(false)} disabled={fwSubiendo}
