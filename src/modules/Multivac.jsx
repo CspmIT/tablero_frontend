@@ -12,6 +12,7 @@ import { useData } from '../data/DataContext.jsx';
 // Ola C: flasheo de firmware desde el navegador — librería OFICIAL de
 // Espressif (Web Serial). Los binarios viven en MinIO (gateway storageov).
 import { ESPLoader, Transport } from 'esptool-js';
+import { md5 } from 'js-md5';
 import { getImage, saveImage } from '../api/minio.js';
 
 // Servicios UART-BLE candidatos (Lorenzo confirmó BLE; el UUID exacto de su
@@ -201,11 +202,26 @@ export default function Multivac() {
     api.multivac.firmwares().then((r) => setFirmwares(Array.isArray(r?.firmwares) ? r.firmwares : [])).catch(() => {});
   }, [api]);
 
-  const CHIPS_FW = [
-    { id: 'esp32', label: 'ESP32 clásico (Multivac 1.0 / 7.1)' },
-    { id: 'esp32s3', label: 'ESP32-S3 (Multivac 8.0)' },
-    { id: 'esp32c3', label: 'ESP32-C3 mini (accesorios RS485)' },
+  // Criterio de diseño (Leonardo+Lorenzo, 12/08): una versión de firmware es
+  // EXACTAMENTE para un modelo de placa, y cada modelo tiene UN chip fijo.
+  // Por eso el ABM pide solo el equipo: el chip viene pegado (nada que elegir).
+  // Placa nueva en el parque = una línea acá.
+  const EQUIPOS_FW = [
+    { modelo: 'Multivac 1.0/7.1', chip: 'esp32' },
+    { modelo: 'Multivac 8.0', chip: 'esp32s3' },
+    { modelo: 'Lector de pulsos RS485', chip: 'esp32c3' },
+    { modelo: 'Sensor ultrasónico RS485', chip: 'esp32c3' },
+    { modelo: 'Lector de bombas RS485', chip: 'esp32c3' },
   ];
+  const CHIP_LABEL = { esp32: 'ESP32 clásico', esp32s3: 'ESP32-S3', esp32c3: 'ESP32-C3 mini' };
+  // Parámetros de flash: DESPLEGABLES con opciones válidas (nada de texto libre
+  // — pedido de Leonardo 12/08), etiquetas estilo Arduino, valores esptool.
+  // Las frecuencias válidas dependen del chip (S3 no soporta 26/20MHz).
+  const FLASH_MODES = ['qio', 'dio', 'qout', 'dout'];
+  const FLASH_FREQS = { esp32: ['80m', '40m', '26m', '20m'], esp32s3: ['80m', '40m'], esp32c3: ['80m', '40m', '26m', '20m'] };
+  const FLASH_SIZES = ['1MB', '2MB', '4MB', '8MB', '16MB'];
+  const MODE_LABEL = { qio: 'QIO', dio: 'DIO', qout: 'QOUT', dout: 'DOUT' };
+  const FREQ_LABEL = { '80m': '80MHz', '40m': '40MHz', '26m': '26MHz', '20m': '20MHz' };
   const normalizarChip = (nombre) => {
     const n = String(nombre || '').toUpperCase();
     if (n.includes('S3')) return 'esp32s3';
@@ -220,8 +236,9 @@ export default function Multivac() {
     .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
   const fwSel = firmwares[fwIdxSel] || null;
 
-  const fwProgramar = async () => {
+  const fwProgramar = async (modo = 'actualizar') => {
     if (!fwSel || flasheando) return;
+    if (modo === 'fabrica' && !fwSel.merged?.key) return;
     // El flasheo necesita el puerto para él solo: cerrar la sesión CLI si está abierta.
     if (conectado) { log('sys', 'Cerrando la sesión del CLI para programar…'); await desconectar(); }
     let transport = null;
@@ -236,35 +253,89 @@ export default function Multivac() {
       });
       const chipNombre = await loader.main();
       const detectado = normalizarChip(chipNombre);
-      log('sys', `Chip detectado: ${chipNombre}`);
+      // Levantar los datos REALES de la placa: tamaño físico de la flash y el
+      // header del firmware presente (declara mode/freq/size con que se grabó).
+      let sizePlaca = null;
+      try { sizePlaca = await loader.detectFlashSize(); } catch { /* opcional */ }
+      let fwActual = null;
+      try {
+        const hdr = await loader.readFlash(detectado === 'esp32' ? 0x1000 : 0x0, 4);
+        if (hdr && hdr[0] === 0xE9) {
+          // Orden del HEADER de imagen ESP32 (≠ orden del desplegable): 0=QIO 1=QOUT 2=DIO 3=DOUT.
+          const modesHdr = ['qio', 'qout', 'dio', 'dout'];
+          const sizes = { 0: '1MB', 1: '2MB', 2: '4MB', 3: '8MB', 4: '16MB' };
+          const freqs = { 0: '40m', 1: '26m', 2: '20m', 15: '80m' };
+          fwActual = { mode: modesHdr[hdr[2]] || '?', size: sizes[hdr[3] >> 4] || '?', freq: freqs[hdr[3] & 0x0f] || '?' };
+        }
+      } catch { /* placa virgen o lectura no disponible: seguir */ }
+      log('sys', `Placa: ${chipNombre} · flash física: ${sizePlaca || '?'}${fwActual ? ` · firmware actual: ${MODE_LABEL[fwActual.mode] || fwActual.mode} / ${FREQ_LABEL[fwActual.freq] || fwActual.freq} / ${fwActual.size}` : ' · sin firmware legible (¿placa virgen?)'}`);
       if (detectado !== fwSel.chip) {
         log('sys', `⛔ ABORTADO: el firmware "${fwSel.modelo} ${fwSel.version}" es para ${fwSel.chip.toUpperCase()} y la placa conectada es ${chipNombre}. Nada se escribió.`);
         return;
       }
-      if (!confirm(`Vas a programar:\n\n${fwSel.modelo} · versión ${fwSel.version}\nChip detectado: ${chipNombre} ✓\n${fwSel.segmentos.length} segmento(s), sin borrar configuración ni datos.\n\n¿Continuar?`)) {
+      const mb = (s) => Number(String(s || '').replace('MB', '')) || 0;
+      if (sizePlaca && fwSel.flash?.size && fwSel.flash.size !== 'keep' && mb(fwSel.flash.size) > mb(sizePlaca)) {
+        log('sys', `⛔ ABORTADO: el release declara flash de ${fwSel.flash.size} y la placa tiene ${sizePlaca}. Nada se escribió.`);
+        return;
+      }
+      if (fwActual && fwSel.flash?.mode && fwSel.flash.mode !== 'keep' && fwActual.mode !== '?' && fwActual.mode !== fwSel.flash.mode) {
+        log('sys', `⚠ Aviso: el firmware actual está en ${MODE_LABEL[fwActual.mode]} y el release usa ${MODE_LABEL[fwSel.flash.mode]} — manda el release (lo validado por Lorenzo).`);
+      }
+      if (modo === 'fabrica') {
+        // Doble confirmación: fábrica borra config, LittleFS y el spool de mediciones.
+        if (!confirm(`🏭 VOLVER A FÁBRICA\n\n${fwSel.modelo} · versión ${fwSel.version}\nChip detectado: ${chipNombre} ✓\n\n⚠ Esto BORRA TODO: configuración, red, y las MEDICIONES pendientes de subir.\nEl equipo queda como recién salido de fábrica.\n\n¿Continuar?`)
+          || !confirm('Última confirmación: ¿seguro que querés BORRAR TODO y volver a fábrica?')) {
+          log('sys', 'Vuelta a fábrica cancelada.');
+          return;
+        }
+      } else if (!confirm(`Vas a ACTUALIZAR:\n\n${fwSel.modelo} · versión ${fwSel.version}\nChip detectado: ${chipNombre} ✓\n\n${fwSel.segmentos.map((sg) => `${sg.offset}  ${sg.nombre}`).join('\n')}\n\nSIN borrar configuración ni mediciones.\n¿Continuar?`)) {
         log('sys', 'Programación cancelada por el usuario.');
         return;
       }
+      const aBajar = modo === 'fabrica'
+        ? [{ key: fwSel.merged.key, nombre: fwSel.merged.nombre || 'merged.bin', offset: '0x0', tamano: fwSel.merged.tamano }]
+        : fwSel.segmentos;
+      // TODO se descarga y VERIFICA antes de tocar la placa: un microcorte de
+      // internet corta acá (la placa queda intacta); durante la escritura la
+      // red ya no participa (RAM → USB, con checksum por bloque de esptool).
       const fileArray = [];
-      for (const seg of fwSel.segmentos) {
+      for (const seg of aBajar) {
         log('sys', `Descargando ${seg.nombre || seg.key} (${seg.offset})…`);
         const objUrl = await getImage(seg.key);
         const buf = await (await fetch(objUrl)).arrayBuffer();
         URL.revokeObjectURL(objUrl);
+        if (seg.tamano != null && buf.byteLength !== Number(seg.tamano)) {
+          log('sys', `⛔ ABORTADO antes de escribir: ${seg.nombre} bajó ${buf.byteLength} bytes y el manifiesto dice ${seg.tamano} (descarga incompleta o archivo alterado). La placa NO se tocó — reintentá.`);
+          return;
+        }
+        if (seg.sha256) {
+          const hex = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', buf))).map((b) => b.toString(16).padStart(2, '0')).join('');
+          if (hex !== seg.sha256) {
+            log('sys', `⛔ ABORTADO antes de escribir: la huella SHA-256 de ${seg.nombre} NO coincide con la publicada por Lorenzo (bit corrupto o archivo alterado). La placa NO se tocó.`);
+            return;
+          }
+        }
         fileArray.push({ data: new Uint8Array(buf), address: parseInt(seg.offset, 16) });
       }
-      log('sys', `Escribiendo ${fileArray.length} segmento(s)…`);
+      log('sys', '✓ Binarios completos y verificados bit a bit (SHA-256) contra el manifiesto publicado.');
+      log('sys', modo === 'fabrica' ? 'Borrando flash completa y escribiendo imagen de fábrica…' : `Escribiendo ${fileArray.length} segmento(s)…`);
       await loader.writeFlash({
         fileArray,
         flashMode: fwSel.flash?.mode || 'keep',
         flashFreq: fwSel.flash?.freq || 'keep',
         flashSize: fwSel.flash?.size || 'keep',
-        eraseAll: false,
+        eraseAll: modo === 'fabrica', // fábrica = borrado total deliberado
         compress: true,
         reportProgress: (i, escrito, total) => setFlashProg({ seg: i + 1, total: fileArray.length, pct: total ? Math.round((escrito / total) * 100) : 0 }),
+        // Verify post-escritura: la placa recalcula el MD5 de lo GRABADO y se
+        // compara con la imagen — el mismo verify que hace el esptool del
+        // script de Lorenzo. Si no coincide, esptool-js lo reporta como error.
+        calculateMD5Hash: (image) => md5(image),
       });
       await loader.after('hard_reset');
-      log('sys', `✅ ${fwSel.modelo} ${fwSel.version} programado. La placa se reinició: reconectá el CLI y verificá con "info".`);
+      log('sys', modo === 'fabrica'
+        ? `✅ ${fwSel.modelo} ${fwSel.version} — vuelta a fábrica completa. El equipo arranca SIN configuración: aprovisionalo con las recetas o desde CriterIA.`
+        : `✅ ${fwSel.modelo} ${fwSel.version} actualizado (config y mediciones intactas). Reconectá el CLI y verificá con "info".`);
     } catch (e) {
       log('sys', '⚠ Flasheo: ' + (e?.message || e) + ' — la placa puede reprogramarse sin problema, reintentá.');
     } finally {
@@ -281,30 +352,67 @@ export default function Multivac() {
     { rol: 'app', offset: '0x10000' },
   ];
   const fwAbrirAlta = () => {
+    const eq = EQUIPOS_FW.find((e) => e.modelo === fwModeloSel) || EQUIPOS_FW[0];
     setFwForm({
-      modelo: fwModeloSel || '', chip: 'esp32', version: '', notas: '',
+      modelo: eq.modelo, chip: eq.chip, version: '', notas: '',
       flash: { mode: 'dio', freq: '80m', size: '4MB' },
       filas: SEGMENTOS_TIPICOS.map((sg) => ({ ...sg, archivo: null })),
+      fuenteArchivo: null,   // proyecto completo (.zip/.rar) — backup del código
+      mergedArchivo: null,   // imagen merged — volver a fábrica
+      flashArgs: '',         // contenido de build/.../flash_args para autocompletar
     });
     setFwAbmOpen(true);
   };
+
+  // Autocompletar desde el flash_args del build de Arduino (el "script de
+  // carga" ya existe en cada export: offsets + parámetros, formato esptool).
+  const fwAplicarFlashArgs = () => {
+    // Acepta el flash_args pelado O el script completo de Lorenzo (PowerShell/
+    // bash/Python que invoque esptool): no se ejecuta NADA — solo se extraen
+    // offsets, archivos y parámetros. Se limpian continuadores (` y \) y comillas.
+    const t = String(fwForm?.flashArgs || '').replace(/[`"']/g, ' ').replace(/\\\s*$/gm, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) return;
+    const flash = { ...fwForm.flash };
+    const m1 = t.match(/--flash_mode\s+(\S+)/); if (m1) flash.mode = m1[1].toLowerCase();
+    const m2 = t.match(/--flash_freq\s+(\S+)/); if (m2) flash.freq = m2[1].replace(/hz$/i, '').replace(/mhz$/i, 'm');
+    const m3 = t.match(/--flash_size\s+(\S+)/); if (m3) flash.size = m3[1].toUpperCase().replace('MB', 'MB');
+    const pares = [...t.matchAll(/(0x[0-9a-fA-F]+)\s+([^\s-]\S*)/g)]
+      .map((m) => ({ rol: (m[2].split(/[\\/]/).pop() || '').slice(0, 60), offset: m[1], archivo: null }));
+    if (flash.freq && !(FLASH_FREQS[fwForm.chip] || []).includes(flash.freq)) flash.freq = (FLASH_FREQS[fwForm.chip] || ['80m'])[0];
+    if (flash.mode && !FLASH_MODES.includes(flash.mode)) delete flash.mode;
+    if (flash.size && !FLASH_SIZES.includes(flash.size)) delete flash.size;
+    setFwForm((f) => ({ ...f, flash: { ...f.flash, ...flash }, filas: pares.length ? pares : f.filas }));
+  };
   const fwGuardarRelease = async () => {
     const filas = (fwForm.filas || []).filter((f) => f.archivo && /^0x[0-9a-fA-F]{1,8}$/.test(f.offset.trim()));
-    if (!fwForm.modelo.trim() || !fwForm.version.trim() || !filas.length) {
-      alert('Completá modelo, versión y al menos un segmento con archivo y offset hexa (0x…).'); return;
+    if (!fwForm.modelo.trim() || !fwForm.version.trim() || (!filas.length && !fwForm.mergedArchivo)) {
+      alert('Completá modelo, versión y al menos un segmento con archivo (o el merged de fábrica).'); return;
     }
     setFwSubiendo(true);
     try {
+      // Cadena de integridad (12/08, pedido de robustez de Lorenzo): al publicar
+      // se calcula el SHA-256 de CADA archivo y queda inmutable en el manifiesto.
+      const sha256Hex = async (buf) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', buf))).map((b) => b.toString(16).padStart(2, '0')).join('');
+      const subir = async (archivo) => {
+        const buf = await archivo.arrayBuffer();
+        const sha256 = await sha256Hex(buf);
+        const key = await saveImage(archivo);
+        // Referencia en el modelo Archivo (trazabilidad; el binario vive en MinIO).
+        try { await api.archivos.create({ key, nombre: archivo.name, mime: 'application/octet-stream', tamano: archivo.size, contexto: 'firmware' }); } catch { /* la referencia es secundaria */ }
+        return { key, sha256 };
+      };
       const segmentos = [];
       for (const fila of filas) {
-        const key = await saveImage(fila.archivo);
-        // Referencia en el modelo Archivo (trazabilidad; el binario vive en MinIO).
-        try { await api.archivos.create({ key, nombre: fila.archivo.name, mime: 'application/octet-stream', tamano: fila.archivo.size, contexto: 'firmware' }); } catch { /* la referencia es secundaria */ }
-        segmentos.push({ offset: fila.offset.trim(), key, nombre: fila.archivo.name, tamano: fila.archivo.size });
+        const { key, sha256 } = await subir(fila.archivo);
+        segmentos.push({ offset: fila.offset.trim(), key, nombre: fila.archivo.name, tamano: fila.archivo.size, sha256 });
       }
+      let fuente = null;
+      if (fwForm.fuenteArchivo) { const r0 = await subir(fwForm.fuenteArchivo); fuente = { key: r0.key, sha256: r0.sha256, nombre: fwForm.fuenteArchivo.name, tamano: fwForm.fuenteArchivo.size }; }
+      let merged = null;
+      if (fwForm.mergedArchivo) { const r1 = await subir(fwForm.mergedArchivo); merged = { key: r1.key, sha256: r1.sha256, nombre: fwForm.mergedArchivo.name, tamano: fwForm.mergedArchivo.size }; }
       const release = {
         modelo: fwForm.modelo.trim(), chip: fwForm.chip, version: fwForm.version.trim(),
-        notas: fwForm.notas.trim(), flash: fwForm.flash, segmentos,
+        notas: fwForm.notas.trim(), flash: fwForm.flash, segmentos, fuente, merged,
       };
       const r = await api.multivac.guardarFirmwares([...firmwares, release]);
       setFirmwares(Array.isArray(r?.firmwares) ? r.firmwares : [...firmwares, release]);
@@ -313,6 +421,18 @@ export default function Multivac() {
     } catch (e) { alert(e.message || 'No se pudo subir el release'); }
     finally { setFwSubiendo(false); }
   };
+  const fwDescargarFuente = async () => {
+    if (!fwSel?.fuente?.key) return;
+    try {
+      log('sys', `Descargando backup del proyecto (${fwSel.fuente.nombre})…`);
+      const objUrl = await getImage(fwSel.fuente.key);
+      const a = document.createElement('a');
+      a.href = objUrl; a.download = fwSel.fuente.nombre || 'proyecto.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+    } catch (e) { alert(e.message || 'No se pudo descargar el proyecto'); }
+  };
+
   const fwBorrarRelease = async (idx) => {
     if (!confirm('¿Quitar este release del catálogo? (los binarios quedan en el almacenamiento)')) return;
     const nuevos = firmwares.filter((_, i) => i !== idx);
@@ -699,11 +819,38 @@ export default function Multivac() {
                 {fwSel && (
                   <>
                     {fwSel.notas && <p className="text-xs text-slate-500 mb-2 whitespace-pre-wrap">{fwSel.notas}</p>}
-                    <p className="text-[11px] text-slate-400 mb-2">{CHIPS_FW.find((c) => c.id === fwSel.chip)?.label || fwSel.chip} · {fwSel.segmentos.length} segmento(s)</p>
-                    <button onClick={fwProgramar} disabled={flasheando || !soportaSerial}
-                      className="w-full px-3 py-2 text-sm font-medium bg-coop-naranja text-white rounded-lg hover:opacity-90 disabled:opacity-40">
-                      {flasheando ? 'Programando…' : `🔌 Programar ${fwSel.version} por USB`}
-                    </button>
+                    <p className="text-[11px] text-slate-400 mb-1">Chip: {CHIP_LABEL[fwSel.chip] || fwSel.chip} · flash {MODE_LABEL[fwSel.flash?.mode] || fwSel.flash?.mode} / {FREQ_LABEL[fwSel.flash?.freq] || fwSel.flash?.freq} / {fwSel.flash?.size}</p>
+                    {/* La "tabla sagrada" del release (miedo puntual de Lorenzo): el mapa
+                        offset → archivo, visible ANTES de tocar nada, tal cual se grabará. */}
+                    {fwSel.segmentos.length > 0 && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 mb-2 font-mono text-[10.5px] text-slate-600">
+                        {fwSel.segmentos.map((sg, i) => (
+                          <div key={i} className="flex justify-between gap-2">
+                            <span className="text-coop-azul shrink-0">{sg.offset}</span>
+                            <span className="truncate">{sg.nombre}</span>
+                            {sg.sha256 && <span className="text-slate-400 shrink-0" title={`SHA-256: ${sg.sha256}`}>✓{sg.sha256.slice(0, 8)}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {fwSel.segmentos.length > 0 && (
+                      <button onClick={() => fwProgramar('actualizar')} disabled={flasheando || !soportaSerial}
+                        className="w-full px-3 py-2 text-sm font-medium bg-coop-naranja text-white rounded-lg hover:opacity-90 disabled:opacity-40">
+                        {flasheando ? 'Programando…' : `⬆ Actualizar a ${fwSel.version} (conserva config)`}
+                      </button>
+                    )}
+                    {fwSel.merged?.key && (
+                      <button onClick={() => fwProgramar('fabrica')} disabled={flasheando || !soportaSerial}
+                        className="w-full mt-1.5 px-3 py-2 text-sm font-medium border border-red-300 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-40">
+                        🏭 Volver a fábrica (borra TODO)
+                      </button>
+                    )}
+                    {fwSel.fuente?.key && (
+                      <button onClick={fwDescargarFuente} disabled={flasheando}
+                        className="w-full mt-1.5 px-3 py-1.5 text-xs border border-slate-300 text-slate-600 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+                        ⬇ Descargar proyecto completo ({fwSel.fuente.nombre})
+                      </button>
+                    )}
                     {flashProg && (
                       <div className="mt-2">
                         <div className="flex justify-between text-[11px] text-slate-500 mb-0.5">
@@ -731,18 +878,11 @@ export default function Multivac() {
             <p className="text-xs text-slate-400 mb-3">Los .bin POR PARTICIÓN que exporta Lorenzo (no el merged: pisaría configuración y mediciones). Offsets típicos precargados — ajustalos según el manifiesto de la versión.</p>
             <div className="grid sm:grid-cols-2 gap-2 mb-2">
               <div>
-                <label className="block text-xs text-slate-500 mb-0.5">Equipo / modelo</label>
-                <input value={fwForm.modelo} onChange={(e) => setFwForm((f) => ({ ...f, modelo: e.target.value }))} list="fw-modelos"
-                  placeholder="Multivac 1.0/7.1" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
-                <datalist id="fw-modelos">
-                  {['Multivac 1.0/7.1', 'Multivac 8.0', 'Lector de pulsos RS485', 'Sensor ultrasónico RS485', 'Lector de bombas RS485', ...fwModelos].map((m) => <option key={m} value={m} />)}
-                </datalist>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-0.5">Chip</label>
-                <select value={fwForm.chip} onChange={(e) => setFwForm((f) => ({ ...f, chip: e.target.value }))}
+                <label className="block text-xs text-slate-500 mb-0.5">Equipo (el chip viene con la placa, no se elige)</label>
+                <select value={fwForm.modelo}
+                  onChange={(e) => { const eq = EQUIPOS_FW.find((x) => x.modelo === e.target.value); setFwForm((f) => ({ ...f, modelo: eq.modelo, chip: eq.chip, flash: { ...f.flash, freq: (FLASH_FREQS[eq.chip] || []).includes(f.flash.freq) ? f.flash.freq : (FLASH_FREQS[eq.chip] || ['80m'])[0] } })); }}
                   className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
-                  {CHIPS_FW.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  {EQUIPOS_FW.map((eq) => <option key={eq.modelo} value={eq.modelo}>{eq.modelo} — {CHIP_LABEL[eq.chip]}</option>)}
                 </select>
               </div>
               <div>
@@ -753,10 +893,18 @@ export default function Multivac() {
               <div>
                 <label className="block text-xs text-slate-500 mb-0.5">Flash (mode · freq · size)</label>
                 <div className="flex gap-1">
-                  {['mode', 'freq', 'size'].map((k) => (
-                    <input key={k} value={fwForm.flash[k]} onChange={(e) => setFwForm((f) => ({ ...f, flash: { ...f.flash, [k]: e.target.value } }))}
-                      className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
-                  ))}
+                  <select value={fwForm.flash.mode} onChange={(e) => setFwForm((f) => ({ ...f, flash: { ...f.flash, mode: e.target.value } }))}
+                    className="w-full border border-slate-300 rounded-lg px-1.5 py-1.5 text-xs">
+                    {FLASH_MODES.map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+                  </select>
+                  <select value={fwForm.flash.freq} onChange={(e) => setFwForm((f) => ({ ...f, flash: { ...f.flash, freq: e.target.value } }))}
+                    className="w-full border border-slate-300 rounded-lg px-1.5 py-1.5 text-xs">
+                    {(FLASH_FREQS[fwForm.chip] || FLASH_FREQS.esp32).map((fq) => <option key={fq} value={fq}>{FREQ_LABEL[fq]}</option>)}
+                  </select>
+                  <select value={fwForm.flash.size} onChange={(e) => setFwForm((f) => ({ ...f, flash: { ...f.flash, size: e.target.value } }))}
+                    className="w-full border border-slate-300 rounded-lg px-1.5 py-1.5 text-xs">
+                    {FLASH_SIZES.map((sz) => <option key={sz} value={sz}>{sz}</option>)}
+                  </select>
                 </div>
               </div>
             </div>
@@ -777,6 +925,28 @@ export default function Multivac() {
             </div>
             <button onClick={() => setFwForm((f) => ({ ...f, filas: [...f.filas, { rol: '', offset: '0x', archivo: null }] }))}
               className="mt-2 text-xs text-coop-azul hover:underline">+ Agregar segmento</button>
+
+            <details className="mt-2">
+              <summary className="text-xs text-slate-500 cursor-pointer">Autocompletar desde flash_args o tu script de flasheo</summary>
+              <p className="text-[11px] text-slate-400 mt-1 mb-1">Pegá el <span className="font-mono">build/…/flash_args</span> del export de Arduino <b>o directamente tu script de laboratorio</b> (PowerShell / bash / Python que invoque esptool): NO se ejecuta — solo se extraen offsets, archivos y parámetros. Después asigná cada .bin a su fila.</p>
+              <textarea rows={3} value={fwForm.flashArgs} onChange={(e) => setFwForm((f) => ({ ...f, flashArgs: e.target.value }))}
+                placeholder="--flash_mode dio --flash_freq 80m --flash_size 4MB 0x1000 xxx.bootloader.bin 0x8000 xxx.partitions.bin …"
+                className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
+              <button onClick={fwAplicarFlashArgs} className="mt-1 px-2.5 py-1 text-[11px] border border-slate-300 rounded-lg hover:border-coop-azul">Aplicar</button>
+            </details>
+
+            <div className="grid sm:grid-cols-2 gap-2 mt-3 border-t border-slate-100 pt-2">
+              <div>
+                <label className="block text-xs text-slate-500 mb-0.5">🏭 Merged (volver a fábrica) — opcional</label>
+                <input type="file" accept=".bin" onChange={(e) => setFwForm((f) => ({ ...f, mergedArchivo: e.target.files?.[0] || null }))} className="w-full text-xs" />
+                <p className="text-[10px] text-slate-400 mt-0.5">El .ino.merged.bin del build. Borra config y mediciones al usarlo.</p>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-0.5">📦 Proyecto completo (backup) — opcional</label>
+                <input type="file" accept=".zip,.rar,.7z" onChange={(e) => setFwForm((f) => ({ ...f, fuenteArchivo: e.target.files?.[0] || null }))} className="w-full text-xs" />
+                <p className="text-[10px] text-slate-400 mt-0.5">El código fuente comprimido: respaldo por si se pierde el proyecto.</p>
+              </div>
+            </div>
 
             {firmwares.length > 0 && (
               <details className="mt-3">
