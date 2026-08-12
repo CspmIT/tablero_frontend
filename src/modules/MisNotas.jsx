@@ -12,6 +12,9 @@ const fmtHora = (v) => { try { const d = new Date(v); return `${String(d.getDate
 
 export default function MisNotas() {
   const { api, me } = useData();
+  // OJO: /auth/me devuelve colaboradorId, NO id (bug 10/08: la nota propia
+  // aparecía como ajena y el textarea quedaba vacío por comparar con me.id).
+  const miId = Number(me?.colaboradorId ?? me?.id);
   const [lunes, setLunes] = useState(() => getMonday(new Date()));
   const anio = lunes.getFullYear();
   const semanaIso = getISOWeek(lunes);
@@ -28,12 +31,12 @@ export default function MisNotas() {
       const r = await api.notas.list(anio, semanaIso);
       const todas = r?.notas || [];
       setNotas(todas);
-      const mia = todas.find((n) => n.colaboradorId === me?.id);
+      const mia = todas.find((n) => Number(n.colaboradorId) === miId);
       setTexto(mia?.texto || '');
       setTextoOriginal(mia?.texto || '');
     } catch { setNotas([]); setTexto(''); setTextoOriginal(''); }
     setCargando(false);
-  }, [api, anio, semanaIso, me?.id]);
+  }, [api, anio, semanaIso, miId]);
   useEffect(() => { cargar(); }, [cargar]);
 
   const guardar = async () => {
@@ -48,7 +51,7 @@ export default function MisNotas() {
   };
 
   const esHoy = getMonday(new Date()).getTime() === lunes.getTime();
-  const ajenas = notas.filter((n) => n.colaboradorId !== me?.id);
+  const ajenas = notas.filter((n) => Number(n.colaboradorId) !== miId);
   const sinGuardar = texto !== textoOriginal;
 
   return (

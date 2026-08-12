@@ -94,7 +94,7 @@ export default function Deseos() {
       <div className="space-y-2">
         {lista.map((d) => {
           const est = ESTADOS[d.estado] || ESTADOS.borrador;
-          const esMio = d.solicitanteId === me?.id;
+          const esMio = Number(d.solicitanteId) === Number(me?.colaboradorId ?? me?.id); // /auth/me trae colaboradorId, no id (fix 10/08)
           const editable = esMio && ['borrador', 'requiere_cambios'].includes(d.estado);
           return (
             <div key={d.id} className="bg-white rounded-xl border border-slate-200 p-4">

@@ -89,10 +89,18 @@ export const api = {
     set: (body) => http.put('/notas', body),
   },
 
-  // Botones compartidos del terminal Multivac (ola 3).
+  // Botones, recetas y aprovisionamiento del terminal Multivac (olas 3 y B).
   multivac: {
     botones: () => http.get('/multivac/botones'),
     guardarBotones: (botones) => http.put('/multivac/botones', { botones }),
+    recetas: () => http.get('/multivac/recetas'),
+    guardarRecetas: (recetas) => http.put('/multivac/recetas', { recetas }),
+    plantillaSensor: () => http.get('/multivac/plantilla-sensor'),
+    guardarPlantillaSensor: (plantilla) => http.put('/multivac/plantilla-sensor', { plantilla }),
+    leadsConPlanteo: () => http.get('/multivac/aprovisionamiento'),
+    planteoDeLead: (leadId) => http.get(`/multivac/aprovisionamiento/${leadId}`),
+    firmwares: () => http.get('/multivac/firmwares'),
+    guardarFirmwares: (firmwares) => http.put('/multivac/firmwares', { firmwares }),
   },
 
   costos: {

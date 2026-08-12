@@ -16,7 +16,7 @@ export default function AguaModal({ open, lead, modo, estadoInicial, onAutoSave,
       const win = iframeRef.current?.contentWindow;
       switch (msg.type) {
         case 'iframe_listo':
-          if (lead) win?.postMessage({ __coop: true, type: 'precargar_datos', meta: { leadId: lead.id, razon: lead.organizacion || '', localidad: lead.ciudad || '', contacto: lead.contactoNombre || '', userId: me?.id || null, userNombre: me?.nombre || null } }, '*');
+          if (lead) win?.postMessage({ __coop: true, type: 'precargar_datos', meta: { leadId: lead.id, razon: lead.organizacion || '', localidad: lead.ciudad || '', contacto: lead.contactoNombre || '', userId: me?.colaboradorId ?? me?.id ?? null, userNombre: me?.nombre || null } }, '*');
           win?.postMessage({ __coop: true, type: 'cargar_estado', estado: estadoInicial || null, modo: modo || 'relevamiento' }, '*');
           break;
         case 'finalizar_relevamiento':
