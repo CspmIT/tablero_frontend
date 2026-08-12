@@ -351,6 +351,49 @@ export default function Multivac() {
     { rol: 'boot_app0', offset: '0xE000' },
     { rol: 'app', offset: '0x10000' },
   ];
+  // Arrastre inteligente (pedido de Leonardo 12/08: Lorenzo ya tiene la carpeta
+  // del build abierta en otra pantalla): soltás los archivos y cada uno va solo
+  // a su lugar por nombre — bootloader→0x1000, partitions.bin→0x8000,
+  // boot_app0→0xE000, app→0x10000, merged→fábrica, zip/rar→backup, y si viene
+  // flash_args se aplica solo (offsets + parámetros). Ignora la paja del build
+  // (_flashed, .elf, .map, sdkconfig...) sin molestar.
+  const [fwArrastrando, setFwArrastrando] = useState(false);
+  const fwSoltarArchivos = async (files) => {
+    const lista = Array.from(files || []);
+    if (!lista.length) return;
+    let flashArgsTexto = null;
+    const IGNORAR = /(_flashed\.bin$|\.elf$|\.map$|\.json$|\.csv$|sdkconfig)/i;
+    const cambios = { filas: null, merged: undefined, fuente: undefined };
+    const sinAsignar = [];
+    const filas = fwForm.filas.map((x) => ({ ...x }));
+    const aFila = (pred, archivo) => { const i = filas.findIndex(pred); if (i >= 0) { filas[i].archivo = archivo; return true; } return false; };
+    for (const file of lista) {
+      const n = file.name.toLowerCase();
+      if (n === 'flash_args') { try { flashArgsTexto = await file.text(); } catch { /* */ } continue; }
+      if (IGNORAR.test(n)) continue;
+      if (/\.(zip|rar|7z)$/.test(n)) { cambios.fuente = file; continue; }
+      if (!/\.bin$/.test(n)) { sinAsignar.push(file.name); continue; }
+      if (n.endsWith('.merged.bin')) { cambios.merged = file; continue; }
+      if (n.includes('bootloader')) { if (!aFila((x) => x.rol === 'bootloader' || x.offset.trim().toLowerCase() === '0x1000', file)) sinAsignar.push(file.name); continue; }
+      if (n.includes('partitions')) { if (!aFila((x) => x.rol === 'partitions' || x.offset.trim().toLowerCase() === '0x8000', file)) sinAsignar.push(file.name); continue; }
+      if (n.includes('boot_app0')) { if (!aFila((x) => x.rol === 'boot_app0' || x.offset.trim().toLowerCase() === '0xe000', file)) sinAsignar.push(file.name); continue; }
+      // app (o cualquier otro .bin): fila app → primera fila libre → fila nueva
+      if (!aFila((x) => (x.rol === 'app' || x.offset.trim().toLowerCase() === '0x10000') && !x.archivo, file)) {
+        const libre = filas.findIndex((x) => !x.archivo);
+        if (libre >= 0) filas[libre].archivo = file; else filas.push({ rol: '', offset: '0x', archivo: file });
+      }
+    }
+    setFwForm((f) => ({
+      ...f,
+      filas,
+      ...(cambios.merged !== undefined ? { mergedArchivo: cambios.merged } : {}),
+      ...(cambios.fuente !== undefined ? { fuenteArchivo: cambios.fuente } : {}),
+      ...(flashArgsTexto ? { flashArgs: flashArgsTexto } : {}),
+    }));
+    if (flashArgsTexto) setTimeout(() => fwAplicarFlashArgs(flashArgsTexto), 0);
+    if (sinAsignar.length) alert('Quedaron sin asignar (ubicalos a mano): ' + sinAsignar.join(', '));
+  };
+
   const fwAbrirAlta = () => {
     const eq = EQUIPOS_FW.find((e) => e.modelo === fwModeloSel) || EQUIPOS_FW[0];
     setFwForm({
@@ -366,11 +409,11 @@ export default function Multivac() {
 
   // Autocompletar desde el flash_args del build de Arduino (el "script de
   // carga" ya existe en cada export: offsets + parámetros, formato esptool).
-  const fwAplicarFlashArgs = () => {
+  const fwAplicarFlashArgs = (textoDirecto) => {
     // Acepta el flash_args pelado O el script completo de Lorenzo (PowerShell/
     // bash/Python que invoque esptool): no se ejecuta NADA — solo se extraen
     // offsets, archivos y parámetros. Se limpian continuadores (` y \) y comillas.
-    const t = String(fwForm?.flashArgs || '').replace(/[`"']/g, ' ').replace(/\\\s*$/gm, ' ').replace(/\s+/g, ' ').trim();
+    const t = String(typeof textoDirecto === 'string' ? textoDirecto : (fwForm?.flashArgs || '')).replace(/[`"']/g, ' ').replace(/\\\s*$/gm, ' ').replace(/\s+/g, ' ').trim();
     if (!t) return;
     const flash = { ...fwForm.flash };
     const m1 = t.match(/--flash_mode\s+(\S+)/); if (m1) flash.mode = m1[1].toLowerCase();
@@ -381,12 +424,33 @@ export default function Multivac() {
     if (flash.freq && !(FLASH_FREQS[fwForm.chip] || []).includes(flash.freq)) flash.freq = (FLASH_FREQS[fwForm.chip] || ['80m'])[0];
     if (flash.mode && !FLASH_MODES.includes(flash.mode)) delete flash.mode;
     if (flash.size && !FLASH_SIZES.includes(flash.size)) delete flash.size;
-    setFwForm((f) => ({ ...f, flash: { ...f.flash, ...flash }, filas: pares.length ? pares : f.filas }));
+    // MERGE con lo ya cargado: los archivos asignados (p.ej. por arrastre) se
+    // conservan matcheando por offset o por nombre — flash_args no pisa nada.
+    setFwForm((f) => ({
+      ...f,
+      flash: { ...f.flash, ...flash },
+      filas: pares.length
+        ? pares.map((par) => {
+            const previa = f.filas.find((x) => x.archivo && x.offset.trim().toLowerCase() === par.offset.toLowerCase())
+              || f.filas.find((x) => x.archivo && x.archivo.name.toLowerCase() === String(par.rol || '').toLowerCase());
+            return { ...par, archivo: previa?.archivo || null };
+          })
+        : f.filas,
+    }));
   };
   const fwGuardarRelease = async () => {
     const filas = (fwForm.filas || []).filter((f) => f.archivo && /^0x[0-9a-fA-F]{1,8}$/.test(f.offset.trim()));
     if (!fwForm.modelo.trim() || !fwForm.version.trim() || (!filas.length && !fwForm.mergedArchivo)) {
       alert('Completá modelo, versión y al menos un segmento con archivo (o el merged de fábrica).'); return;
+    }
+    // Solo .bin en los segmentos (caso real 12/08: se coló un partitions.csv —
+    // el .csv es la RECETA de la tabla, el que se graba es .ino.partitions.bin).
+    const noBin = filas.find((f) => !/\.bin$/i.test(f.archivo.name));
+    if (noBin) {
+      alert(`"${noBin.archivo.name}" no es un .bin.\nEn los segmentos van SOLO los binarios del build (p.ej. el partitions va con .ino.partitions.bin, no con partitions.csv).`); return;
+    }
+    if (fwForm.mergedArchivo && !/\.bin$/i.test(fwForm.mergedArchivo.name)) {
+      alert('El merged tiene que ser el .ino.merged.bin del build.'); return;
     }
     setFwSubiendo(true);
     try {
@@ -396,7 +460,27 @@ export default function Multivac() {
       const subir = async (archivo) => {
         const buf = await archivo.arrayBuffer();
         const sha256 = await sha256Hex(buf);
-        const key = await saveImage(archivo);
+        // El gateway storageov nació para imágenes y puede rechazar .bin (500,
+        // visto en producción 12/08). Plan A: subir tal cual. Plan B: mismo
+        // contenido byte a byte, camuflado con extensión/mime .pdf SOLO para
+        // atravesar el gateway (el nombre real viaja en el manifiesto). La
+        // verificación de ida y vuelta de abajo garantiza que NADA se alteró.
+        let key;
+        try {
+          key = await saveImage(archivo);
+        } catch {
+          const camuflado = new File([buf], archivo.name + '.pdf', { type: 'application/pdf' });
+          key = await saveImage(camuflado);
+        }
+        // VERIFICACIÓN DE IDA Y VUELTA: se descarga lo recién subido y se
+        // compara el SHA-256 con el del archivo original. Si el almacenamiento
+        // alteró UN bit, la publicación falla acá (nunca llega al catálogo).
+        const objUrl = await getImage(key);
+        const bufVuelta = await (await fetch(objUrl)).arrayBuffer();
+        URL.revokeObjectURL(objUrl);
+        if (await sha256Hex(bufVuelta) !== sha256) {
+          throw new Error(`El almacenamiento devolvió ${archivo.name} ALTERADO (huella distinta). Release NO publicado — avisar a Juan (gateway storageov).`);
+        }
         // Referencia en el modelo Archivo (trazabilidad; el binario vive en MinIO).
         try { await api.archivos.create({ key, nombre: archivo.name, mime: 'application/octet-stream', tamano: archivo.size, contexto: 'firmware' }); } catch { /* la referencia es secundaria */ }
         return { key, sha256 };
@@ -673,55 +757,6 @@ export default function Multivac() {
 
         {/* Columna derecha: la soldadura CriterIA + recetas */}
         <div className="lg:col-span-2">
-          {/* LA SOLDADURA (ola B): planteo CriterIA → aprovisionamiento */}
-          <div className="bg-white border-2 border-coop-azul/30 rounded-xl p-3 mb-4">
-            <h3 className="font-medium text-coop-azul text-sm mb-1">⚡ Aprovisionar desde CriterIA</h3>
-            <p className="text-[11px] text-slate-400 mb-2">Elegí el proyecto: la secuencia se arma sola desde la asignación de recursos del planteo.</p>
-            <select value={cwLeadSel} onChange={(e) => cwElegirLead(e.target.value)}
-              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mb-2">
-              <option value="">— Elegir proyecto con planteo —</option>
-              {cwLeads.map((l) => <option key={l.id} value={l.id}>{l.organizacion}{l.ciudad ? ` (${l.ciudad})` : ''} · {l.equipos} equipo{l.equipos === 1 ? '' : 's'}</option>)}
-            </select>
-            {cwCargando && <p className="text-xs text-slate-400">Leyendo planteo…</p>}
-            {cwDetalle && (
-              <>
-                {cwDetalle.asignacion_recursos.length > 1 && (
-                  <select value={cwEquipoSel} onChange={(e) => cwElegirEquipo(Number(e.target.value))}
-                    className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mb-2">
-                    {cwDetalle.asignacion_recursos.map((eq, i) => <option key={i} value={i}>{eq.equipo || `Equipo ${i + 1}`}{eq.ubicacion ? ` · ${eq.ubicacion}` : ''}</option>)}
-                  </select>
-                )}
-                {['nombre', 'ssid', 'clave'].map((k) => (
-                  <div key={k} className="mb-1.5">
-                    <label className="block text-xs text-slate-500 mb-0.5">{k}</label>
-                    <input value={cwVars[k] || ''} onChange={(e) => setCwVars((v) => ({ ...v, [k]: e.target.value }))}
-                      className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
-                  </div>
-                ))}
-                <label className="block text-xs text-slate-500 mb-0.5 mt-2">Secuencia (editable; # comenta)</label>
-                <textarea rows={9} value={cwSecuencia} onChange={(e) => setCwSecuencia(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
-                <button onClick={cwEnviar} disabled={!conectado}
-                  className="w-full mt-2 px-3 py-2 text-sm font-medium bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40">
-                  ⚡ Aprovisionar {cwDetalle.asignacion_recursos[cwEquipoSel]?.equipo || ''}
-                </button>
-                {!conectado && <p className="text-[11px] text-slate-400 mt-1">Conectá la Multivac por USB para enviar.</p>}
-                <details className="mt-2">
-                  <summary className="text-[11px] text-slate-400 cursor-pointer">Plantilla de recurso (compartida)</summary>
-                  <p className="text-[11px] text-slate-400 mt-1 mb-1">Convierte cada recurso del planteo en una línea ({'{{canal}}'}, {'{{descripcion}}'}, {'{{tipo}}'}). Hoy genera comentarios guía; cuando Lorenzo defina el JSON de add_sensor_json, se cambia acá y pasan a ser comandos reales.</p>
-                  <textarea rows={2} value={cwPlantilla} onChange={(e) => { setCwPlantilla(e.target.value); setCwPlantillaDirty(true); }}
-                    className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
-                  <div className="flex items-center gap-2 mt-1">
-                    <button onClick={cwGuardarPlantilla} disabled={!cwPlantillaDirty}
-                      className="px-2.5 py-1 text-[11px] bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40">Guardar para todos</button>
-                    <button onClick={() => cwDetalle && setCwSecuencia(armarSecuencia(cwDetalle, cwEquipoSel, cwPlantilla))}
-                      className="px-2.5 py-1 text-[11px] border border-slate-300 rounded-lg hover:border-coop-azul">Regenerar secuencia</button>
-                  </div>
-                </details>
-              </>
-            )}
-          </div>
-
           <div className="bg-white border border-slate-200 rounded-xl p-3">
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-medium text-slate-700 text-sm">Recetas de aprovisionamiento</h3>
@@ -783,6 +818,56 @@ export default function Multivac() {
               </>
             )}
           </div>
+
+          {/* LA SOLDADURA (ola B): planteo CriterIA → aprovisionamiento */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 mt-4">
+            <h3 className="font-medium text-slate-700 text-sm mb-1">⚡ Aprovisionar desde un planteo CriterIA <span className="font-normal text-slate-400">(opcional)</span></h3>
+            <p className="text-[11px] text-slate-400 mb-2">Solo cuando el equipo nace de un proyecto +Agua con planteo generado: la secuencia se arma sola desde la asignación de recursos. Reconecta y las actualizaciones de rutina NO pasan por acá — van directo con recetas, botones o Firmware.</p>
+            <select value={cwLeadSel} onChange={(e) => cwElegirLead(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mb-2">
+              <option value="">— Elegir proyecto con planteo —</option>
+              {cwLeads.map((l) => <option key={l.id} value={l.id}>{l.organizacion}{l.ciudad ? ` (${l.ciudad})` : ''} · {l.equipos} equipo{l.equipos === 1 ? '' : 's'}</option>)}
+            </select>
+            {cwCargando && <p className="text-xs text-slate-400">Leyendo planteo…</p>}
+            {cwDetalle && (
+              <>
+                {cwDetalle.asignacion_recursos.length > 1 && (
+                  <select value={cwEquipoSel} onChange={(e) => cwElegirEquipo(Number(e.target.value))}
+                    className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mb-2">
+                    {cwDetalle.asignacion_recursos.map((eq, i) => <option key={i} value={i}>{eq.equipo || `Equipo ${i + 1}`}{eq.ubicacion ? ` · ${eq.ubicacion}` : ''}</option>)}
+                  </select>
+                )}
+                {['nombre', 'ssid', 'clave'].map((k) => (
+                  <div key={k} className="mb-1.5">
+                    <label className="block text-xs text-slate-500 mb-0.5">{k}</label>
+                    <input value={cwVars[k] || ''} onChange={(e) => setCwVars((v) => ({ ...v, [k]: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                  </div>
+                ))}
+                <label className="block text-xs text-slate-500 mb-0.5 mt-2">Secuencia (editable; # comenta)</label>
+                <textarea rows={9} value={cwSecuencia} onChange={(e) => setCwSecuencia(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
+                <button onClick={cwEnviar} disabled={!conectado}
+                  className="w-full mt-2 px-3 py-2 text-sm font-medium bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40">
+                  ⚡ Aprovisionar {cwDetalle.asignacion_recursos[cwEquipoSel]?.equipo || ''}
+                </button>
+                {!conectado && <p className="text-[11px] text-slate-400 mt-1">Conectá la Multivac por USB para enviar.</p>}
+                <details className="mt-2">
+                  <summary className="text-[11px] text-slate-400 cursor-pointer">Plantilla de recurso (compartida)</summary>
+                  <p className="text-[11px] text-slate-400 mt-1 mb-1">Convierte cada recurso del planteo en una línea ({'{{canal}}'}, {'{{descripcion}}'}, {'{{tipo}}'}). Hoy genera comentarios guía; cuando Lorenzo defina el JSON de add_sensor_json, se cambia acá y pasan a ser comandos reales.</p>
+                  <textarea rows={2} value={cwPlantilla} onChange={(e) => { setCwPlantilla(e.target.value); setCwPlantillaDirty(true); }}
+                    className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
+                  <div className="flex items-center gap-2 mt-1">
+                    <button onClick={cwGuardarPlantilla} disabled={!cwPlantillaDirty}
+                      className="px-2.5 py-1 text-[11px] bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40">Guardar para todos</button>
+                    <button onClick={() => cwDetalle && setCwSecuencia(armarSecuencia(cwDetalle, cwEquipoSel, cwPlantilla))}
+                      className="px-2.5 py-1 text-[11px] border border-slate-300 rounded-lg hover:border-coop-azul">Regenerar secuencia</button>
+                  </div>
+                </details>
+              </>
+            )}
+          </div>
+
           <div className="mt-2">
             <label className="block text-[11px] text-slate-400 mb-0.5">Servicio BLE del firmware (UUID — opcional; se prueban NUS/FFE0/ABF0 solos)</label>
             <input defaultValue={typeof localStorage !== 'undefined' ? (localStorage.getItem('cooptech:multivac_uuid') || '') : ''}
@@ -911,6 +996,13 @@ export default function Multivac() {
             <label className="block text-xs text-slate-500 mb-0.5">Notas de la versión</label>
             <textarea rows={2} value={fwForm.notas} onChange={(e) => setFwForm((f) => ({ ...f, notas: e.target.value }))}
               className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm mb-2" />
+            <div
+              onDragOver={(e) => { e.preventDefault(); setFwArrastrando(true); }}
+              onDragLeave={() => setFwArrastrando(false)}
+              onDrop={(e) => { e.preventDefault(); setFwArrastrando(false); fwSoltarArchivos(e.dataTransfer.files); }}
+              className={`border-2 border-dashed rounded-lg px-3 py-2 mb-2 text-center text-xs transition-colors ${fwArrastrando ? 'border-coop-azul bg-coop-azul/5 text-coop-azul' : 'border-slate-300 text-slate-400'}`}>
+              🖱 Arrastrá acá los archivos del build de Arduino — se acomodan solos: bootloader→0x1000, partitions.bin→0x8000, boot_app0→0xE000, app→0x10000, merged→fábrica, zip/rar→backup, y si viene flash_args carga los parámetros. (Ignora _flashed, .elf, .map y demás.)
+            </div>
             <label className="block text-xs text-slate-500 mb-1">Segmentos (offset hexa + .bin; fila sin archivo = se ignora)</label>
             <div className="space-y-1.5">
               {fwForm.filas.map((fila, i) => (
