@@ -618,8 +618,12 @@ export default function Multivac() {
     } catch (e) { alert(e.message || 'No se pudo subir el release'); }
     finally { setFwSubiendo(false); }
   };
+  // Feedback de descarga del backup (pedido 12/08: sin aviso, Leonardo tocó
+  // varias veces creyendo que no funcionaba — misma lección del Excel de costos).
+  const [fwDescarga, setFwDescarga] = useState(null); // { key, estado: 'bajando'|'ok' }
   const fwDescargarFuente = async (rel = fwSel) => {
-    if (!rel?.fuente?.key) return;
+    if (!rel?.fuente?.key || fwDescarga?.estado === 'bajando') return;
+    setFwDescarga({ key: rel.fuente.key, estado: 'bajando' });
     try {
       log('sys', `Descargando backup del proyecto (${rel.fuente.nombre})…`);
       const objUrl = await getImage(rel.fuente.key);
@@ -627,7 +631,12 @@ export default function Multivac() {
       a.href = objUrl; a.download = rel.fuente.nombre || 'proyecto.zip';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
-    } catch (e) { alert(e.message || 'No se pudo descargar el proyecto'); }
+      setFwDescarga({ key: rel.fuente.key, estado: 'ok' });
+      setTimeout(() => setFwDescarga((d) => (d?.key === rel.fuente.key && d.estado === 'ok' ? null : d)), 5000);
+    } catch (e) {
+      setFwDescarga(null);
+      alert(e.message || 'No se pudo descargar el proyecto');
+    }
   };
 
   const fwBorrarRelease = async (idx) => {
@@ -1098,8 +1107,11 @@ export default function Multivac() {
             {gestion && (
               <td className="px-2 py-1.5 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                 {f.fuente?.key && (
-                  <button onClick={() => fwDescargarFuente(f)} title={`Descargar proyecto completo (${f.fuente.nombre})`}
-                    className="text-slate-400 hover:text-coop-azul px-1">⬇</button>
+                  <button onClick={() => fwDescargarFuente(f)} disabled={fwDescarga?.estado === 'bajando'}
+                    title={fwDescarga?.key === f.fuente.key && fwDescarga.estado === 'ok' ? 'Descarga iniciada — revisá tus descargas' : `Descargar proyecto completo (${f.fuente.nombre})`}
+                    className={`px-1 ${fwDescarga?.key === f.fuente.key ? (fwDescarga.estado === 'bajando' ? 'text-amber-500' : 'text-emerald-600') : 'text-slate-400 hover:text-coop-azul'}`}>
+                    {fwDescarga?.key === f.fuente.key ? (fwDescarga.estado === 'bajando' ? '⏳' : '✓') : '⬇'}
+                  </button>
                 )}
                 <button onClick={() => fwBorrarRelease(f._i)} title="Eliminar release del catálogo"
                   className="text-slate-400 hover:text-red-500 px-1 text-sm leading-none">×</button>
@@ -1111,26 +1123,72 @@ export default function Multivac() {
     </table>
   );
 
-  return (
-    <div className="p-4 max-w-5xl">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
-        <h2 className="text-lg font-semibold text-slate-800">AutonomIA <span className="text-sm font-normal text-slate-400">· aprovisionamiento Multivac</span></h2>
-        <div className="flex gap-2">
-          {!conectado && soportaSerial && (
-            <button onClick={conectarSerial} title="Conectar por cable USB (CLI serie)"
-              className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90 flex items-center gap-1.5"><Usb size={16} /> USB</button>
-          )}
-          {!conectado && soportaBle && (
-            <button onClick={conectarBle} title="Conectar por Bluetooth (BLE)"
-              className="p-2 rounded-lg border border-coop-azul text-coop-azul hover:bg-coop-azul/5"><Bluetooth size={18} /></button>
-          )}
-          {conectado && (
-            <button onClick={desconectar} className="px-3 py-1.5 text-sm rounded-lg border border-red-300 text-red-500 hover:bg-red-50">
-              Desconectar ({transporte === 'serial' ? 'USB' : 'BLE'})
-            </button>
+  // Panel de programación compartido (12/08): idéntico en «Actualizaciones de
+  // firmware» y en «Gestión de versiones» — así Lorenzo prueba un release SIN
+  // aprobarlo (aprobar para probar lo haría visible a todos por un rato).
+  // Detalle con la "tabla sagrada" offset→archivo SIEMPRE visible antes de
+  // tocar nada (pedido puntual de Lorenzo) + botones + progreso + terminal.
+  const panelProgramacion = () => (
+    <>
+      {fwSel && (
+        <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
+          <div className="flex items-center justify-between flex-wrap gap-1 mb-1">
+            <p className="text-sm font-medium text-slate-700">
+              {fwSel.modelo} · {fwSel.version}{fwSel.nombre ? ` · ${fwSel.nombre}` : ''}
+              {fwSel.aprobado !== true && <span className="ml-2 text-[11px] text-amber-600 font-normal">sin aprobar — prueba interna</span>}
+            </p>
+            <span className="text-[11px] text-slate-400">Chip: {CHIP_LABEL[fwSel.chip] || fwSel.chip} · flash {MODE_LABEL[fwSel.flash?.mode] || fwSel.flash?.mode} / {FREQ_LABEL[fwSel.flash?.freq] || fwSel.flash?.freq} / {fwSel.flash?.size}</span>
+          </div>
+          {fwSel.segmentos.length > 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono text-[10.5px] text-slate-600">
+              {fwSel.segmentos.map((sg, i) => (
+                <div key={i} className="flex justify-between gap-2">
+                  <span className="text-coop-azul shrink-0">{sg.offset}</span>
+                  <span className="truncate">{sg.nombre}</span>
+                  {sg.sha256 && <span className="text-slate-400 shrink-0" title={`SHA-256: ${sg.sha256}`}>✓{sg.sha256.slice(0, 8)}</span>}
+                </div>
+              ))}
+            </div>
           )}
         </div>
+      )}
+
+      <div className="grid sm:grid-cols-2 gap-2 mt-3">
+        <button onClick={() => fwProgramar('actualizar')} disabled={!fwSel?.segmentos?.length || flasheando || !soportaSerial}
+          className="px-4 py-3 text-sm font-medium bg-coop-naranja text-white rounded-xl hover:opacity-90 disabled:opacity-40">
+          {flasheando ? 'Programando…' : '⬆ Actualizar con la versión seleccionada (conserva config)'}
+        </button>
+        <button onClick={() => fwProgramar('fabrica')} disabled={!fwSel?.merged?.key || flasheando || !soportaSerial}
+          className="px-4 py-3 text-sm font-medium border border-red-300 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-40">
+          🏭 Volver a fábrica (borra TODO)
+        </button>
       </div>
+      {!fwSel && <p className="text-[11px] text-slate-400 mt-1.5">Seleccioná una versión en la tabla para habilitar los botones.</p>}
+      {fwSel && !fwSel.merged?.key && <p className="text-[11px] text-slate-400 mt-1.5">Esta versión no incluye imagen de fábrica (merged): solo actualización.</p>}
+      {/* Barra de progreso SIEMPRE visible (pedido 12/08: para el usuario no
+          especializado tiene que estar ahí aunque no haya programación en
+          curso). Ancho total = el de los dos botones de arriba. */}
+      <div className="mt-3">
+        <div className="flex justify-between text-[11px] text-slate-500 mb-0.5">
+          <span>{flashProg ? `Programando — segmento ${flashProg.seg}/${flashProg.total}` : flasheando ? 'Preparando programación…' : 'Progreso de programación'}</span>
+          <span>{flashProg ? `${flashProg.pct}%` : flasheando ? '…' : '—'}</span>
+        </div>
+        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div className="h-full bg-coop-naranja transition-all" style={{ width: `${flashProg ? flashProg.pct : 0}%` }} />
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <h3 className="text-sm font-medium text-slate-700 mb-1.5">Terminal de comunicaciones</h3>
+        {cajaTerminal('h-56', '— Acá vas a ver el paso a paso de la programación —')}
+        <p className="text-[11px] text-slate-400 mt-1.5">La placa entra al bootloader por auto-reset (DTR/RTS), el chip se verifica ANTES de escribir y al terminar se reinicia sola a modo run. Si el CLI está conectado, se cierra solo.</p>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="p-4">
+      <h2 className="text-lg font-semibold text-slate-800 mb-1">AutonomIA <span className="text-sm font-normal text-slate-400">· aprovisionamiento Multivac</span></h2>
       {/* Solapas del rediseño 12/08 (mockup de Leonardo). Gestión de versiones
           es de uso interno del área — los usuarios externos no la ven. */}
       <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4 mt-1">
@@ -1149,7 +1207,7 @@ export default function Multivac() {
 
       {/* ============ SOLAPA: ACTUALIZACIONES DE FIRMWARE (todos) ============ */}
       {solapa === 'firmware' && (
-        <div className="max-w-4xl">
+        <div>
           <p className="text-sm text-slate-500 mb-3">
             Elegí el equipo, tocá una versión en la tabla y programá. Acá aparecen solo las versiones <b>aprobadas</b> por el área.
             {!soportaSerial && ' Este navegador no soporta Web Serial: usá Chrome/Edge de PC.'}
@@ -1168,69 +1226,37 @@ export default function Multivac() {
             </details>
           ))}
 
-          {/* Detalle de la versión seleccionada: la "tabla sagrada" offset→archivo
-              SIEMPRE visible antes de tocar nada (pedido puntual de Lorenzo). */}
-          {fwSel && (
-            <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
-              <div className="flex items-center justify-between flex-wrap gap-1 mb-1">
-                <p className="text-sm font-medium text-slate-700">
-                  {fwSel.modelo} · {fwSel.version}{fwSel.nombre ? ` · ${fwSel.nombre}` : ''}
-                  {fwSel.aprobado !== true && <span className="ml-2 text-[11px] text-amber-600 font-normal">sin aprobar — prueba interna</span>}
-                </p>
-                <span className="text-[11px] text-slate-400">Chip: {CHIP_LABEL[fwSel.chip] || fwSel.chip} · flash {MODE_LABEL[fwSel.flash?.mode] || fwSel.flash?.mode} / {FREQ_LABEL[fwSel.flash?.freq] || fwSel.flash?.freq} / {fwSel.flash?.size}</span>
-              </div>
-              {fwSel.segmentos.length > 0 && (
-                <div className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono text-[10.5px] text-slate-600">
-                  {fwSel.segmentos.map((sg, i) => (
-                    <div key={i} className="flex justify-between gap-2">
-                      <span className="text-coop-azul shrink-0">{sg.offset}</span>
-                      <span className="truncate">{sg.nombre}</span>
-                      {sg.sha256 && <span className="text-slate-400 shrink-0" title={`SHA-256: ${sg.sha256}`}>✓{sg.sha256.slice(0, 8)}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="grid sm:grid-cols-2 gap-2 mt-3">
-            <button onClick={() => fwProgramar('actualizar')} disabled={!fwSel?.segmentos?.length || flasheando || !soportaSerial}
-              className="px-4 py-3 text-sm font-medium bg-coop-naranja text-white rounded-xl hover:opacity-90 disabled:opacity-40">
-              {flasheando ? 'Programando…' : '⬆ Actualizar con la versión seleccionada (conserva config)'}
-            </button>
-            <button onClick={() => fwProgramar('fabrica')} disabled={!fwSel?.merged?.key || flasheando || !soportaSerial}
-              className="px-4 py-3 text-sm font-medium border border-red-300 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-40">
-              🏭 Volver a fábrica (borra TODO)
-            </button>
-          </div>
-          {!fwSel && <p className="text-[11px] text-slate-400 mt-1.5">Seleccioná una versión en la tabla para habilitar los botones.</p>}
-          {fwSel && !fwSel.merged?.key && <p className="text-[11px] text-slate-400 mt-1.5">Esta versión no incluye imagen de fábrica (merged): solo actualización.</p>}
-          {flashProg && (
-            <div className="mt-3">
-              <div className="flex justify-between text-[11px] text-slate-500 mb-0.5">
-                <span>Segmento {flashProg.seg}/{flashProg.total}</span><span>{flashProg.pct}%</span>
-              </div>
-              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full bg-coop-naranja transition-all" style={{ width: `${flashProg.pct}%` }} />
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4">
-            <h3 className="text-sm font-medium text-slate-700 mb-1.5">Terminal de comunicaciones</h3>
-            {cajaTerminal('h-56', '— Acá vas a ver el paso a paso de la programación —')}
-            <p className="text-[11px] text-slate-400 mt-1.5">La placa entra al bootloader por auto-reset (DTR/RTS), el chip se verifica ANTES de escribir y al terminar se reinicia sola a modo run. Si el CLI está conectado, se cierra solo.</p>
-          </div>
+          {panelProgramacion()}
         </div>
       )}
 
       {/* ============ SOLAPA: CONFIGURACIONES (el CLI completo) ============ */}
       {solapa === 'config' && (
       <>
-      <p className="text-sm text-slate-500 mb-3">
-        Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.
-        {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
-      </p>
+      {/* Los botones de conexión viven ACÁ (pedido 12/08): el CLI por USB/BLE
+          solo se usa en esta solapa — el flasheo y el sniffer piden su propio
+          puerto en su propia vista. */}
+      <div className="flex items-start justify-between flex-wrap gap-2 mb-3">
+        <p className="text-sm text-slate-500 flex-1 min-w-[260px]">
+          Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.
+          {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
+        </p>
+        <div className="flex gap-2 shrink-0">
+          {!conectado && soportaSerial && (
+            <button onClick={conectarSerial} title="Conectar por cable USB (CLI serie)"
+              className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90 flex items-center gap-1.5"><Usb size={16} /> USB</button>
+          )}
+          {!conectado && soportaBle && (
+            <button onClick={conectarBle} title="Conectar por Bluetooth (BLE)"
+              className="p-2 rounded-lg border border-coop-azul text-coop-azul hover:bg-coop-azul/5"><Bluetooth size={18} /></button>
+          )}
+          {conectado && (
+            <button onClick={desconectar} className="px-3 py-1.5 text-sm rounded-lg border border-red-300 text-red-500 hover:bg-red-50">
+              Desconectar ({transporte === 'serial' ? 'USB' : 'BLE'})
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="grid lg:grid-cols-5 gap-4">
         {/* Terminal */}
@@ -1403,9 +1429,9 @@ export default function Multivac() {
 
       {/* ============ SOLAPA: TERMINAL SNIFFER (reemplazo del Hercules) ============ */}
       {solapa === 'sniffer' && (
-        <div className="max-w-4xl">
+        <div>
           <p className="text-sm text-slate-500 mb-3">
-            Monitor serie crudo con timestamp y dirección, estilo Hercules — pero acá la captura <b>no pisa datos viejos</b>: queda entera en memoria y se guarda completa a archivo. Hasta <b>3 canales a la vez</b> (para la placa sniffer de 3 USB: el completo + uno por dirección) — cada canal baja su propio TXT, y si hay más de uno, también el combinado. Independiente del CLI y del flasheo.
+            Monitor de comunicaciones serie. Registra cada ráfaga con fecha y hora al milisegundo y su dirección (TX/RX); la captura se conserva completa en memoria — la pantalla muestra las últimas entradas y el archivo guarda la totalidad. Admite hasta <b>3 puertos COM simultáneos</b> con etiqueta propia (por ejemplo, para monitorear la comunicación entre dos equipos: un canal completo y uno por cada dirección). Al guardar se genera un archivo por canal y, si hay más de uno, un archivo combinado en orden cronológico. Funciona de manera independiente del CLI y de la programación de firmware.
           </p>
 
           {/* Opciones compartidas del puerto (los 3 COM escuchan el mismo bus) */}
@@ -1600,10 +1626,10 @@ export default function Multivac() {
 
       {/* ============ SOLAPA: GESTIÓN DE VERSIONES (uso interno del área) ============ */}
       {solapa === 'gestion' && puedeGestionar && (
-        <div className="max-w-4xl">
+        <div>
           <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
             <p className="text-sm text-slate-500 flex-1 min-w-[260px]">
-              Todos los releases subidos, aprobados o no. El tilde <b>✓ habilita</b> la versión hacia «Actualizaciones de firmware» (la vista de todos los usuarios). Para probar una versión sin aprobar: seleccionala acá y programala desde esa solapa.
+              Todos los releases subidos, aprobados o no. El tilde <b>✓ habilita</b> la versión hacia «Actualizaciones de firmware» (la vista de todos los usuarios). Desde acá también se programa: seleccioná una versión — aprobada o no — y usá los botones de abajo, sin necesidad de aprobarla para probarla.
             </p>
             <button onClick={fwAbrirAlta} className="px-3 py-1.5 text-sm bg-coop-azul text-white rounded-lg hover:opacity-90 flex items-center gap-1.5 shrink-0">
               <HardDriveDownload size={15} /> + Subir release
@@ -1625,6 +1651,10 @@ export default function Multivac() {
           <p className="text-[11px] text-slate-400 mt-2">
             × elimina el release del catálogo (los binarios quedan en el almacenamiento — sirve para sacar cargas fallidas o versiones retiradas). ⬇ descarga el backup del proyecto completo si la versión lo incluye.
           </p>
+
+          {/* Programación IN SITU (pedido 12/08): Lorenzo prueba el release
+              recién subido SIN aprobarlo — mismo panel que Actualizaciones. */}
+          {panelProgramacion()}
         </div>
       )}
 
