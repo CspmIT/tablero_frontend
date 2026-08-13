@@ -14,6 +14,9 @@ import { useData } from '../data/DataContext.jsx';
 import { ESPLoader, Transport } from 'esptool-js';
 import { md5 } from 'js-md5';
 import { getImage, saveImage } from '../api/minio.js';
+// Configuración guiada por firmware (13/08): formulario que lee/edita/graba
+// la config de la placa — el terminal queda como registro limpio.
+import MultivacConfigReconecta from './MultivacConfigReconecta.jsx';
 
 // Servicios UART-BLE candidatos (Lorenzo confirmó BLE; el UUID exacto de su
 // stack se detecta probando en orden — y hay campo para pegar uno custom).
@@ -889,6 +892,16 @@ export default function Multivac() {
   const conexion = useRef({}); // { port, reader, writer } | { device, rxChar }
   const bufferRx = useRef('');
   const finLog = useRef(null);
+  // Sink de RX para la configuración guiada: cuando el formulario consulta la
+  // placa, cada línea recibida le llega también a él (además del terminal).
+  const rxSink = useRef(null);
+  // Selector de firmware de la solapa Configuraciones (13/08): cada firmware
+  // tiene su flujo guiado; "libre" es el terminal clásico completo. Manual
+  // hasta que Lorenzo agregue `FW version` a `info` (ahí: autodetección).
+  const [cfgModo, setCfgModo] = useState(() => {
+    try { return localStorage.getItem('cooptech:multivac_cfgmodo') || 'reconecta'; } catch { return 'reconecta'; }
+  });
+  const elegirCfgModo = (m) => { setCfgModo(m); try { localStorage.setItem('cooptech:multivac_cfgmodo', m); } catch { /* */ } };
 
   const soportaSerial = typeof navigator !== 'undefined' && 'serial' in navigator;
   const soportaBle = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
@@ -902,7 +915,10 @@ export default function Multivac() {
     while ((corte = bufferRx.current.indexOf('\n')) >= 0) {
       const linea = bufferRx.current.slice(0, corte).replace(/\r$/, '');
       bufferRx.current = bufferRx.current.slice(corte + 1);
-      if (linea) log('in', linea);
+      if (linea) {
+        log('in', linea);
+        try { rxSink.current?.(linea); } catch { /* el sink nunca frena el terminal */ }
+      }
     }
   };
 
@@ -1237,10 +1253,25 @@ export default function Multivac() {
           solo se usa en esta solapa — el flasheo y el sniffer piden su propio
           puerto en su propia vista. */}
       <div className="flex items-start justify-between flex-wrap gap-2 mb-3">
-        <p className="text-sm text-slate-500 flex-1 min-w-[260px]">
-          Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.
-          {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
-        </p>
+        <div className="flex-1 min-w-[280px]">
+          {/* Selector de firmware (13/08): flujos distintos por firmware. Manual
+              hasta que `info` informe la versión — ahí se autodetecta. */}
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <label className="text-xs text-slate-500">Firmware de la placa:</label>
+            <select value={cfgModo} onChange={(e) => elegirCfgModo(e.target.value)}
+              className="border border-slate-300 rounded-lg px-2 py-1 text-sm">
+              <option value="reconecta">Reconecta — DNP3 Universal (guiado)</option>
+              <option value="agua" disabled>+Agua (próximamente)</option>
+              <option value="libre">Terminal libre (avanzado)</option>
+            </select>
+          </div>
+          <p className="text-sm text-slate-500">
+            {cfgModo === 'reconecta'
+              ? 'Conectá la placa por USB: la configuración se lee sola y se edita como formulario — «Grabar» envía únicamente lo que cambiaste.'
+              : 'Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.'}
+            {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
+          </p>
+        </div>
         <div className="flex gap-2 shrink-0">
           {!conectado && soportaSerial && (
             <button onClick={conectarSerial} title="Conectar por cable USB (CLI serie)"
@@ -1258,6 +1289,19 @@ export default function Multivac() {
         </div>
       </div>
 
+      {/* Modo GUIADO Reconecta: formulario que lee/edita/graba la placa. */}
+      {cfgModo === 'reconecta' && (
+        <MultivacConfigReconecta
+          conectado={conectado && transporte === 'serial'}
+          enviarLinea={enviarLinea}
+          rxSink={rxSink}
+          terminal={cajaTerminal('h-[480px]')}
+          log={log}
+        />
+      )}
+
+      {/* Modo TERMINAL LIBRE: la vista clásica completa. */}
+      {cfgModo !== 'reconecta' && (
       <div className="grid lg:grid-cols-5 gap-4">
         {/* Terminal */}
         <div className="lg:col-span-3">
@@ -1424,6 +1468,7 @@ export default function Multivac() {
           </p>
         </div>
       </div>
+      )}
       </>
       )}
 
