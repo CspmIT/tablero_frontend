@@ -446,8 +446,11 @@ export default function Multivac() {
         await transport.setRTS(false);  // EN=1 → boot normal
       } catch { /* adaptador sin señales: reiniciar a mano como hasta ahora */ }
       log('sys', modo === 'fabrica'
-        ? `✅ ${fwSel.modelo} ${fwSel.version} — vuelta a fábrica completa. El equipo arranca SIN configuración: aprovisionalo con las recetas o desde CriterIA.`
+        ? `✅ ${fwSel.modelo} ${fwSel.version} — vuelta a fábrica completa. El equipo arranca SIN configuración: te llevamos a Configuraciones para aprovisionarlo (elegí el firmware y conectá por USB).`
         : `✅ ${fwSel.modelo} ${fwSel.version} actualizado (config y mediciones intactas). Reconectá el CLI y verificá con "info".`);
+      // Pedido 14/08: tras borrar TODO, la placa queda en blanco ⇒ llevar al
+      // usuario directo a Configuraciones para la primera configuración.
+      if (modo === 'fabrica') setSolapa('config');
     } catch (e) {
       log('sys', '⚠ Flasheo: ' + (e?.message || e) + ' — la placa puede reprogramarse sin problema, reintentá.');
     } finally {
@@ -898,10 +901,10 @@ export default function Multivac() {
   // Selector de firmware de la solapa Configuraciones (13/08): cada firmware
   // tiene su flujo guiado; "libre" es el terminal clásico completo. Manual
   // hasta que Lorenzo agregue `FW version` a `info` (ahí: autodetección).
-  const [cfgModo, setCfgModo] = useState(() => {
-    try { return localStorage.getItem('cooptech:multivac_cfgmodo') || 'reconecta'; } catch { return 'reconecta'; }
-  });
-  const elegirCfgModo = (m) => { setCfgModo(m); try { localStorage.setItem('cooptech:multivac_cfgmodo', m); } catch { /* */ } };
+  // Ajuste UX 14/08 (Leonardo): SIN firmware por defecto — al entrar se ve
+  // «Seleccionar» y el formulario bloqueado con los pasos a seguir. Por eso
+  // ya no se persiste la elección: cada entrada arranca del paso 1.
+  const [cfgModo, setCfgModo] = useState('');
 
   const soportaSerial = typeof navigator !== 'undefined' && 'serial' in navigator;
   const soportaBle = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
@@ -1202,6 +1205,41 @@ export default function Multivac() {
     </>
   );
 
+  // Selector de firmware + botones de conexión: viven JUNTOS en la sección
+  // «1 · Conexión y elección de versión» (mockup 14/08 — menos recorrido de
+  // vista). Conectar se habilita recién con un firmware elegido (paso 1 → 2).
+  const selectorFirmware = (
+    <div>
+      <label className="block text-xs text-slate-500 mb-0.5">Firmware de la placa</label>
+      <select value={cfgModo} onChange={(e) => setCfgModo(e.target.value)}
+        className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm min-w-[230px]">
+        <option value="">— Seleccionar —</option>
+        <option value="reconecta">Reconecta — DNP3 Universal (guiado)</option>
+        <option value="agua" disabled>+Agua (próximamente)</option>
+        <option value="libre">Terminal libre (avanzado)</option>
+      </select>
+    </div>
+  );
+  const botonesConexion = (
+    <>
+      {!conectado && soportaSerial && (
+        <button onClick={conectarSerial} disabled={!cfgModo}
+          title={cfgModo ? 'Conectar por cable USB (CLI serie)' : 'Primero elegí el firmware de la placa'}
+          className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"><Usb size={16} /> USB</button>
+      )}
+      {!conectado && soportaBle && (
+        <button onClick={conectarBle} disabled={!cfgModo}
+          title={cfgModo ? 'Conectar por Bluetooth (BLE)' : 'Primero elegí el firmware de la placa'}
+          className="p-2 rounded-lg border border-coop-azul text-coop-azul hover:bg-coop-azul/5 disabled:opacity-40"><Bluetooth size={18} /></button>
+      )}
+      {conectado && (
+        <button onClick={desconectar} className="px-3 py-1.5 text-sm rounded-lg border border-red-300 text-red-500 hover:bg-red-50">
+          Desconectar ({transporte === 'serial' ? 'USB' : 'BLE'})
+        </button>
+      )}
+    </>
+  );
+
   return (
     <div className="p-4">
       <h2 className="text-lg font-semibold text-slate-800 mb-1">AutonomIA <span className="text-sm font-normal text-slate-400">· aprovisionamiento Multivac</span></h2>
@@ -1246,62 +1284,39 @@ export default function Multivac() {
         </div>
       )}
 
-      {/* ============ SOLAPA: CONFIGURACIONES (el CLI completo) ============ */}
+      {/* ============ SOLAPA: CONFIGURACIONES ============ */}
       {solapa === 'config' && (
       <>
-      {/* Los botones de conexión viven ACÁ (pedido 12/08): el CLI por USB/BLE
-          solo se usa en esta solapa — el flasheo y el sniffer piden su propio
-          puerto en su propia vista. */}
-      <div className="flex items-start justify-between flex-wrap gap-2 mb-3">
-        <div className="flex-1 min-w-[280px]">
-          {/* Selector de firmware (13/08): flujos distintos por firmware. Manual
-              hasta que `info` informe la versión — ahí se autodetecta. */}
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <label className="text-xs text-slate-500">Firmware de la placa:</label>
-            <select value={cfgModo} onChange={(e) => elegirCfgModo(e.target.value)}
-              className="border border-slate-300 rounded-lg px-2 py-1 text-sm">
-              <option value="reconecta">Reconecta — DNP3 Universal (guiado)</option>
-              <option value="agua" disabled>+Agua (próximamente)</option>
-              <option value="libre">Terminal libre (avanzado)</option>
-            </select>
-          </div>
-          <p className="text-sm text-slate-500">
-            {cfgModo === 'reconecta'
-              ? 'Conectá la placa por USB: la configuración se lee sola y se edita como formulario — «Grabar» envía únicamente lo que cambiaste.'
-              : 'Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.'}
-            {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
-          </p>
-        </div>
-        <div className="flex gap-2 shrink-0">
-          {!conectado && soportaSerial && (
-            <button onClick={conectarSerial} title="Conectar por cable USB (CLI serie)"
-              className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90 flex items-center gap-1.5"><Usb size={16} /> USB</button>
-          )}
-          {!conectado && soportaBle && (
-            <button onClick={conectarBle} title="Conectar por Bluetooth (BLE)"
-              className="p-2 rounded-lg border border-coop-azul text-coop-azul hover:bg-coop-azul/5"><Bluetooth size={18} /></button>
-          )}
-          {conectado && (
-            <button onClick={desconectar} className="px-3 py-1.5 text-sm rounded-lg border border-red-300 text-red-500 hover:bg-red-50">
-              Desconectar ({transporte === 'serial' ? 'USB' : 'BLE'})
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Modo GUIADO Reconecta: formulario que lee/edita/graba la placa. */}
-      {cfgModo === 'reconecta' && (
+      {/* Ajuste UX 14/08 (mockup de Leonardo): sin firmware por defecto — el
+          formulario guiado se ve desde la entrada con los campos bloqueados y
+          los pasos a seguir; selector + botones USB/BT juntos en la sección
+          «1 · Conexión y elección de versión». */}
+      {cfgModo !== 'libre' && (
         <MultivacConfigReconecta
+          habilitado={cfgModo === 'reconecta'}
           conectado={conectado && transporte === 'serial'}
           enviarLinea={enviarLinea}
           rxSink={rxSink}
-          terminal={cajaTerminal('h-[480px]')}
+          terminal={cajaTerminal('h-80')}
           log={log}
+          selectorFirmware={selectorFirmware}
+          botonesConexion={botonesConexion}
         />
       )}
 
       {/* Modo TERMINAL LIBRE: la vista clásica completa. */}
-      {cfgModo !== 'reconecta' && (
+      {cfgModo === 'libre' && (
+      <>
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-3">
+        <div className="flex items-end gap-3 flex-wrap">
+          {selectorFirmware}
+          <div className="flex gap-2 pb-0.5">{botonesConexion}</div>
+        </div>
+        <p className="text-sm text-slate-500 flex-1 min-w-[240px]">
+          Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.
+          {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
+        </p>
+      </div>
       <div className="grid lg:grid-cols-5 gap-4">
         {/* Terminal */}
         <div className="lg:col-span-3">
@@ -1468,6 +1483,7 @@ export default function Multivac() {
           </p>
         </div>
       </div>
+      </>
       )}
       </>
       )}

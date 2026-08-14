@@ -1,18 +1,19 @@
 // Configuración guiada — Reconecta / DNP3 Universal FW (13/08).
 // Diseño congelado en Multivac_ConfigGuiada_Reconecta_diseno_13_08.md, sobre
-// el flujo REAL de Leonardo (docx 13/08) + capturas de show_mqtt/show_ftp/
-// set_baud/set_reco_tz del banco (13/08). Reglas:
-// - Al conectar: sesión + login AUTOMÁTICOS (respuesta 1 de Leonardo). La
-//   contraseña sale del campo; si está vacío, la MAC (pass de fábrica) que se
-//   lee de `info` ANTES del login (info no requiere sesión según el help).
-// - La lectura puebla el formulario con LO QUE LA PLACA TIENE; el usuario
-//   edita (campos tocados en ámbar) y «Grabar» muestra los comandos exactos
-//   y envía SOLO los cambios. Después re-lee y el formulario refleja la
-//   REALIDAD, no la intención.
-// - PROHIBIDO en lectura: `set_eth_ip` sin argumentos (entra al flujo guiado
-//   interactivo y deja el CLI esperando). La IP estática queda "(sin leer)"
-//   y solo se ESCRIBE con la forma directa: set_eth_ip <ip> <mask> <gw> <dns>
-//   (confirmada por Leonardo 13/08).
+// el flujo REAL de Leonardo (docx 13/08) + capturas del banco (13/08).
+// Ajuste UX 14/08 (mockup de Leonardo): la solapa se ordena en 4 secciones
+// numeradas — 1. Conexión y elección de versión (selector + USB/BT + pass +
+// releer, todo junto para no recorrer la vista), 2. Configuraciones (el
+// formulario SIEMPRE visible, con campos bloqueados hasta elegir firmware y
+// conectar), 3. Configurar (Grabar), 4. Modo avanzado (terminal a lo ancho).
+// Reglas de fondo (sin cambios):
+// - Al conectar: sesión + login AUTOMÁTICOS (pass del campo o la MAC de
+//   fábrica, leída de `info` antes del login).
+// - «Grabar» muestra los comandos exactos y envía SOLO los cambios; después
+//   re-lee y el formulario refleja la REALIDAD, no la intención.
+// - PROHIBIDO en lectura: `set_eth_ip` sin argumentos (flujo guiado
+//   interactivo → cuelga el CLI). La IP estática es write-only con la forma
+//   directa: set_eth_ip <ip> <mask> <gw> <dns>.
 // - Parsers tolerantes clave:valor — una línea nueva del FW no rompe nada.
 import { useEffect, useRef, useState } from 'react';
 
@@ -27,21 +28,16 @@ const MQTT_PERFILES = [
   { v: '4', t: '4 — AGUA_EXT' }, { v: '5', t: '5 — CUSTOM' },
 ];
 
-// "(vacio)", "(sin configurar)", "(raiz)", "(ninguno)", "(no configurado)" → ''
 const VACIO = /\(vacio\)|\(sin configurar\)|\(raiz\)|\(ninguno\)|\(no configurado\)|\(sin perfil/i;
 const limpiar = (s) => { const t = String(s ?? '').trim(); return VACIO.test(t) ? '' : t; };
 
 const CAMPOS_DEF = {
-  // Generales
   nombre: '', passNueva: '', debug: 'off', tz: '-10800',
-  // Red ('' = sin leer en dhcp/static; la IP estática no es legible sin flujo guiado)
   ethDhcp: '', ethStatic: '', ethIp: '', ethMask: '', ethGw: '', ethDns: '',
   w0ssid: '', w0pass: '', w0on: 'off', w1ssid: '', w1pass: '', w1on: 'off', w2ssid: '', w2pass: '', w2on: 'off',
   failover: 'on',
-  // Servidores
   mqttPerfil: '', blockPublic: 'no', ntp: 'auto', ntpFallback: 'on',
   ftpHost: '', ftpPort: '21', ftpUser: '', ftpPass: '', ftpPath: '',
-  // Reconectador
   recoPerfil: '', sn: '', baud: '', recoTz: '-180',
 };
 
@@ -51,7 +47,7 @@ const valorDe = (lineas, clave) => {
   return null;
 };
 
-export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink, terminal, log }) {
+export default function MultivacConfigReconecta({ habilitado, conectado, enviarLinea, rxSink, terminal, log, selectorFirmware, botonesConexion }) {
   const [campos, setCampos] = useState({ ...CAMPOS_DEF });
   const [orig, setOrig] = useState(null); // snapshot leído: base del diff
   const [estado, setEstado] = useState({}); // solo lectura (links, IPs, MQTT, hora…)
@@ -63,6 +59,9 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
   const [confirmar, setConfirmar] = useState(null); // { comandos, resolve }
   const [aviso, setAviso] = useState('');
   const ocupado = !!leyendo || grabando;
+  // El formulario está SIEMPRE a la vista (mockup 14/08), pero bloqueado hasta
+  // que haya firmware elegido + placa conectada + primera lectura hecha.
+  const bloqueado = !habilitado || !conectado || !orig || ocupado;
   const activo = useRef(true);
   useEffect(() => () => { activo.current = false; if (rxSink) rxSink.current = null; }, [rxSink]);
 
@@ -78,7 +77,7 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
     };
     const sink = (l) => { acumulado.push(l); clearTimeout(tQuiet); tQuiet = setTimeout(fin, quietMs); };
     rxSink.current = sink;
-    tQuiet = setTimeout(fin, 1500); // si nunca responde, no colgarse
+    tQuiet = setTimeout(fin, 1500);
     tMax = setTimeout(fin, maxMs);
     enviarLinea(cmd);
   });
@@ -156,16 +155,14 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
 
   // ---------- Lectura completa (auto al conectar y con «Releer placa») ----------
   const leerPlaca = async (passOverride) => {
-    if (!conectado || ocupado) return;
+    if (!conectado || !habilitado || ocupado) return;
     setAviso('');
     const d = {}; const e = {};
     try {
       setLeyendo('abriendo sesión');
       await consultar('comando');
-      // info ANTES del login: consigue la MAC (= contraseña de fábrica).
       setLeyendo('info');
       parseInfo(await consultar('info'), d, e);
-      // Login automático (respuesta 1 de Leonardo 13/08).
       setLeyendo('login');
       const rLogin = await consultar('login');
       if (rLogin.some((l) => /password/i.test(l))) {
@@ -175,7 +172,6 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
         setLogueado(ok);
         if (!ok) setAviso('Login rechazado: cargá la contraseña CLI de esta placa (en placa recién programada es la MAC) y tocá «Releer placa».');
       } else {
-        // sin prompt de password: sesión ya logueada o FW sin pass
         setLogueado(true);
       }
       setLeyendo('time'); parseTime(await consultar('time'), d, e);
@@ -184,7 +180,6 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
       setLeyendo('show_mqtt'); parseMqtt(await consultar('show_mqtt'), d, e);
       setLeyendo('show_ftp'); parseFtp(await consultar('show_ftp'), d);
       setLeyendo('list_profiles'); parsePerfiles(await consultar('list_profiles'), d);
-      // Estos dos SIN argumentos devuelven el valor actual (capturas 13/08).
       setLeyendo('set_baud'); parseBaud(await consultar('set_baud'), d);
       setLeyendo('set_reco_tz'); parseRecoTz(await consultar('set_reco_tz'), d);
       if (!activo.current) return;
@@ -194,12 +189,12 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
     } finally { if (activo.current) setLeyendo(''); }
   };
 
-  // Auto-lectura al conectar (una vez por conexión).
+  // Auto-lectura al conectar con firmware elegido (una vez por conexión).
   useEffect(() => {
-    if (conectado && !orig && !ocupado) leerPlaca();
-    if (!conectado) { setLogueado(false); }
+    if (habilitado && conectado && !orig && !ocupado) leerPlaca();
+    if (!conectado) setLogueado(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conectado]);
+  }, [conectado, habilitado]);
 
   // ---------- Diff → comandos (SOLO lo tocado) ----------
   const armarComandos = () => {
@@ -245,7 +240,6 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
   const grabar = async () => {
     const comandos = armarComandos();
     if (!comandos.length || ocupado || !conectado) return;
-    // Vista previa transparente (estilo tabla sagrada): SE VE lo que se envía.
     const ok = await new Promise((res) => setConfirmar({ comandos, resolve: res }));
     setConfirmar(null);
     if (!ok) return;
@@ -254,7 +248,7 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
       for (const cmd of comandos) await consultar(cmd, 500, 8000);
       log('sys', `✓ ${comandos.length} cambio(s) enviado(s). Releyendo la placa para verificar…`);
       const passNueva = campos.passNueva.trim();
-      if (passNueva) setPassLogin(passNueva); // la próxima lectura loguea con la nueva
+      if (passNueva) setPassLogin(passNueva);
       setGrabando(false);
       await leerPlaca(passNueva || undefined);
     } finally { if (activo.current) setGrabando(false); }
@@ -268,7 +262,7 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
       const m = r.join(' ').match(/SN identificado y guardado:\s*(\S+)/i);
       if (m) {
         setCampos((c) => ({ ...c, sn: m[1] }));
-        setOrig((o) => (o ? { ...o, sn: m[1] } : o)); // ya quedó grabado en la placa
+        setOrig((o) => (o ? { ...o, sn: m[1] } : o));
         log('sys', `✓ SN auto-identificado: ${m[1]}`);
       } else {
         setAviso('El auto-id no devolvió un SN (¿el reconectador está conectado y con el perfil activo?).');
@@ -278,28 +272,27 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
 
   // ---------- Piezas de formulario (funciones de render: no pierden foco) ----------
   const esDirty = (k) => orig && String(campos[k]) !== String(orig[k]);
-  const claseCampo = (k) => `w-full border rounded-lg px-2 py-1.5 text-sm ${esDirty(k) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`;
+  const claseCampo = (k) => `w-full border rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400 ${esDirty(k) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`;
   const set = (k, val) => setCampos((c) => ({ ...c, [k]: val }));
 
   const campoTexto = (k, label, props = {}) => (
     <div className="mb-1.5">
       <label className="block text-xs text-slate-500 mb-0.5">{label}</label>
-      <input value={campos[k]} onChange={(e2) => set(k, e2.target.value)} disabled={ocupado}
+      <input value={campos[k]} onChange={(e2) => set(k, e2.target.value)} disabled={bloqueado}
         className={claseCampo(k)} {...props} />
     </div>
   );
   const campoSelect = (k, label, opciones) => (
     <div className="mb-1.5">
       <label className="block text-xs text-slate-500 mb-0.5">{label}</label>
-      <select value={campos[k]} onChange={(e2) => set(k, e2.target.value)} disabled={ocupado} className={claseCampo(k)}>
+      <select value={campos[k]} onChange={(e2) => set(k, e2.target.value)} disabled={bloqueado} className={claseCampo(k)}>
         {opciones.map((op) => <option key={op.v} value={op.v}>{op.t}</option>)}
       </select>
     </div>
   );
   const OPC_ONOFF = [{ v: 'on', t: 'on' }, { v: 'off', t: 'off' }];
   const OPC_ONOFF_SL = [{ v: '', t: '(sin leer)' }, ...OPC_ONOFF];
-  // Campo IP estilo configurador de redes de Windows (pedido 13/08): 4 octetos
-  // con los puntos incluidos.
+  // Campo IP estilo configurador de redes de Windows: 4 octetos con puntos.
   const campoIp = (k, label) => {
     const partes = String(campos[k] || '').split('.');
     const oct = [0, 1, 2, 3].map((i) => partes[i] || '');
@@ -311,10 +304,10 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
     return (
       <div className="mb-1.5">
         <label className="block text-xs text-slate-500 mb-0.5">{label}</label>
-        <div className={`inline-flex items-center border rounded-lg px-1.5 py-1 ${esDirty(k) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}>
+        <div className={`inline-flex items-center border rounded-lg px-1.5 py-1 ${bloqueado ? 'bg-slate-50' : ''} ${esDirty(k) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}>
           {oct.map((v, i) => (
             <span key={i} className="flex items-center">
-              <input value={v} onChange={(e2) => setOct(i, e2.target.value)} disabled={ocupado}
+              <input value={v} onChange={(e2) => setOct(i, e2.target.value)} disabled={bloqueado}
                 inputMode="numeric" placeholder="0"
                 className="w-10 text-center text-sm outline-none bg-transparent disabled:text-slate-400" />
               {i < 3 && <span className="text-slate-400 px-0.5">.</span>}
@@ -326,155 +319,167 @@ export default function MultivacConfigReconecta({ conectado, enviarLinea, rxSink
   };
   const lineaEstado = (label, valor) => (valor ? <div className="flex justify-between gap-2"><span className="text-slate-400">{label}</span><span className="text-slate-600 text-right">{valor}</span></div> : null);
 
+  // Mensaje de pasos (pedido 14/08: guiar al usuario desde la entrada).
+  const mensajePasos = !habilitado
+    ? 'Pasos: 1️⃣ Elegí el firmware de la placa → 2️⃣ Conectala por USB → 3️⃣ la configuración se lee sola y se habilitan los campos.'
+    : !conectado
+      ? 'Firmware elegido ✓ — ahora conectá la placa con el botón USB: la configuración se lee sola.'
+      : leyendo
+        ? `⏳ Leyendo la placa: ${leyendo}…`
+        : orig
+          ? '✓ Configuración leída. Editá los campos que necesites (se marcan en ámbar) y bajá a «Grabar cambios».'
+          : 'Conectado — si la lectura no arrancó sola, tocá «Releer placa».';
+
   return (
-    <div className="grid lg:grid-cols-5 gap-4">
-      {/* ---------- Columna del formulario ---------- */}
-      <div className="lg:col-span-3">
-        {/* Barra de estado / acciones de lectura */}
-        <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3">
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="flex-1 min-w-[220px]">
-              <label className="block text-xs text-slate-500 mb-0.5">Contraseña CLI de la placa (vacío = MAC, el default de fábrica)</label>
-              <input type="password" value={passLogin} onChange={(e2) => setPassLogin(e2.target.value)} disabled={ocupado}
-                placeholder={estado.mac ? `MAC: ${estado.mac}` : 'se lee sola al conectar'}
-                className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
-            </div>
-            <button onClick={() => leerPlaca()} disabled={!conectado || ocupado}
-              className="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
-              ↻ Releer placa
-            </button>
-            <span className={`text-[11px] pb-2 ${logueado ? 'text-emerald-600' : 'text-slate-400'}`}>
-              {leyendo ? `⏳ Leyendo: ${leyendo}…` : logueado ? '✓ Sesión iniciada' : conectado ? 'Conectado' : 'Conectá la placa por USB'}
-            </span>
+    <div>
+      {/* ============ 1 · CONEXIÓN Y ELECCIÓN DE VERSIÓN ============ */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">1 · Conexión y elección de versión</h3>
+        <div className="flex flex-wrap items-end gap-3">
+          {selectorFirmware}
+          <div className="flex gap-2 items-end pb-0.5">{botonesConexion}</div>
+          <div className="flex-1 min-w-[240px]">
+            <label className="block text-xs text-slate-500 mb-0.5">Contraseña CLI de la placa (vacío = MAC, el default de fábrica)</label>
+            <input type="password" value={passLogin} onChange={(e2) => setPassLogin(e2.target.value)} disabled={!habilitado || ocupado}
+              placeholder={estado.mac ? `MAC: ${estado.mac}` : 'se usa sola al conectar'}
+              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50" />
           </div>
-          {aviso && <p className="text-xs text-amber-600 mt-1.5">{aviso}</p>}
-          {!orig && !leyendo && conectado && <p className="text-xs text-slate-400 mt-1.5">Al conectar, la configuración se lee sola. Si no arrancó, tocá «Releer placa».</p>}
+          <button onClick={() => leerPlaca()} disabled={!habilitado || !conectado || ocupado}
+            className="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+            ↻ Releer placa
+          </button>
         </div>
+        <p className={`text-xs mt-2 ${!habilitado || !conectado ? 'text-coop-azul' : 'text-slate-500'}`}>
+          {mensajePasos}{logueado && !leyendo ? '  ·  ✓ Sesión iniciada' : ''}
+        </p>
+        {aviso && <p className="text-xs text-amber-600 mt-1">{aviso}</p>}
+      </div>
 
+      {/* ============ 2 · CONFIGURACIONES (formulario SIEMPRE visible) ============ */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">2 · Configuraciones</h3>
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {/* Columna 1: Generales + Reconectador */}
+          <div>
+            <div className="border border-slate-100 rounded-lg p-2.5 mb-3">
+              <h4 className="text-sm font-medium text-slate-700 mb-2">⚙ Configuraciones Generales</h4>
+              {campoTexto('nombre', 'Nombre del dispositivo', { placeholder: 'DNP3_ejemplo' })}
+              {campoTexto('passNueva', 'Nueva contraseña CLI (vacío = no cambiar)', { type: 'password', placeholder: '••••••••' })}
+              <div className="grid grid-cols-2 gap-2">
+                {campoSelect('debug', 'Debug', OPC_ONOFF)}
+                {campoTexto('tz', 'Timezone (seg; Arg = -10800)')}
+              </div>
+            </div>
+            <div className="border border-slate-100 rounded-lg p-2.5">
+              <h4 className="text-sm font-medium text-slate-700 mb-2">🔌 Configuraciones del Reconectador</h4>
+              {campoSelect('recoPerfil', 'Perfil (leído de la placa)', [{ v: '', t: '(sin perfil — engine DNP3 apagado)' }, ...perfiles.map((p) => ({ v: p.key, t: `${p.brand} ${p.model} (${p.key})` }))])}
+              <div className="flex items-end gap-2">
+                <div className="flex-1">{campoTexto('sn', 'Número de serie')}</div>
+                <button onClick={autoId} disabled={bloqueado || !campos.recoPerfil}
+                  title="recloser_autoid: consulta el SN directamente al reconectador (requiere perfil activo)"
+                  className="mb-1.5 px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40 shrink-0">🔍 Auto-identificar</button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {campoSelect('baud', 'Baud DNP3', [{ v: '', t: '(sin leer)' }, ...BAUD_OPCIONES])}
+                {campoTexto('recoTz', 'Hora del reco vs UTC (min; Arg = -180)')}
+              </div>
+            </div>
+          </div>
+
+          {/* Columna 2: Red */}
+          <div className="border border-slate-100 rounded-lg p-2.5">
+            <h4 className="text-sm font-medium text-slate-700 mb-2">🌐 Configuraciones de Red</h4>
+            <div className="grid grid-cols-3 gap-2">
+              {campoSelect('ethDhcp', 'ETH DHCP', OPC_ONOFF_SL)}
+              {campoSelect('ethStatic', 'ETH estática', OPC_ONOFF_SL)}
+              {campoSelect('failover', 'Failover', OPC_ONOFF)}
+            </div>
+            <div className="grid grid-cols-2 gap-x-3">
+              {campoIp('ethIp', 'IP estática')}
+              {campoIp('ethMask', 'Máscara')}
+              {campoIp('ethGw', 'Gateway')}
+              {campoIp('ethDns', 'DNS')}
+            </div>
+            <p className="text-[10.5px] text-slate-400 mb-2">La IP estática grabada no es legible desde el CLI: los campos arrancan vacíos y solo se envían si los completás (los 4 juntos).</p>
+            <div className="border-t border-slate-100 pt-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end mb-1">
+                  <div>{campoTexto(`w${i}ssid`, i === 0 ? 'WiFi — SSID' : '', { placeholder: `perfil ${i}` })}</div>
+                  <div>{campoTexto(`w${i}pass`, i === 0 ? 'Clave' : '', { type: 'password', placeholder: '••••••' })}</div>
+                  <div className="mb-1.5">
+                    <select value={campos[`w${i}on`]} onChange={(e2) => set(`w${i}on`, e2.target.value)} disabled={bloqueado}
+                      className={`border rounded-lg px-1.5 py-1.5 text-xs disabled:bg-slate-50 disabled:text-slate-400 ${esDirty(`w${i}on`) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}>
+                      <option value="on">on</option><option value="off">off</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Columna 3: Servidores */}
+          <div className="border border-slate-100 rounded-lg p-2.5">
+            <h4 className="text-sm font-medium text-slate-700 mb-2">🖥 Configuraciones de Servidores</h4>
+            <div className="grid grid-cols-2 gap-2">
+              {campoSelect('mqttPerfil', 'Perfil MQTT', [{ v: '', t: '(sin leer)' }, ...MQTT_PERFILES])}
+              {campoSelect('blockPublic', 'Bloquear rutas públicas', [{ v: 'no', t: 'no' }, { v: 'yes', t: 'yes' }])}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {campoTexto('ntp', 'NTP (auto | ip | host)')}
+              {campoSelect('ntpFallback', 'Fallback pool.ntp.org', OPC_ONOFF)}
+            </div>
+            <div className="border-t border-slate-100 pt-2 grid grid-cols-2 gap-2">
+              {campoTexto('ftpHost', 'FTP host', { placeholder: '(sin configurar)' })}
+              {campoTexto('ftpPort', 'FTP puerto')}
+              {campoTexto('ftpUser', 'FTP usuario')}
+              {campoTexto('ftpPass', 'FTP contraseña', { type: 'password' })}
+            </div>
+            {campoTexto('ftpPath', 'FTP ruta base', { placeholder: '(raíz)' })}
+          </div>
+        </div>
+      </div>
+
+      {/* ============ 3 · CONFIGURAR ============ */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">3 · Configurar</h3>
+        <div className="flex items-center justify-center gap-3 flex-wrap">
+          <button onClick={grabar} disabled={bloqueado || !cambios.length}
+            className="px-6 py-3 text-sm font-medium bg-coop-azul text-white rounded-xl hover:opacity-90 disabled:opacity-40">
+            {grabando ? '⏳ Grabando…' : `💾 Grabar cambios${cambios.length ? ` (${cambios.length})` : ''}`}
+          </button>
+          {!!cambios.length && !grabando && (
+            <button onClick={() => { setCampos({ ...orig }); setAviso(''); }}
+              className="px-3 py-2 text-xs border border-slate-300 rounded-lg text-slate-500 hover:border-slate-400">
+              Descartar cambios
+            </button>
+          )}
+          <span className="text-[11px] text-slate-400">
+            {bloqueado && !orig ? 'Se habilita al conectar y leer la placa.' : cambios.length ? 'Los campos en ámbar son los que se van a grabar — antes de enviar vas a ver la lista exacta de comandos.' : 'Sin cambios pendientes: editá un campo y se marca en ámbar.'}
+          </span>
+        </div>
         {orig && (
-          <>
-            <div className="grid md:grid-cols-2 gap-3">
-              {/* ⚙ GENERALES */}
-              <div className="bg-white border border-slate-200 rounded-xl p-3">
-                <h3 className="text-sm font-medium text-slate-700 mb-2">⚙ Configuraciones Generales</h3>
-                {campoTexto('nombre', 'Nombre del dispositivo', { placeholder: 'DNP3_ejemplo' })}
-                {campoTexto('passNueva', 'Nueva contraseña CLI (vacío = no cambiar)', { type: 'password', placeholder: '••••••••' })}
-                <div className="grid grid-cols-2 gap-2">
-                  {campoSelect('debug', 'Debug', OPC_ONOFF)}
-                  {campoTexto('tz', 'Timezone (seg; Arg = -10800)')}
-                </div>
-              </div>
-
-              {/* 🔌 RECONECTADOR */}
-              <div className="bg-white border border-slate-200 rounded-xl p-3">
-                <h3 className="text-sm font-medium text-slate-700 mb-2">🔌 Configuraciones del Reconectador</h3>
-                {campoSelect('recoPerfil', 'Perfil (leído de la placa)', [{ v: '', t: '(sin perfil — engine DNP3 apagado)' }, ...perfiles.map((p) => ({ v: p.key, t: `${p.brand} ${p.model} (${p.key})` }))])}
-                <div className="flex items-end gap-2">
-                  <div className="flex-1">{campoTexto('sn', 'Número de serie')}</div>
-                  <button onClick={autoId} disabled={!conectado || ocupado || !campos.recoPerfil}
-                    title="recloser_autoid: consulta el SN directamente al reconectador (requiere perfil activo)"
-                    className="mb-1.5 px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg hover:border-coop-azul hover:text-coop-azul disabled:opacity-40 shrink-0">🔍 Auto-identificar</button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {campoSelect('baud', 'Baud DNP3', [{ v: '', t: '(sin leer)' }, ...BAUD_OPCIONES])}
-                  {campoTexto('recoTz', 'Hora del reco vs UTC (min; Arg = -180)')}
-                </div>
-              </div>
-
-              {/* 🌐 RED */}
-              <div className="bg-white border border-slate-200 rounded-xl p-3">
-                <h3 className="text-sm font-medium text-slate-700 mb-2">🌐 Configuraciones de Red</h3>
-                <div className="grid grid-cols-3 gap-2">
-                  {campoSelect('ethDhcp', 'ETH DHCP', OPC_ONOFF_SL)}
-                  {campoSelect('ethStatic', 'ETH estática', OPC_ONOFF_SL)}
-                  {campoSelect('failover', 'Failover', OPC_ONOFF)}
-                </div>
-                <div className="grid grid-cols-2 gap-x-3">
-                  {campoIp('ethIp', 'IP estática')}
-                  {campoIp('ethMask', 'Máscara')}
-                  {campoIp('ethGw', 'Gateway')}
-                  {campoIp('ethDns', 'DNS')}
-                </div>
-                <p className="text-[10.5px] text-slate-400 mb-2">La IP estática grabada no es legible desde el CLI: los campos arrancan vacíos y solo se envían si los completás (los 4 juntos).</p>
-                <div className="border-t border-slate-100 pt-2">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end mb-1">
-                      <div>{campoTexto(`w${i}ssid`, i === 0 ? 'WiFi — SSID' : '', { placeholder: `perfil ${i}` })}</div>
-                      <div>{campoTexto(`w${i}pass`, i === 0 ? 'Clave' : '', { type: 'password', placeholder: '••••••' })}</div>
-                      <div className="mb-1.5">
-                        <select value={campos[`w${i}on`]} onChange={(e2) => set(`w${i}on`, e2.target.value)} disabled={ocupado}
-                          className={`border rounded-lg px-1.5 py-1.5 text-xs ${esDirty(`w${i}on`) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}>
-                          <option value="on">on</option><option value="off">off</option>
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* 🖥 SERVIDORES */}
-              <div className="bg-white border border-slate-200 rounded-xl p-3">
-                <h3 className="text-sm font-medium text-slate-700 mb-2">🖥 Configuraciones de Servidores</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {campoSelect('mqttPerfil', 'Perfil MQTT', [{ v: '', t: '(sin leer)' }, ...MQTT_PERFILES])}
-                  {campoSelect('blockPublic', 'Bloquear rutas públicas', [{ v: 'no', t: 'no' }, { v: 'yes', t: 'yes' }])}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {campoTexto('ntp', 'NTP (auto | ip | host)')}
-                  {campoSelect('ntpFallback', 'Fallback pool.ntp.org', OPC_ONOFF)}
-                </div>
-                <div className="border-t border-slate-100 pt-2 grid grid-cols-2 gap-2">
-                  {campoTexto('ftpHost', 'FTP host', { placeholder: '(sin configurar)' })}
-                  {campoTexto('ftpPort', 'FTP puerto')}
-                  {campoTexto('ftpUser', 'FTP usuario')}
-                  {campoTexto('ftpPass', 'FTP contraseña', { type: 'password' })}
-                </div>
-                {campoTexto('ftpPath', 'FTP ruta base', { placeholder: '(raíz)' })}
-              </div>
+          <div className="mt-3 border-t border-slate-100 pt-2 text-xs">
+            <div className="grid sm:grid-cols-3 gap-x-6 gap-y-0.5">
+              {lineaEstado('MAC', estado.mac)}
+              {lineaEstado('Hora', estado.hora)}
+              {lineaEstado('ETH', estado.ethLink && `${estado.ethLink}${estado.ethIp ? ` · ${estado.ethIp}` : ''}`)}
+              {lineaEstado('WiFi', estado.wifiLink && `${estado.wifiLink}${estado.wifiIp ? ` · ${estado.wifiIp}` : ''}`)}
+              {lineaEstado('Interfaz activa', estado.iface)}
+              {lineaEstado('MQTT', estado.mqttEstado && `${estado.mqttEstado}${estado.mqttUser ? ` · user ${estado.mqttUser}` : ''}`)}
+              {lineaEstado('NTP sync', estado.ntpSync)}
+              {lineaEstado('Reconectador', estado.recloserInfo)}
+              {lineaEstado('Uptime', estado.uptime)}
             </div>
-
-            {/* GRABAR */}
-            <div className="mt-3 flex items-center gap-3 flex-wrap">
-              <button onClick={grabar} disabled={!conectado || ocupado || !cambios.length}
-                className="px-5 py-3 text-sm font-medium bg-coop-azul text-white rounded-xl hover:opacity-90 disabled:opacity-40">
-                {grabando ? '⏳ Grabando…' : `💾 Grabar cambios${cambios.length ? ` (${cambios.length})` : ''}`}
-              </button>
-              {!!cambios.length && !grabando && (
-                <button onClick={() => { setCampos({ ...orig }); setAviso(''); }}
-                  className="px-3 py-2 text-xs border border-slate-300 rounded-lg text-slate-500 hover:border-slate-400">
-                  Descartar cambios
-                </button>
-              )}
-              <span className="text-[11px] text-slate-400">
-                {cambios.length ? 'Los campos en ámbar son los que se van a grabar — antes de enviar vas a ver la lista exacta de comandos.' : 'Sin cambios pendientes: editá un campo y se marca en ámbar.'}
-              </span>
-            </div>
-
-            {/* Estado leído (solo lectura) */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3 text-xs">
-              <h3 className="text-sm font-medium text-slate-700 mb-1.5">Estado de la placa (última lectura)</h3>
-              <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
-                {lineaEstado('MAC', estado.mac)}
-                {lineaEstado('Hora', estado.hora)}
-                {lineaEstado('ETH', estado.ethLink && `${estado.ethLink}${estado.ethIp ? ` · ${estado.ethIp}` : ''}`)}
-                {lineaEstado('WiFi', estado.wifiLink && `${estado.wifiLink}${estado.wifiIp ? ` · ${estado.wifiIp}` : ''}`)}
-                {lineaEstado('Interfaz activa', estado.iface)}
-                {lineaEstado('MQTT', estado.mqttEstado && `${estado.mqttEstado}${estado.mqttUser ? ` · user ${estado.mqttUser}` : ''}`)}
-                {lineaEstado('NTP sync', estado.ntpSync)}
-                {lineaEstado('Reconectador', estado.recloserInfo)}
-                {lineaEstado('Uptime', estado.uptime)}
-              </div>
-              {!!estado.mqttRutas?.length && (
-                <div className="mt-1 text-slate-400 font-mono text-[10.5px]">{estado.mqttRutas.join('  ·  ')}</div>
-              )}
-            </div>
-          </>
+            {!!estado.mqttRutas?.length && (
+              <div className="mt-1 text-slate-400 font-mono text-[10.5px]">{estado.mqttRutas.join('  ·  ')}</div>
+            )}
+          </div>
         )}
       </div>
 
-      {/* ---------- Columna del terminal (registro fiel) ---------- */}
-      <div className="lg:col-span-2">
-        <h3 className="text-sm font-medium text-slate-700 mb-1.5">Terminal de comunicaciones <span className="font-normal text-slate-400">· registro de lo enviado y recibido</span></h3>
+      {/* ============ 4 · MODO AVANZADO: MONITOR ============ */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3">
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">4 · Modo avanzado: monitor del proceso de lectura y configuración</h3>
         {terminal}
         <p className="text-[11px] text-slate-400 mt-1.5">Todo lo que el formulario lee y graba pasa por acá, comando por comando. Para operar a mano, cambiá a «Terminal libre» en el selector de firmware.</p>
       </div>
