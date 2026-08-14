@@ -153,6 +153,26 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     const m = ls.join(' ').match(/vs UTC:\s*(-?\d+)\s*min/i); if (m) d.recoTz = m[1];
   };
 
+  // Re-login AUTOMÁTICO (hallazgo de campo 14/08: el protocolo del CLI cierra
+  // la sesión a los pocos minutos — mientras el usuario completa el
+  // formulario, el login caduca y la escritura rebota). Se llama antes de
+  // CUALQUIER escritura: reabre la sesión (`comando`) y se loguea con la
+  // contraseña del campo o la MAC. Si la sesión sigue viva, no molesta.
+  const asegurarLogin = async (passOverride, macFallback) => {
+    await consultar('comando');
+    const rLogin = await consultar('login');
+    if (rLogin.some((l) => /password/i.test(l))) {
+      const pass = String(passOverride ?? passLogin).trim() || macFallback || estado.mac || '';
+      const rPass = await consultar(pass || 'cancel');
+      const ok = rPass.some((l) => /login ok/i.test(l));
+      setLogueado(ok);
+      return ok;
+    }
+    // Sin prompt de password: sesión ya logueada o FW sin contraseña.
+    setLogueado(true);
+    return true;
+  };
+
   // ---------- Lectura completa (auto al conectar y con «Releer placa») ----------
   const leerPlaca = async (passOverride) => {
     if (!conectado || !habilitado || ocupado) return;
@@ -162,18 +182,10 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
       setLeyendo('abriendo sesión');
       await consultar('comando');
       setLeyendo('info');
-      parseInfo(await consultar('info'), d, e);
+      parseInfo(await consultar('info'), d, e); // la MAC de acá = pass de fábrica
       setLeyendo('login');
-      const rLogin = await consultar('login');
-      if (rLogin.some((l) => /password/i.test(l))) {
-        const pass = String(passOverride ?? passLogin).trim() || e.mac || '';
-        const rPass = await consultar(pass || 'cancel');
-        const ok = rPass.some((l) => /login ok/i.test(l));
-        setLogueado(ok);
-        if (!ok) setAviso('Login rechazado: cargá la contraseña CLI de esta placa (en placa recién programada es la MAC) y tocá «Releer placa».');
-      } else {
-        setLogueado(true);
-      }
+      const ok = await asegurarLogin(passOverride, e.mac);
+      if (!ok) setAviso('Login rechazado: cargá la contraseña CLI de esta placa (en placa recién programada es la MAC) y tocá «Releer placa».');
       setLeyendo('time'); parseTime(await consultar('time'), d, e);
       setLeyendo('show_net_status'); parseNet(await consultar('show_net_status'), d, e);
       setLeyendo('list_wifi'); parseWifi(await consultar('list_wifi'), d);
@@ -245,6 +257,13 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     if (!ok) return;
     setGrabando(true);
     try {
+      // Re-login automático (14/08): la sesión CLI caduca sola mientras se
+      // completa el formulario — Grabar la reabre y se loguea antes de enviar.
+      const okLogin = await asegurarLogin();
+      if (!okLogin) {
+        setAviso('La sesión expiró y el re-login falló: revisá la contraseña CLI (en placa recién programada es la MAC) y volvé a tocar «Grabar cambios».');
+        return;
+      }
       for (const cmd of comandos) await consultar(cmd, 500, 8000);
       log('sys', `✓ ${comandos.length} cambio(s) enviado(s). Releyendo la placa para verificar…`);
       const passNueva = campos.passNueva.trim();
@@ -258,6 +277,12 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     if (!conectado || ocupado) return;
     setLeyendo('recloser_autoid (puede tardar unos segundos)');
     try {
+      // recloser_autoid es comando de escritura [*]: re-login por las dudas
+      // (la sesión CLI caduca sola — hallazgo de campo 14/08).
+      if (!(await asegurarLogin())) {
+        setAviso('La sesión expiró y el re-login falló: revisá la contraseña CLI y reintentá.');
+        return;
+      }
       const r = await consultar('recloser_autoid', 2500, 15000);
       const m = r.join(' ').match(/SN identificado y guardado:\s*(\S+)/i);
       if (m) {
