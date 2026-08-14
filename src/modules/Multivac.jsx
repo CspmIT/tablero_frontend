@@ -17,6 +17,10 @@ import { getImage, saveImage } from '../api/minio.js';
 // Configuración guiada por firmware (13/08): formulario que lee/edita/graba
 // la config de la placa — el terminal queda como registro limpio.
 import MultivacConfigReconecta from './MultivacConfigReconecta.jsx';
+// Uso desde el CELULAR (14/08): en Chrome de Android el Web Serial por cable
+// no existe (el picker solo lista Bluetooth) — se usa WebUSB con driver
+// CP210x propio, con la misma interfaz que un SerialPort.
+import { soportaWebUsb, pedirPuertoCp210x } from '../api/cp210x.js';
 
 // Servicios UART-BLE candidatos (Lorenzo confirmó BLE; el UUID exacto de su
 // stack se detecta probando en orden — y hay campo para pegar uno custom).
@@ -237,6 +241,10 @@ export default function Multivac() {
   const [fwIdxSel, setFwIdxSel] = useState(-1);
   const [flasheando, setFlasheando] = useState(false);
   const [flashProg, setFlashProg] = useState(null); // { seg, total, pct }
+  // Ajustes UX 14/08: detalle de archivos oculto tras «Ver detalles» en la
+  // tabla, y estado final de la barra (verde «Finalizado exitosamente»).
+  const [fwDetalleVer, setFwDetalleVer] = useState(false);
+  const [flashFin, setFlashFin] = useState(null); // null | 'ok'
   // Confirmación PROPIA de la app (pedido de Leonardo 12/08): el confirm()
   // nativo mete el encabezado "tauri://localhost dice…" / "localhost:… says"
   // que asusta a los usuarios no especializados y no se puede quitar. Este
@@ -321,9 +329,9 @@ export default function Multivac() {
     if (snRef.current.canales.some((c) => c.port)) { log('sys', 'Cerrando el Terminal Sniffer para programar…'); await snCerrarTodos(); }
     let transport = null;
     try {
-      const port = await navigator.serial.requestPort();
+      const port = await pedirPuertoSerie();
       transport = new Transport(port, false);
-      setFlasheando(true);
+      setFlasheando(true); setFlashFin(null);
       log('sys', `Entrando al bootloader (921600, fallback 115200)…`);
       const loader = new ESPLoader({
         transport, baudrate: 921600, romBaudrate: 115200,
@@ -448,6 +456,7 @@ export default function Multivac() {
       log('sys', modo === 'fabrica'
         ? `✅ ${fwSel.modelo} ${fwSel.version} — vuelta a fábrica completa. El equipo arranca SIN configuración: te llevamos a Configuraciones para aprovisionarlo (elegí el firmware y conectá por USB).`
         : `✅ ${fwSel.modelo} ${fwSel.version} actualizado (config y mediciones intactas). Reconectá el CLI y verificá con "info".`);
+      setFlashFin('ok'); // barra completa en verde: «Finalizado exitosamente»
       // Pedido 14/08: tras borrar TODO, la placa queda en blanco ⇒ llevar al
       // usuario directo a Configuraciones para la primera configuración.
       if (modo === 'fabrica') setSolapa('config');
@@ -708,7 +717,7 @@ export default function Multivac() {
 
   const snAbrir = async (i) => {
     try {
-      const port = await navigator.serial.requestPort();
+      const port = await pedirPuertoSerie();
       await port.open({
         baudRate: Number(snOpc.baud) || 19200, dataBits: Number(snOpc.dataBits) || 8,
         parity: snOpc.parity, stopBits: Number(snOpc.stopBits) || 1,
@@ -908,6 +917,14 @@ export default function Multivac() {
 
   const soportaSerial = typeof navigator !== 'undefined' && 'serial' in navigator;
   const soportaBle = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+  // CELULAR (14/08): en Android el picker de Web Serial existe pero solo
+  // lista Bluetooth — el cable va por WebUSB con el driver CP210x propio.
+  const esAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
+  const usarWebUsb = esAndroid && soportaWebUsb();
+  const hayUsb = usarWebUsb || soportaSerial;
+  // ÚNICO punto de pedido de puerto serie por cable: PC → Web Serial nativo;
+  // Android → WebUSB + CP210x. El resto del código no distingue.
+  const pedirPuertoSerie = () => (usarWebUsb ? pedirPuertoCp210x() : navigator.serial.requestPort());
 
   const log = (t, txt) => setLineas((ls) => [...ls.slice(-500), { t, txt }]);
   useEffect(() => { finLog.current?.scrollIntoView({ behavior: 'smooth' }); }, [lineas]);
@@ -928,7 +945,7 @@ export default function Multivac() {
   // ---------- Transporte USB (Web Serial): el CLI por serie, tal cual ----------
   const conectarSerial = async () => {
     try {
-      const port = await navigator.serial.requestPort();
+      const port = await pedirPuertoSerie();
       await port.open({ baudRate: 115200 });
       // Salida del modo bootloader (hotfix 07/08): al abrir, el navegador puede
       // dejar DTR/RTS en un estado que resetea la placa con IO0 a masa → el
@@ -1103,6 +1120,7 @@ export default function Multivac() {
           <th className="px-2 py-1.5 font-medium">Nombre</th>
           <th className="px-2 py-1.5 font-medium">Archivos</th>
           <th className="px-2 py-1.5 font-medium">Comentario de la versión</th>
+          <th className="px-2 py-1.5" title="Archivos y parámetros de la versión" />
           {gestion && <th className="px-2 py-1.5 font-medium">Subido</th>}
           {gestion && <th />}
         </tr>
@@ -1122,6 +1140,14 @@ export default function Multivac() {
             <td className="px-2 py-1.5">{f.nombre || '—'}</td>
             <td className="px-2 py-1.5 whitespace-nowrap text-slate-500" title={(f.segmentos || []).map((sg) => `${sg.offset}  ${sg.nombre}`).join('\n')}>{descArchivos(f)}</td>
             <td className="px-2 py-1.5 text-slate-500 max-w-[260px] truncate" title={f.notas || ''}>{f.notas || ''}</td>
+            {/* Ver detalles (14/08): los archivos de la versión van ocultos —
+                este botón selecciona la fila y abre/cierra la ficha de abajo. */}
+            <td className="px-2 py-1.5 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => { setFwModeloSel(f.modelo); if (fwIdxSel === f._i) { setFwDetalleVer((v) => !v); } else { setFwIdxSel(f._i); setFwDetalleVer(true); } }}
+                className={`text-[11px] px-2 py-0.5 rounded-full border ${fwIdxSel === f._i && fwDetalleVer ? 'border-coop-azul text-coop-azul bg-coop-azul/5' : 'border-slate-200 text-slate-400 hover:border-coop-azul hover:text-coop-azul'}`}>
+                {fwIdxSel === f._i && fwDetalleVer ? 'Ocultar detalles' : 'Ver detalles'}
+              </button>
+            </td>
             {gestion && <td className="px-2 py-1.5 whitespace-nowrap text-slate-400">{String(f.fecha || '').slice(0, 10)}{f.subidoPor ? ` · ${f.subidoPor}` : ''}</td>}
             {gestion && (
               <td className="px-2 py-1.5 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
@@ -1149,7 +1175,10 @@ export default function Multivac() {
   // tocar nada (pedido puntual de Lorenzo) + botones + progreso + terminal.
   const panelProgramacion = () => (
     <>
-      {fwSel && (
+      {/* Ficha de la versión (14/08: OCULTA por defecto — se abre con «Ver
+          detalles» en la tabla): la "tabla sagrada" offset→archivo, tal cual
+          se grabará (pedido puntual de Lorenzo, intacto detrás del botón). */}
+      {fwSel && fwDetalleVer && (
         <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
           <div className="flex items-center justify-between flex-wrap gap-1 mb-1">
             <p className="text-sm font-medium text-slate-700">
@@ -1172,35 +1201,48 @@ export default function Multivac() {
         </div>
       )}
 
-      <div className="grid sm:grid-cols-2 gap-2 mt-3">
-        <button onClick={() => fwProgramar('actualizar')} disabled={!fwSel?.segmentos?.length || flasheando || !soportaSerial}
-          className="px-4 py-3 text-sm font-medium bg-coop-naranja text-white rounded-xl hover:opacity-90 disabled:opacity-40">
-          {flasheando ? 'Programando…' : '⬆ Actualizar con la versión seleccionada (conserva config)'}
-        </button>
-        <button onClick={() => fwProgramar('fabrica')} disabled={!fwSel?.merged?.key || flasheando || !soportaSerial}
-          className="px-4 py-3 text-sm font-medium border border-red-300 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-40">
-          🏭 Volver a fábrica (borra TODO)
-        </button>
-      </div>
-      {!fwSel && <p className="text-[11px] text-slate-400 mt-1.5">Seleccioná una versión en la tabla para habilitar los botones.</p>}
-      {fwSel && !fwSel.merged?.key && <p className="text-[11px] text-slate-400 mt-1.5">Esta versión no incluye imagen de fábrica (merged): solo actualización.</p>}
-      {/* Barra de progreso SIEMPRE visible (pedido 12/08: para el usuario no
-          especializado tiene que estar ahí aunque no haya programación en
-          curso). Ancho total = el de los dos botones de arriba. */}
-      <div className="mt-3">
-        <div className="flex justify-between text-[11px] text-slate-500 mb-0.5">
-          <span>{flashProg ? `Programando — segmento ${flashProg.seg}/${flashProg.total}` : flasheando ? 'Preparando programación…' : 'Progreso de programación'}</span>
-          <span>{flashProg ? `${flashProg.pct}%` : flasheando ? '…' : '—'}</span>
+      {/* ===== 2 · ELECCIÓN DE MODO DE PROGRAMACIÓN ===== */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">2 · Elección de modo de programación</h3>
+        <div className="grid sm:grid-cols-2 gap-2">
+          <button onClick={() => fwProgramar('actualizar')} disabled={!fwSel?.segmentos?.length || flasheando || !hayUsb}
+            className="px-4 py-3 text-sm font-medium bg-coop-naranja text-white rounded-xl hover:opacity-90 disabled:opacity-40">
+            {flasheando ? 'Programando…' : '⬆ Actualizar con la versión seleccionada (conserva config)'}
+          </button>
+          <button onClick={() => fwProgramar('fabrica')} disabled={!fwSel?.merged?.key || flasheando || !hayUsb}
+            className="px-4 py-3 text-sm font-medium border border-red-300 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-40">
+            🏭 Volver a fábrica (borra TODO)
+          </button>
         </div>
-        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full bg-coop-naranja transition-all" style={{ width: `${flashProg ? flashProg.pct : 0}%` }} />
+        <p className="text-[11px] text-slate-400 mt-1.5">
+          {!fwSel
+            ? 'Seleccioná una versión en la tabla de arriba para habilitar los botones.'
+            : <>Versión seleccionada: <b className="text-slate-600">{fwSel.modelo} · {fwSel.version}{fwSel.nombre ? ` · ${fwSel.nombre}` : ''}</b>{fwSel.aprobado !== true ? ' (sin aprobar — prueba interna)' : ''}{!fwSel.merged?.key ? ' — esta versión no incluye imagen de fábrica: solo actualización.' : ''}</>}
+        </p>
+      </div>
+
+      {/* ===== 3 · ESTADO ===== */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">3 · Estado</h3>
+        <div className="flex justify-between text-[11px] mb-0.5">
+          <span className={flashFin === 'ok' && !flasheando ? 'text-emerald-600 font-medium' : 'text-slate-500'}>
+            {flashProg ? `Programando — segmento ${flashProg.seg}/${flashProg.total}` : flasheando ? 'Preparando programación…' : flashFin === 'ok' ? '✓ Finalizado exitosamente' : 'Sin programación en curso'}
+          </span>
+          <span className={flashFin === 'ok' && !flasheando ? 'text-emerald-600 font-medium' : 'text-slate-500'}>
+            {flashProg ? `${flashProg.pct}%` : flasheando ? '…' : flashFin === 'ok' ? '100%' : '—'}
+          </span>
+        </div>
+        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+          <div className={`h-full transition-all ${flashFin === 'ok' && !flasheando ? 'bg-emerald-500' : 'bg-coop-naranja'}`}
+            style={{ width: flashFin === 'ok' && !flasheando ? '100%' : `${flashProg ? flashProg.pct : 0}%` }} />
         </div>
       </div>
 
-      <div className="mt-4">
-        <h3 className="text-sm font-medium text-slate-700 mb-1.5">Terminal de comunicaciones</h3>
+      {/* ===== 4 · TERMINAL (misma forma que en Configuraciones) ===== */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 mt-3">
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">4 · Modo avanzado: monitor del proceso de programación</h3>
         {cajaTerminal('h-56', '— Acá vas a ver el paso a paso de la programación —')}
-        <p className="text-[11px] text-slate-400 mt-1.5">La placa entra al bootloader por auto-reset (DTR/RTS), el chip se verifica ANTES de escribir y al terminar se reinicia sola a modo run. Si el CLI está conectado, se cierra solo.</p>
+        <p className="text-[11px] text-slate-400 mt-1.5">Todo el proceso pasa por acá, paso a paso: la placa entra al bootloader por auto-reset (DTR/RTS), el chip se verifica ANTES de escribir y al terminar se reinicia sola a modo run. Si el CLI está conectado, se cierra solo.</p>
       </div>
     </>
   );
@@ -1222,7 +1264,7 @@ export default function Multivac() {
   );
   const botonesConexion = (
     <>
-      {!conectado && soportaSerial && (
+      {!conectado && hayUsb && (
         <button onClick={conectarSerial} disabled={!cfgModo}
           title={cfgModo ? 'Conectar por cable USB (CLI serie)' : 'Primero elegí el firmware de la placa'}
           className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"><Usb size={16} /> USB</button>
@@ -1262,23 +1304,28 @@ export default function Multivac() {
       {/* ============ SOLAPA: ACTUALIZACIONES DE FIRMWARE (todos) ============ */}
       {solapa === 'firmware' && (
         <div>
-          <p className="text-sm text-slate-500 mb-3">
-            Elegí el equipo, tocá una versión en la tabla y programá. Acá aparecen solo las versiones <b>aprobadas</b> por el área.
-            {!soportaSerial && ' Este navegador no soporta Web Serial: usá Chrome/Edge de PC.'}
-          </p>
-          {gruposAprobados.length === 0 && (
-            <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-sm text-slate-400 mb-3">
-              Todavía no hay versiones aprobadas.{puedeGestionar ? ' Subilas y aprobalas con el tilde en «Gestión de versiones».' : ' El área está preparando el catálogo.'}
-            </div>
-          )}
-          {gruposAprobados.map((g) => (
-            <details key={g.modelo} open className="bg-white border border-slate-200 rounded-xl mb-2 overflow-hidden">
-              <summary className="px-3 py-2 cursor-pointer select-none text-sm font-medium text-slate-700 hover:bg-slate-50">
-                {g.modelo} <span className="font-normal text-slate-400">{g.chip ? `· ${CHIP_LABEL[g.chip]} ` : ''}· {g.releases.length} versión{g.releases.length === 1 ? '' : 'es'}</span>
-              </summary>
-              <div className="overflow-x-auto border-t border-slate-100">{tablaReleases(g.releases, false)}</div>
-            </details>
-          ))}
+          {/* ===== 1 · ELECCIÓN DE VERSIÓN (14/08: mismas secciones numeradas
+              que Configuraciones; los archivos van tras «Ver detalles») ===== */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3">
+            <h3 className="text-sm font-semibold text-slate-700 mb-1">1 · Elección de versión de firmware</h3>
+            <p className="text-sm text-slate-500 mb-3">
+              Elegí el equipo y tocá una versión en la tabla. Acá aparecen solo las versiones <b>aprobadas</b> por el área.
+              {!hayUsb && ' Este navegador no soporta puerto serie: usá Chrome/Edge (PC) o Chrome de Android.'}
+            </p>
+            {gruposAprobados.length === 0 && (
+              <div className="border border-slate-100 rounded-lg p-6 text-center text-sm text-slate-400">
+                Todavía no hay versiones aprobadas.{puedeGestionar ? ' Subilas y aprobalas con el tilde en «Gestión de versiones».' : ' El área está preparando el catálogo.'}
+              </div>
+            )}
+            {gruposAprobados.map((g) => (
+              <details key={g.modelo} open className="border border-slate-100 rounded-lg mb-2 overflow-hidden">
+                <summary className="px-3 py-2 cursor-pointer select-none text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  {g.modelo} <span className="font-normal text-slate-400">{g.chip ? `· ${CHIP_LABEL[g.chip]} ` : ''}· {g.releases.length} versión{g.releases.length === 1 ? '' : 'es'}</span>
+                </summary>
+                <div className="overflow-x-auto border-t border-slate-100">{tablaReleases(g.releases, false)}</div>
+              </details>
+            ))}
+          </div>
 
           {panelProgramacion()}
         </div>
@@ -1314,7 +1361,7 @@ export default function Multivac() {
         </div>
         <p className="text-sm text-slate-500 flex-1 min-w-[240px]">
           Terminal del CLI del firmware universal: configurá una Multivac sin ingeniero, por cable USB o Bluetooth.
-          {!soportaSerial && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
+          {!hayUsb && !soportaBle && ' Este navegador no soporta ninguno de los dos transportes: usá Chrome/Edge.'}
         </p>
       </div>
       <div className="grid lg:grid-cols-5 gap-4">
@@ -1553,7 +1600,7 @@ export default function Multivac() {
                     {snRef.current.canales[i].entradas.length ? `${snRef.current.canales[i].entradas.length} entradas · ${snRef.current.canales[i].bytes >= 10240 ? `${(snRef.current.canales[i].bytes / 1024).toFixed(1)} KB` : `${snRef.current.canales[i].bytes} bytes`}` : (snAbiertos[i] ? 'escuchando…' : 'sin datos')}
                   </span>
                   {!snAbiertos[i] && (
-                    <button onClick={() => snAbrir(i)} disabled={!soportaSerial}
+                    <button onClick={() => snAbrir(i)} disabled={!hayUsb}
                       className="px-3 py-1.5 text-xs font-medium bg-coop-azul text-white rounded-lg hover:opacity-90 disabled:opacity-40 shrink-0">▶ Abrir puerto</button>
                   )}
                   {snAbiertos[i] && (
@@ -1688,6 +1735,7 @@ export default function Multivac() {
       {/* ============ SOLAPA: GESTIÓN DE VERSIONES (uso interno del área) ============ */}
       {solapa === 'gestion' && puedeGestionar && (
         <div>
+          <h3 className="text-sm font-semibold text-slate-700 mb-1">1 · Gestión y elección de releases</h3>
           <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
             <p className="text-sm text-slate-500 flex-1 min-w-[260px]">
               Todos los releases subidos, aprobados o no. El tilde <b>✓ habilita</b> la versión hacia «Actualizaciones de firmware» (la vista de todos los usuarios). Desde acá también se programa: seleccioná una versión — aprobada o no — y usá los botones de abajo, sin necesidad de aprobarla para probarla.
