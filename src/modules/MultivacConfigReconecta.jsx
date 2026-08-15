@@ -33,7 +33,9 @@ const limpiar = (s) => { const t = String(s ?? '').trim(); return VACIO.test(t) 
 
 const CAMPOS_DEF = {
   nombre: '', passNueva: '', debug: 'off', tz: '-10800',
-  ethDhcp: '', ethStatic: '', ethIp: '', ethMask: '', ethGw: '', ethDns: '',
+  // Máscara con default 255.255.255.0 (pedido 15/08 — el caso típico; si la
+  // placa informa otra al leer, se pisa con la real).
+  ethDhcp: '', ethStatic: '', ethIp: '', ethMask: '255.255.255.0', ethGw: '', ethDns: '',
   w0ssid: '', w0pass: '', w0on: 'off', w1ssid: '', w1pass: '', w1on: 'off', w2ssid: '', w2pass: '', w2on: 'off',
   failover: 'on',
   mqttPerfil: '', blockPublic: 'no', ntp: 'auto', ntpFallback: 'on',
@@ -56,6 +58,11 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
   const [leyendo, setLeyendo] = useState('');
   const [logueado, setLogueado] = useState(false);
   const [grabando, setGrabando] = useState(false);
+  // Barra de progreso del bloque 3 (pedido 14/08: al finalizar debe quedar
+  // claro que terminó bien — verde «Finalizado exitosamente», igual que en
+  // Actualizaciones de firmware). { txt, pct } durante el grabado; { ok:true }
+  // al terminar verificado; null en reposo.
+  const [cfgProg, setCfgProg] = useState(null);
   const [confirmar, setConfirmar] = useState(null); // { comandos, resolve }
   const [aviso, setAviso] = useState('');
   const ocupado = !!leyendo || grabando;
@@ -153,6 +160,72 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     const m = ls.join(' ').match(/vs UTC:\s*(-?\d+)\s*min/i); if (m) d.recoTz = m[1];
   };
 
+  // ---- FW ≥ 6.32 (Lorenzo, 14/08): get_all_json / get_firmware / get_hardware
+  // (sin login). UN comando devuelve TODA la config como JSON — incluye lo que
+  // antes era ilegible (IP/máscara/GW estáticas, DHCP/estática, block_public,
+  // baud, reco_tz). Las claves WiFi y FTP no viajan en el JSON (correcto):
+  // quedan write-only. Si el FW no conoce el comando, cae a la secuencia clásica.
+  const sinCeros = (v) => (String(v || '') === '0.0.0.0' ? '' : String(v || ''));
+  const parseAllJson = (ls, d, e) => {
+    const texto = ls.join('\n');
+    const ini = texto.indexOf('{'); const fin = texto.lastIndexOf('}');
+    if (ini < 0 || fin <= ini) return false;
+    let j; try { j = JSON.parse(texto.slice(ini, fin + 1)); } catch { return false; }
+    const g = j.general || {}; const r = j.redes || {}; const s = j.servidores || {}; const rc = j.reconectador || {};
+    if (g.dev_name != null) d.nombre = limpiar(g.dev_name);
+    if (g.mac) e.mac = String(g.mac);
+    if (g.debug != null) d.debug = g.debug ? 'on' : 'off';
+    if (g.tz_sistema_s != null) d.tz = String(g.tz_sistema_s);
+    if (g.uptime_s != null) e.uptime = `${g.uptime_s} s`;
+    if (g.fw) e.fw = `${g.fw}${g.supported ? ` · ${g.supported}` : ''}`;
+    if (g.hw) e.hw = String(g.hw);
+    (Array.isArray(r.wifi) ? r.wifi : []).slice(0, 3).forEach((w, i) => {
+      d[`w${i}ssid`] = limpiar(w?.ssid || '');
+      d[`w${i}on`] = w?.enabled ? 'on' : 'off';
+      d[`w${i}pass`] = ''; // el JSON no expone claves: write-only
+    });
+    const et = r.eth || {};
+    if (et.dhcp != null) d.ethDhcp = et.dhcp ? 'on' : 'off';
+    if (et.static != null) d.ethStatic = et.static ? 'on' : 'off';
+    if (et.ip != null) d.ethIp = sinCeros(et.ip);
+    if (et.mask != null) d.ethMask = sinCeros(et.mask) || '255.255.255.0'; // placa sin máscara → default
+    if (et.gw != null) d.ethGw = sinCeros(et.gw);
+    if (r.failover != null) d.failover = r.failover ? 'on' : 'off';
+    if (r.block_public != null) d.blockPublic = r.block_public ? 'yes' : 'no';
+    if (r.iface_activa) e.iface = String(r.iface_activa);
+    const mq = s.mqtt || {};
+    if (mq.profile_idx != null) d.mqttPerfil = String(mq.profile_idx);
+    if (mq.user != null) e.mqttUser = String(mq.user);
+    if (mq.conectado != null) e.mqttEstado = mq.conectado ? 'connected' : 'disconnected';
+    if (Array.isArray(mq.rutas)) e.mqttRutas = mq.rutas.map((x, i) => `[${i}] ${x?.host}:${x?.port}  ${x?.privada ? 'privada' : 'publica'}`);
+    const nt = s.ntp || {};
+    if (nt.server != null) d.ntp = /\(auto\)/i.test(String(nt.server)) ? 'auto' : (limpiar(nt.server) || 'auto');
+    if (nt.pool_fallback != null) d.ntpFallback = nt.pool_fallback ? 'on' : 'off';
+    if (nt.sincronizado != null) e.ntpSync = nt.sincronizado ? 'ok' : 'pendiente';
+    const ft = s.ftp || {};
+    if (ft.host != null) d.ftpHost = /\(none\)/i.test(String(ft.host)) ? '' : limpiar(ft.host);
+    if (ft.port != null) d.ftpPort = String(ft.port);
+    if (ft.user != null) d.ftpUser = limpiar(ft.user);
+    if (ft.path != null) d.ftpPath = limpiar(ft.path);
+    if (rc.perfil != null) d.recoPerfil = limpiar(String(rc.perfil));
+    if (rc.sn != null) d.sn = limpiar(String(rc.sn));
+    if (rc.baud_idx != null) d.baud = String(rc.baud_idx);
+    if (rc.reco_tz_min != null) d.recoTz = String(rc.reco_tz_min);
+    if (rc.event_map) e.eventMap = `${rc.event_map.origen || '?'} · ${rc.event_map.entries ?? '?'} entradas`;
+    if (rc.eventos_pendientes != null) e.eventosPend = String(rc.eventos_pendientes);
+    e.recloserInfo = d.recoPerfil ? `${d.recoPerfil}${d.sn ? ` · SN ${d.sn}` : ''}` : '(sin perfil)';
+    return true;
+  };
+  const parseFirmware = (ls, e) => {
+    const build = ls.join(' ').match(/build:\s*(.+?)(\s{2,}|$)/i);
+    if (build) e.fwBuild = build[1].trim();
+    if (!e.fw) { const v = ls.find((l) => /\S/.test(l) && !/^>+/.test(l.trim())); if (v) e.fw = v.trim(); }
+  };
+  const parseHardware = (ls, e) => {
+    const fl = ls.join('\n').match(/flash:\s*(.+)/i); if (fl) e.flash = fl[1].trim();
+    const sk = ls.join('\n').match(/sketch:\s*(.+)/i); if (sk) e.sketch = sk[1].trim();
+  };
+
   // Re-login AUTOMÁTICO (hallazgo de campo 14/08: el protocolo del CLI cierra
   // la sesión a los pocos minutos — mientras el usuario completa el
   // formulario, el login caduca y la escritura rebota). Se llama antes de
@@ -181,19 +254,32 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     try {
       setLeyendo('abriendo sesión');
       await consultar('comando');
-      setLeyendo('info');
-      parseInfo(await consultar('info'), d, e); // la MAC de acá = pass de fábrica
-      setLeyendo('login');
-      const ok = await asegurarLogin(passOverride, e.mac);
-      if (!ok) setAviso('Login rechazado: cargá la contraseña CLI de esta placa (en placa recién programada es la MAC) y tocá «Releer placa».');
-      setLeyendo('time'); parseTime(await consultar('time'), d, e);
-      setLeyendo('show_net_status'); parseNet(await consultar('show_net_status'), d, e);
-      setLeyendo('list_wifi'); parseWifi(await consultar('list_wifi'), d);
-      setLeyendo('show_mqtt'); parseMqtt(await consultar('show_mqtt'), d, e);
-      setLeyendo('show_ftp'); parseFtp(await consultar('show_ftp'), d);
-      setLeyendo('list_profiles'); parsePerfiles(await consultar('list_profiles'), d);
-      setLeyendo('set_baud'); parseBaud(await consultar('set_baud'), d);
-      setLeyendo('set_reco_tz'); parseRecoTz(await consultar('set_reco_tz'), d);
+      // VÍA RÁPIDA (FW ≥ 6.32, Lorenzo 14/08): get_all_json trae TODO de una,
+      // sin login. Si el FW no lo conoce, cae a la secuencia clásica.
+      setLeyendo('get_all_json');
+      const esJson = parseAllJson(await consultar('get_all_json', 500, 8000), d, e);
+      if (esJson) {
+        setLeyendo('get_firmware'); parseFirmware(await consultar('get_firmware'), e);
+        setLeyendo('get_hardware'); parseHardware(await consultar('get_hardware'), e);
+        setLeyendo('list_profiles'); parsePerfiles(await consultar('list_profiles'), d);
+        // Guardia de flujo: si el FW reportado no es DNP3, el selector está mal.
+        if (e.fw && !/dnp3/i.test(e.fw)) setAviso(`La placa reporta firmware "${e.fw}" — no parece DNP3 Universal: verificá el selector de firmware.`);
+      } else {
+        // SECUENCIA CLÁSICA (FW anterior): acá sí hace falta login para asegurar.
+        setLeyendo('info');
+        parseInfo(await consultar('info'), d, e); // la MAC de acá = pass de fábrica
+        setLeyendo('login');
+        const ok = await asegurarLogin(passOverride, e.mac);
+        if (!ok) setAviso('Login rechazado: cargá la contraseña CLI de esta placa (en placa recién programada es la MAC) y tocá «Releer placa».');
+        setLeyendo('time'); parseTime(await consultar('time'), d, e);
+        setLeyendo('show_net_status'); parseNet(await consultar('show_net_status'), d, e);
+        setLeyendo('list_wifi'); parseWifi(await consultar('list_wifi'), d);
+        setLeyendo('show_mqtt'); parseMqtt(await consultar('show_mqtt'), d, e);
+        setLeyendo('show_ftp'); parseFtp(await consultar('show_ftp'), d);
+        setLeyendo('list_profiles'); parsePerfiles(await consultar('list_profiles'), d);
+        setLeyendo('set_baud'); parseBaud(await consultar('set_baud'), d);
+        setLeyendo('set_reco_tz'); parseRecoTz(await consultar('set_reco_tz'), d);
+      }
       if (!activo.current) return;
       const final = { ...CAMPOS_DEF, ...d, passNueva: '' };
       setCampos(final); setOrig(final); setEstado(e);
@@ -219,7 +305,10 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     if (dif('tz') && String(v.tz).trim()) c.push(`set_tz ${String(v.tz).trim()}`);
     if (dif('ethDhcp') && v.ethDhcp) c.push(`set_eth_dhcp ${v.ethDhcp}`);
     if (dif('ethStatic') && v.ethStatic) c.push(`set_eth_static ${v.ethStatic}`);
-    const ipCompleta = v.ethIp && v.ethMask && v.ethGw && v.ethDns;
+    // IP completa = los 4 campos con sus 4 octetos (15/08: antes un octeto
+    // vacío en el medio, tipo "10..110.27", pasaba como "completo").
+    const ipOk = (x) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(x || ''));
+    const ipCompleta = ipOk(v.ethIp) && ipOk(v.ethMask) && ipOk(v.ethGw) && ipOk(v.ethDns);
     if ((dif('ethIp') || dif('ethMask') || dif('ethGw') || dif('ethDns')) && ipCompleta) {
       c.push(`set_eth_ip ${v.ethIp} ${v.ethMask} ${v.ethGw} ${v.ethDns}`);
     }
@@ -256,20 +345,27 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     setConfirmar(null);
     if (!ok) return;
     setGrabando(true);
+    setCfgProg({ txt: 'Iniciando sesión en la placa…', pct: 5 });
     try {
       // Re-login automático (14/08): la sesión CLI caduca sola mientras se
       // completa el formulario — Grabar la reabre y se loguea antes de enviar.
       const okLogin = await asegurarLogin();
       if (!okLogin) {
         setAviso('La sesión expiró y el re-login falló: revisá la contraseña CLI (en placa recién programada es la MAC) y volvé a tocar «Grabar cambios».');
+        setCfgProg(null);
         return;
       }
-      for (const cmd of comandos) await consultar(cmd, 500, 8000);
+      for (let i = 0; i < comandos.length; i += 1) {
+        setCfgProg({ txt: `Grabando — comando ${i + 1}/${comandos.length}`, pct: 10 + Math.round(((i + 1) / comandos.length) * 70) });
+        await consultar(comandos[i], 500, 8000);
+      }
       log('sys', `✓ ${comandos.length} cambio(s) enviado(s). Releyendo la placa para verificar…`);
+      setCfgProg({ txt: 'Verificando: releyendo la configuración de la placa…', pct: 85 });
       const passNueva = campos.passNueva.trim();
       if (passNueva) setPassLogin(passNueva);
       setGrabando(false);
       await leerPlaca(passNueva || undefined);
+      if (activo.current) setCfgProg({ ok: true });
     } finally { if (activo.current) setGrabando(false); }
   };
 
@@ -324,7 +420,10 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     const setOct = (i, val) => {
       const limpio = val.replace(/[^0-9]/g, '').slice(0, 3);
       const nu = [...oct]; nu[i] = limpio;
-      set(k, nu.some(Boolean) ? nu.map((x) => x || '0').join('.') : '');
+      // Fix 15/08: los octetos NO tocados quedan VACÍOS (placeholder gris),
+      // no se rellenan con ceros reales — antes había que borrarlos a mano y
+      // se colaban 0 sin querer. Todo vacío ⇒ el campo vuelve a ''.
+      set(k, nu.every((x) => x === '') ? '' : nu.join('.'));
     };
     return (
       <div className="mb-1.5">
@@ -414,18 +513,23 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
           {/* Columna 2: Red */}
           <div className="border border-slate-100 rounded-lg p-2.5">
             <h4 className="text-sm font-medium text-slate-700 mb-2">🌐 Configuraciones de Red</h4>
-            <div className="grid grid-cols-3 gap-2">
+            {/* Responsive celu (15/08): 2 columnas en angosto, 3 en ancho —
+                antes los selects quedaban con el texto cortado. */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {campoSelect('ethDhcp', 'ETH DHCP', OPC_ONOFF_SL)}
               {campoSelect('ethStatic', 'ETH estática', OPC_ONOFF_SL)}
               {campoSelect('failover', 'Failover', OPC_ONOFF)}
             </div>
-            <div className="grid grid-cols-2 gap-x-3">
+            {/* Responsive celu (15/08): los campos de IP por octetos van UNO
+                por fila en pantalla angosta — a dos columnas se desbordaban
+                de la tarjeta (captura de Leonardo). */}
+            <div className="grid sm:grid-cols-2 gap-x-3">
               {campoIp('ethIp', 'IP estática')}
               {campoIp('ethMask', 'Máscara')}
               {campoIp('ethGw', 'Gateway')}
               {campoIp('ethDns', 'DNS')}
             </div>
-            <p className="text-[10.5px] text-slate-400 mb-2">La IP estática grabada no es legible desde el CLI: los campos arrancan vacíos y solo se envían si los completás (los 4 juntos).</p>
+            <p className="text-[10.5px] text-slate-400 mb-2">Con firmware 6.32+ la IP, máscara y gateway se leen solas (el DNS no lo informa la placa: completalo para grabar cambios de IP). Los 4 campos se envían juntos.</p>
             <div className="border-t border-slate-100 pt-2">
               {[0, 1, 2].map((i) => (
                 <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end mb-1">
@@ -482,6 +586,23 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
             {bloqueado && !orig ? 'Se habilita al conectar y leer la placa.' : cambios.length ? 'Los campos en ámbar son los que se van a grabar — antes de enviar vas a ver la lista exacta de comandos.' : 'Sin cambios pendientes: editá un campo y se marca en ámbar.'}
           </span>
         </div>
+        {/* Barra de progreso SIEMPRE visible (misma regla que el flasheo):
+            en reposo vacía; durante el grabado avanza; al terminar verificado
+            queda COMPLETA EN VERDE con «Finalizado exitosamente». */}
+        <div className="mt-3">
+          <div className="flex justify-between text-[11px] mb-0.5">
+            <span className={cfgProg?.ok ? 'text-emerald-600 font-medium' : 'text-slate-500'}>
+              {cfgProg?.ok ? '✓ Finalizado exitosamente — configuración grabada y verificada en la placa' : cfgProg ? cfgProg.txt : 'Sin grabado en curso'}
+            </span>
+            <span className={cfgProg?.ok ? 'text-emerald-600 font-medium' : 'text-slate-500'}>
+              {cfgProg?.ok ? '100%' : cfgProg ? `${cfgProg.pct}%` : '—'}
+            </span>
+          </div>
+          <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+            <div className={`h-full transition-all ${cfgProg?.ok ? 'bg-emerald-500' : 'bg-coop-azul'}`}
+              style={{ width: cfgProg?.ok ? '100%' : `${cfgProg?.pct || 0}%` }} />
+          </div>
+        </div>
         {orig && (
           <div className="mt-3 border-t border-slate-100 pt-2 text-xs">
             <div className="grid sm:grid-cols-3 gap-x-6 gap-y-0.5">
@@ -493,6 +614,10 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
               {lineaEstado('MQTT', estado.mqttEstado && `${estado.mqttEstado}${estado.mqttUser ? ` · user ${estado.mqttUser}` : ''}`)}
               {lineaEstado('NTP sync', estado.ntpSync)}
               {lineaEstado('Reconectador', estado.recloserInfo)}
+              {lineaEstado('Firmware', estado.fw && `${estado.fw}${estado.fwBuild ? ` · build ${estado.fwBuild}` : ''}`)}
+              {lineaEstado('Hardware', estado.hw && `${estado.hw}${estado.flash ? ` · flash ${estado.flash}` : ''}`)}
+              {lineaEstado('Mapa de eventos', estado.eventMap)}
+              {lineaEstado('Eventos pendientes', estado.eventosPend)}
               {lineaEstado('Uptime', estado.uptime)}
             </div>
             {!!estado.mqttRutas?.length && (
