@@ -700,6 +700,9 @@ export default function Multivac() {
   const [snFin, setSnFin] = useState('\r\n'); // fin de línea al enviar ASCII
   const [snCmds, setSnCmds] = useState([{ texto: '', hex: true }, { texto: '', hex: true }, { texto: '', hex: true }]);
   const [, setSnTick] = useState(0); // refresco throttled de la captura
+  const [snAutoScroll, setSnAutoScroll] = useState(true); // como Arduino (14/08)
+  const snAutoScrollRef = useRef(true); // espejo para el interval (evita closure vieja)
+  useEffect(() => { snAutoScrollRef.current = snAutoScroll; }, [snAutoScroll]);
   const snCaja = useRef(null);
   const snHayAbierto = snAbiertos.some(Boolean);
   useEffect(() => {
@@ -709,8 +712,9 @@ export default function Multivac() {
     const id = setInterval(() => {
       setSnTick((t) => t + 1);
       const el = snCaja.current;
-      // autoscroll solo si ya estabas abajo (no pelea si estás revisando arriba)
-      if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 60) el.scrollTop = el.scrollHeight;
+      // autoscroll con checkbox explícito (14/08, como Arduino): desmarcado,
+      // la captura sigue corriendo pero la vista queda quieta para analizar.
+      if (snAutoScrollRef.current && el) el.scrollTop = el.scrollHeight;
     }, 150);
     return () => clearInterval(id);
   }, [snHayAbierto]);
@@ -927,7 +931,15 @@ export default function Multivac() {
   const pedirPuertoSerie = () => (usarWebUsb ? pedirPuertoCp210x() : navigator.serial.requestPort());
 
   const log = (t, txt) => setLineas((ls) => [...ls.slice(-500), { t, txt }]);
-  useEffect(() => { finLog.current?.scrollIntoView({ behavior: 'smooth' }); }, [lineas]);
+  // Autoscroll con CHECKBOX explícito estilo Arduino (pedido 14/08): marcado
+  // sigue el final; desmarcado el log NO se mueve — para analizar un mensaje
+  // con datos entrando. Siempre scroll INTERNO de la caja (fix 14/08:
+  // scrollIntoView arrastraba la página entera).
+  const [autoScroll, setAutoScroll] = useState(true);
+  useEffect(() => {
+    const el = finLog.current;
+    if (autoScroll && el) el.scrollTop = el.scrollHeight;
+  }, [lineas, autoScroll]);
 
   const procesarEntrada = (chunk) => {
     bufferRx.current += chunk;
@@ -1096,14 +1108,20 @@ export default function Multivac() {
   // muestra el paso a paso del flasheo; en "Configuraciones" es el CLI completo.
   // Solo se monta una a la vez, así que el ref de autoscroll no se pisa.
   const cajaTerminal = (altura, vacio) => (
-    <div className={`bg-slate-900 text-slate-100 rounded-xl p-3 ${altura} overflow-y-auto font-mono text-[12.5px] leading-relaxed`}>
-      {lineas.length === 0 && <p className="text-slate-500">{vacio || '— Conectá un equipo y escribí «help» —'}</p>}
-      {lineas.map((l, i) => (
-        <div key={i} className={l.t === 'out' ? 'text-emerald-300' : l.t === 'sys' ? 'text-amber-300' : 'text-slate-100'}>
-          {l.t === 'out' ? '› ' : ''}{l.txt}
-        </div>
-      ))}
-      <div ref={finLog} />
+    <div>
+      <div ref={finLog} className={`bg-slate-900 text-slate-100 rounded-xl p-3 ${altura} overflow-y-auto font-mono text-[12.5px] leading-relaxed`}>
+        {lineas.length === 0 && <p className="text-slate-500">{vacio || '— Conectá un equipo y escribí «help» —'}</p>}
+        {lineas.map((l, i) => (
+          <div key={i} className={l.t === 'out' ? 'text-emerald-300' : l.t === 'sys' ? 'text-amber-300' : 'text-slate-100'}>
+            {l.t === 'out' ? '› ' : ''}{l.txt}
+          </div>
+        ))}
+      </div>
+      {/* Como en Arduino: desmarcado, el log queda quieto para analizarlo. */}
+      <label className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 cursor-pointer select-none w-fit">
+        <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} className="accent-coop-azul" />
+        Autoscroll
+      </label>
     </div>
   );
 
@@ -1285,9 +1303,11 @@ export default function Multivac() {
   return (
     <div className="p-4">
       <h2 className="text-lg font-semibold text-slate-800 mb-1">AutonomIA <span className="text-sm font-normal text-slate-400">· aprovisionamiento Multivac</span></h2>
-      {/* Solapas del rediseño 12/08 (mockup de Leonardo). Gestión de versiones
-          es de uso interno del área — los usuarios externos no la ven. */}
-      <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4 mt-1">
+      {/* Solapas del rediseño 12/08. Estilo píldoras (rediseño 15/08, pedido
+          de Leonardo desde el celu: las solapas con borde inferior envolvían
+          en varias líneas y "no parecían un menú" — las píldoras envuelven
+          bien en pantallas angostas y se leen como menú en PC y celular). */}
+      <div className="flex flex-wrap gap-1.5 mb-4 mt-1">
         {[
           { id: 'firmware', label: 'Actualizaciones de firmware' },
           { id: 'config', label: 'Configuraciones' },
@@ -1295,7 +1315,7 @@ export default function Multivac() {
           ...(puedeGestionar ? [{ id: 'gestion', label: 'Gestión de versiones' }] : []),
         ].map((s) => (
           <button key={s.id} onClick={() => setSolapa(s.id)}
-            className={`px-3 py-2 text-sm rounded-t-lg -mb-px border ${solapa === s.id ? 'bg-white border-slate-200 border-b-white text-coop-negro font-medium' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+            className={`px-3.5 py-1.5 text-sm rounded-full border whitespace-nowrap transition-colors ${solapa === s.id ? 'bg-coop-azul text-white border-coop-azul font-medium shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-coop-azul hover:text-coop-azul'}`}>
             {s.label}
           </button>
         ))}
@@ -1320,7 +1340,7 @@ export default function Multivac() {
             {gruposAprobados.map((g) => (
               <details key={g.modelo} open className="border border-slate-100 rounded-lg mb-2 overflow-hidden">
                 <summary className="px-3 py-2 cursor-pointer select-none text-sm font-medium text-slate-700 hover:bg-slate-50">
-                  {g.modelo} <span className="font-normal text-slate-400">{g.chip ? `· ${CHIP_LABEL[g.chip]} ` : ''}· {g.releases.length} versión{g.releases.length === 1 ? '' : 'es'}</span>
+                  {g.modelo} <span className="font-normal text-slate-400">{g.chip ? `· ${CHIP_LABEL[g.chip]} ` : ''}· {g.releases.length} {g.releases.length === 1 ? 'versión' : 'versiones'}</span>
                 </summary>
                 <div className="overflow-x-auto border-t border-slate-100">{tablaReleases(g.releases, false)}</div>
               </details>
@@ -1630,6 +1650,9 @@ export default function Multivac() {
               </div>
             )}
             <span className="text-[11px] text-slate-400">{snTotales().entradas} entrada{snTotales().entradas === 1 ? '' : 's'} · {snTotales().bytes >= 10240 ? `${(snTotales().bytes / 1024).toFixed(1)} KB` : `${snTotales().bytes} bytes`} (completos, nada se pisa)</span>
+            <label className="flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer select-none" title="Desmarcá para analizar la captura sin que la vista se mueva (la captura sigue completa)">
+              <input type="checkbox" checked={snAutoScroll} onChange={(e) => setSnAutoScroll(e.target.checked)} className="accent-coop-azul" /> Autoscroll
+            </label>
             <div className="flex-1" />
             <button onClick={snGuardar} disabled={!snTotales().entradas}
               title="Baja un TXT por canal con datos; si hay más de uno, también el combinado"
