@@ -25,6 +25,9 @@ export const INFO = [
   { id: 'francos', label: 'Francos', icon: CalendarMinus, listo: true },
   { id: 'feriados', label: 'Fechas especiales', icon: CalendarCheck, listo: true, roles: ['manager'] },
   { id: 'analisis', label: 'Reportes', icon: FileText, listo: true, roles: ['manager', 'gerencial', 'externo'] },
+  // Métricas OV (18/08, pedido de Gerencia de Operaciones): tickets de
+  // Oficina Virtual clasificados por tipo × causa. Manager + gerencial.
+  { id: 'metricas-ov', label: 'Métricas Oficina Virtual', icon: BarChart3, listo: true, roles: ['manager', 'gerencial'] },
 ];
 
 // Configuración (engranaje): panel de permisos + ajustes del sistema.

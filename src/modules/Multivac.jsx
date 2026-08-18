@@ -20,7 +20,10 @@ import MultivacConfigReconecta from './MultivacConfigReconecta.jsx';
 // Uso desde el CELULAR (14/08): en Chrome de Android el Web Serial por cable
 // no existe (el picker solo lista Bluetooth) — se usa WebUSB con driver
 // CP210x propio, con la misma interfaz que un SerialPort.
-import { soportaWebUsb, pedirPuertoCp210x } from '../api/cp210x.js';
+import { soportaWebUsb, pedirPuertoUsbSerie } from '../api/cp210x.js';
+// Flujo guiado DLMS Itron (16/08): contra el CLI que le agregamos a
+// DLMS_ITRON_2.ino v2.1b (mismo protocolo que el FW DNP3, validado en banco).
+import MultivacConfigItron from './MultivacConfigItron.jsx';
 
 // Servicios UART-BLE candidatos (Lorenzo confirmó BLE; el UUID exacto de su
 // stack se detecta probando en orden — y hay campo para pegar uno custom).
@@ -269,6 +272,10 @@ export default function Multivac() {
     { modelo: 'Lector de pulsos RS485', chip: 'esp32c3' },
     { modelo: 'Sensor ultrasónico RS485', chip: 'esp32c3' },
     { modelo: 'Lector de bombas RS485', chip: 'esp32c3' },
+    // 16/08: la placa lectora de medidores Itron (proyecto DLMS_ITRON_2, con
+    // CLI propio) también se programa desde acá. El backend acepta el chip
+    // del cliente para modelos fuera de su mapa (esp32 está en CHIPS).
+    { modelo: 'DLMS Itron (medidores)', chip: 'esp32' },
   ];
   const CHIP_LABEL = { esp32: 'ESP32 clásico', esp32s3: 'ESP32-S3', esp32c3: 'ESP32-C3 mini' };
   // Parámetros de flash: DESPLEGABLES con opciones válidas (nada de texto libre
@@ -922,13 +929,16 @@ export default function Multivac() {
   const soportaSerial = typeof navigator !== 'undefined' && 'serial' in navigator;
   const soportaBle = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
   // CELULAR (14/08): en Android el picker de Web Serial existe pero solo
-  // lista Bluetooth — el cable va por WebUSB con el driver CP210x propio.
+  // lista Bluetooth — el cable va por WebUSB con drivers propios.
+  // FIX 18/08: el picker ahora lista TODOS los dispositivos y elige driver por
+  // VID (CP210x SiLabs / CH34x QinHeng — el puente de la Multivac). Si el
+  // puente es otro, el error dice VID/PID exactos para agregar el driver.
   const esAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
   const usarWebUsb = esAndroid && soportaWebUsb();
   const hayUsb = usarWebUsb || soportaSerial;
   // ÚNICO punto de pedido de puerto serie por cable: PC → Web Serial nativo;
-  // Android → WebUSB + CP210x. El resto del código no distingue.
-  const pedirPuertoSerie = () => (usarWebUsb ? pedirPuertoCp210x() : navigator.serial.requestPort());
+  // Android → WebUSB + driver según puente. El resto del código no distingue.
+  const pedirPuertoSerie = () => (usarWebUsb ? pedirPuertoUsbSerie() : navigator.serial.requestPort());
 
   const log = (t, txt) => setLineas((ls) => [...ls.slice(-500), { t, txt }]);
   // Autoscroll con CHECKBOX explícito estilo Arduino (pedido 14/08): marcado
@@ -973,6 +983,16 @@ export default function Multivac() {
       conexion.current = { port, writer, vivo: true };
       setTransporte('serial'); setConectado(true);
       log('sys', 'Conectado por USB (115200). Probá "help" para ver los comandos del CLI.');
+      // DIAGNÓSTICO DE CAMPO (18/08): en el celu conviene saber QUÉ puente USB
+      // se conectó (CP210x, CH340, …) — si un modelo nuevo falla, esta línea
+      // identifica el chip sin herramientas extra.
+      try {
+        const info = port.getInfo?.() || {};
+        if (info.usbVendorId != null) {
+          const hex = (n) => '0x' + n.toString(16).toUpperCase().padStart(4, '0');
+          log('sys', `Puente USB detectado: VID ${hex(info.usbVendorId)} / PID ${hex(info.usbProductId ?? 0)}${usarWebUsb ? ' (driver WebUSB propio)' : ''}`);
+        }
+      } catch { /* solo informativo */ }
       // LECTOR ROBUSTO (hotfix 12/08): el reset a modo RUN que hacemos al
       // conectar genera un glitch en la línea → Web Serial lo reporta como
       // framing error y ERRA el stream de lectura (el puerto sigue abierto).
@@ -1275,6 +1295,7 @@ export default function Multivac() {
         className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm min-w-[230px]">
         <option value="">— Seleccionar —</option>
         <option value="reconecta">Reconecta — DNP3 Universal (guiado)</option>
+        <option value="itron">DLMS Itron — SL7000/ACE6000 (guiado)</option>
         <option value="agua" disabled>+Agua (próximamente)</option>
         <option value="libre">Terminal libre (avanzado)</option>
       </select>
@@ -1358,9 +1379,24 @@ export default function Multivac() {
           formulario guiado se ve desde la entrada con los campos bloqueados y
           los pasos a seguir; selector + botones USB/BT juntos en la sección
           «1 · Conexión y elección de versión». */}
-      {cfgModo !== 'libre' && (
+      {cfgModo !== 'libre' && cfgModo !== 'itron' && (
         <MultivacConfigReconecta
           habilitado={cfgModo === 'reconecta'}
+          conectado={conectado && transporte === 'serial'}
+          enviarLinea={enviarLinea}
+          rxSink={rxSink}
+          terminal={cajaTerminal('h-80')}
+          log={log}
+          selectorFirmware={selectorFirmware}
+          botonesConexion={botonesConexion}
+        />
+      )}
+
+      {/* Flujo guiado DLMS ITRON: engancha la ventana de boot (la placa se
+          resetea al conectar) y Grabar reinicia solo para aplicar+verificar. */}
+      {cfgModo === 'itron' && (
+        <MultivacConfigItron
+          habilitado
           conectado={conectado && transporte === 'serial'}
           enviarLinea={enviarLinea}
           rxSink={rxSink}

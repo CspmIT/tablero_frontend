@@ -15,6 +15,7 @@ import CRM from './modules/CRM.jsx';
 import Objetivos from './modules/Objetivos.jsx';
 import Costos from './modules/Costos.jsx';
 import Ingresos from './modules/Ingresos.jsx';
+import MetricasOV from './modules/MetricasOV.jsx';
 import Dashboard from './modules/Dashboard.jsx';
 import Importar from './modules/Importar.jsx';
 import ImportarGrilla from './modules/ImportarGrilla.jsx';
@@ -55,6 +56,7 @@ function Contenido({ activo }) {
   if (activo === 'objetivos') return <Objetivos />;
   if (activo === 'costos') return <Costos />;
   if (activo === 'ingresos') return <Ingresos />;
+  if (activo === 'metricas-ov') return <MetricasOV />;
   if (activo === 'dashboard') return <Dashboard />;
   if (activo === 'asistente') return <Asistente />;
   if (activo === 'analisis') return <Analisis />;
