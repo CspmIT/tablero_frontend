@@ -90,6 +90,14 @@ export const api = {
   },
 
   // Botones, recetas y aprovisionamiento del terminal Multivac (olas 3 y B).
+  // Métricas Oficina Virtual (18/08): tickets = ítems de grilla clasificados.
+  analisisOv: {
+    tickets: (desde, hasta) => http.get(`/analisis/ov/tickets?desde=${desde}&hasta=${hasta}`),
+    clasificar: (payload) => http.put('/analisis/ov/clasificar', payload),
+    descartar: (payload) => http.put('/analisis/ov/descartar', payload),
+    reglas: () => http.get('/analisis/ov/reglas'),
+    guardarReglas: (reglas) => http.put('/analisis/ov/reglas', { reglas }),
+  },
   multivac: {
     botones: () => http.get('/multivac/botones'),
     guardarBotones: (botones) => http.put('/multivac/botones', { botones }),

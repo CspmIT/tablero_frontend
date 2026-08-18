@@ -9,6 +9,23 @@ import {
 const FULL_DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const inputCls = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm';
 
+// Métricas OV (18/08, pedido de Gerencia de Operaciones): si el ítem lleva el
+// tag «Oficina Virtual», se clasifica ACÁ MISMO (tipo × causa) — el ticket
+// nace clasificado y la bandeja de Métricas OV no acumula (lección del punto
+// 18 del registro: etiquetar en el origen). Los campos viajan ADENTRO del
+// ítem (ovTipo/ovCausa/...), sin migración; el spread de cleanItems los
+// preserva y el PUT de grilla hace merge por id.
+const OV_TIPOS = [['incidente', 'Incidente'], ['solicitud', 'Solicitud']];
+const OV_CAUSAS = [
+  ['ov_interna', 'Operación interna OV'],
+  ['interna_otra', 'Otra causa interna'],
+  ['procoop', 'Procoop y dependencias'],
+  ['terceros', 'Software de terceros'],
+];
+const esItemOV = (it) => (Array.isArray(it?.tags) ? it.tags : []).some(
+  (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() === 'oficina virtual',
+);
+
 // Normalización para sugerir sin importar mayúsculas/acentos/símbolos
 // ("mas agua" encuentra "+Agua" si comparten raíz, "MASAGUA" encuentra "masagua").
 const normTag = (s) => String(s || '')
@@ -86,7 +103,7 @@ function TagChips({ tags, onAdd, onRemove, catalogo = [] }) {
 }
 
 export default function DayEditModal({ open, onClose, collaborator, date, entry, weeklyWipText, feriadoName, onSave, onReunionCreada }) {
-  const { api, tags: tagsRegistro } = useData();
+  const { api, me, tags: tagsRegistro } = useData();
   // Ola reuniones: crear una reunión directamente desde el día de la grilla
   // (el ítem lo agrega el backend en la grilla de todos los participantes; el
   // modal del día se cierra para que la recarga muestre el día actualizado).
@@ -338,6 +355,25 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
                     )}
                   </div>
                   <TagChips tags={it.tags} onAdd={(t) => addTag(idx, t)} onRemove={(t) => removeTag(idx, t)} catalogo={catalogoTags} />
+                  {/* Clasificacion Metricas OV: nace clasificado desde el origen */}
+                  {esItemOV(it) && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                      <span className="text-[10px] text-slate-400">Ticket OV:</span>
+                      <select value={it.ovTipo || ''}
+                        onChange={(e) => setItem(idx, { ovTipo: e.target.value || null, ovPor: me?.nombre ?? null, ovFecha: new Date().toISOString().slice(0, 10) })}
+                        className={`text-[11px] border rounded-lg px-1.5 py-1 ${it.ovTipo ? 'border-slate-300' : 'border-amber-300 bg-amber-50'}`}>
+                        <option value="">— Tipo —</option>
+                        {OV_TIPOS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                      </select>
+                      <select value={it.ovCausa || ''}
+                        onChange={(e) => setItem(idx, { ovCausa: e.target.value || null, ovPor: me?.nombre ?? null, ovFecha: new Date().toISOString().slice(0, 10) })}
+                        className={`text-[11px] border rounded-lg px-1.5 py-1 ${it.ovCausa ? 'border-slate-300' : 'border-amber-300 bg-amber-50'}`}>
+                        <option value="">— Causa —</option>
+                        {OV_CAUSAS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                      </select>
+                      {!(it.ovTipo && it.ovCausa) && <span className="text-[10px] text-amber-600">sin clasificar (va a la bandeja de Metricas OV)</span>}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
