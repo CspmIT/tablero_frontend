@@ -128,9 +128,153 @@ export class PuertoCp210x {
   }
 }
 
-// Picker de WebUSB filtrado a Silicon Labs (CP2101/2/4…). Devuelve un puerto
-// con cara de SerialPort, listo para el CLI, el sniffer o esptool-js.
-export async function pedirPuertoCp210x() {
-  const device = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x10c4 }] });
-  return new PuertoCp210x(device);
+// ============================================================================================
+// Driver CH34x (QinHeng CH340 / CH341 / CH9102) sobre WebUSB — 18/08.
+// Hallazgo de campo: la Multivac no aparecia en el picker porque el filtro
+// solo dejaba pasar Silicon Labs — muchas placas ESP32 llevan puente CH340
+// (VID 0x1A86). Protocolo segun el driver ch341 de Linux / usb-serial-for-android:
+//   READ_VERSION(0x5F) · SERIAL_INIT(0xA1) · WRITE_REG(0x9A) con
+//   reg 0x1312 = divisor de baudrate y reg 0x2518 = LCR · MODEM_CTRL(0xA4)
+//   con DTR/RTS ACTIVOS EN BAJO (bits invertidos).
+// ============================================================================================
+
+const CH_REQ_VERSION = 0x5f;
+const CH_REQ_WRITE_REG = 0x9a;
+const CH_REQ_SERIAL_INIT = 0xa1;
+const CH_REQ_MODEM_CTRL = 0xa4;
+const CH_BAUDBASE_FACTOR = 1532620800;
+
+export class PuertoCh34x {
+  constructor(device) {
+    this.device = device;
+    this.readable = null;
+    this.writable = null;
+    this._abierto = false;
+    this._ifNum = 0;
+    this._epIn = null;
+    this._epOut = null;
+    this._dtr = false;
+    this._rts = false;
+  }
+
+  getInfo() {
+    return { usbVendorId: this.device.vendorId, usbProductId: this.device.productId };
+  }
+
+  _ctrlOut(request, value, index = 0) {
+    return this.device.controlTransferOut({ requestType: 'vendor', recipient: 'device', request, value, index });
+  }
+  _ctrlIn(request, value, index, length) {
+    return this.device.controlTransferIn({ requestType: 'vendor', recipient: 'device', request, value, index }, length);
+  }
+
+  async _setBaudLcr(baudRate, dataBits, parity, stopBits) {
+    // Divisor de baudrate (algoritmo del ch341.c de Linux)
+    let factor = Math.floor(CH_BAUDBASE_FACTOR / (Number(baudRate) || 115200));
+    let divisor = 3;
+    while (factor > 0xfff0 && divisor > 0) { factor >>= 3; divisor -= 1; }
+    if (factor > 0xfff0) throw new Error('Baudrate no soportado por el CH340');
+    factor = 0x10000 - factor;
+    const val = (factor & 0xff00) | divisor | 0x80; // bit7: TX inmediato (sin buffering)
+    await this._ctrlOut(CH_REQ_WRITE_REG, 0x1312, val);
+    // LCR: enable RX/TX + bits de datos + paridad + stop
+    let lcr = 0x80 | 0x40; // ENABLE_RX | ENABLE_TX
+    const db = Number(dataBits) || 8;
+    lcr |= (db === 5) ? 0x00 : (db === 6) ? 0x01 : (db === 7) ? 0x02 : 0x03;
+    if (parity === 'even') lcr |= 0x08 | 0x10;      // PAR_ENA | EVEN
+    else if (parity === 'odd') lcr |= 0x08;          // PAR_ENA (impar)
+    if (Number(stopBits) === 2) lcr |= 0x04;
+    await this._ctrlOut(CH_REQ_WRITE_REG, 0x2518, lcr);
+  }
+
+  async _modem() {
+    // DTR (0x20) y RTS (0x40) activos en bajo: se escribe el complemento.
+    const mcr = (this._dtr ? 0x20 : 0) | (this._rts ? 0x40 : 0);
+    await this._ctrlOut(CH_REQ_MODEM_CTRL, (~mcr) & 0xffff, 0);
+  }
+
+  async open({ baudRate = 115200, dataBits = 8, parity = 'none', stopBits = 1 } = {}) {
+    const d = this.device;
+    await d.open();
+    if (d.configuration === null) await d.selectConfiguration(1);
+    const intf = d.configuration.interfaces[0];
+    this._ifNum = intf.interfaceNumber;
+    await d.claimInterface(this._ifNum);
+    const alt = intf.alternate || intf.alternates[0];
+    this._epIn = alt.endpoints.find((e) => e.direction === 'in' && e.type === 'bulk').endpointNumber;
+    this._epOut = alt.endpoints.find((e) => e.direction === 'out' && e.type === 'bulk').endpointNumber;
+    try { await this._ctrlIn(CH_REQ_VERSION, 0, 0, 2); } catch { /* algunos clones no responden */ }
+    await this._ctrlOut(CH_REQ_SERIAL_INIT, 0, 0);
+    await this._setBaudLcr(baudRate, dataBits, parity, stopBits);
+    this._dtr = false; this._rts = false;
+    await this._modem(); // DTR/RTS sueltos: no resetear la ESP32 al abrir
+    this._abierto = true;
+    this._armarStreams();
+  }
+
+  _armarStreams() {
+    const d = this.device;
+    const epIn = this._epIn;
+    const epOut = this._epOut;
+    const self = this;
+    this.readable = new ReadableStream({
+      async pull(controller) {
+        try {
+          const r = await d.transferIn(epIn, 1024);
+          if (r.status === 'stall') { await d.clearHalt('in', epIn); return; }
+          if (r.data && r.data.byteLength) {
+            controller.enqueue(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
+          }
+        } catch (e) {
+          if (self._abierto) {
+            self.readable = null;
+            try { controller.error(e); } catch { /* */ }
+          } else {
+            try { controller.close(); } catch { /* */ }
+          }
+        }
+      },
+      cancel() { /* el corte real lo hace close() */ },
+    });
+    this.writable = new WritableStream({
+      async write(chunk) {
+        const buf = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+        await d.transferOut(epOut, buf);
+      },
+    });
+  }
+
+  async setSignals({ dataTerminalReady, requestToSend } = {}) {
+    if (dataTerminalReady !== undefined) this._dtr = !!dataTerminalReady;
+    if (requestToSend !== undefined) this._rts = !!requestToSend;
+    await this._modem();
+  }
+
+  async close() {
+    this._abierto = false;
+    try { await this.device.releaseInterface(this._ifNum); } catch { /* */ }
+    try { await this.device.close(); } catch { /* */ }
+    this.readable = null;
+    this.writable = null;
+  }
 }
+
+// ============================================================================================
+// Picker UNIVERSAL (18/08): muestra TODOS los dispositivos USB (fin del
+// "no se encontraron dispositivos compatibles" cuando el puente no era
+// SiLabs) y elige el driver por fabricante:
+//   0x10C4 Silicon Labs (CP210x) · 0x1A86 QinHeng (CH340/CH9102)
+// Si el puente no esta soportado, el error DICE el VID/PID exacto para
+// agregarlo (pasarselo a Claude y se suma el driver).
+// ============================================================================================
+export async function pedirPuertoUsbSerie() {
+  const device = await navigator.usb.requestDevice({ filters: [] });
+  const vid = device.vendorId;
+  if (vid === 0x10c4) return new PuertoCp210x(device);
+  if (vid === 0x1a86) return new PuertoCh34x(device);
+  const hex = (n) => '0x' + n.toString(16).toUpperCase().padStart(4, '0');
+  throw new Error(`Puente USB no soportado todavia: VID ${hex(device.vendorId)} / PID ${hex(device.productId)}${device.productName ? ` (${device.productName})` : ''} — pasa estos datos para agregar el driver.`);
+}
+
+// Compatibilidad con el nombre anterior.
+export const pedirPuertoCp210x = pedirPuertoUsbSerie;
