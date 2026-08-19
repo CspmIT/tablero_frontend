@@ -77,6 +77,10 @@ export const api = {
     upsert: (body) => http.put('/grilla', body),
     bulk: (entries) => http.post('/grilla/bulk', { entries }),
     deleteDay: (colaboradorId, fecha) => http.del(`/grilla?colaboradorId=${colaboradorId}&fecha=${fecha}`),
+    // Grilla típica (semana default por colaborador) + vacaciones por rango.
+    tipica: () => http.get('/grilla/tipica'),
+    guardarTipica: (tipica) => http.put('/grilla/tipica', { tipica }),
+    cargarVacaciones: (body) => http.post('/grilla/vacaciones', body),
     wips: () => http.get('/grilla/wips'),
     setWip: (body) => http.put('/grilla/wip', body),
     resumenSemana: (lunes) => http.get('/grilla/resumen-semana', { lunes }),

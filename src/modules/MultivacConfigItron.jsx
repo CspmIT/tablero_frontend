@@ -39,6 +39,20 @@ const sinCeros = (v) => (String(v || '') === '0.0.0.0' ? '' : String(v || ''));
 // Comillas dobles si el valor lleva espacios (el CLI las soporta en one-shot).
 const q = (v) => (/\s/.test(String(v)) ? `"${v}"` : String(v));
 
+// Parser del scan de redes (formato pactado con el FW v2.2):
+//   [scan] 1) "Interna 2.4"  -55dBm  protegida
+const parseScan = (ls) => {
+  const redes = [];
+  for (const l of ls || []) {
+    const m = String(l).match(/\[scan\]\s*\d+\)\s*"(.+)"\s+(-?\d+)\s*dBm\s*(\S+)?/i);
+    if (m) redes.push({ ssid: m[1], rssi: Number(m[2]), abierta: /abierta|open/i.test(m[3] || '') });
+  }
+  const vistos = new Set();
+  return redes.sort((a, b) => b.rssi - a.rssi)
+    .filter((r) => (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true)));
+};
+const senial = (rssi) => (rssi >= -60 ? '📶 buena' : rssi >= -75 ? '📶 media' : '📶 baja');
+
 export default function MultivacConfigItron({ habilitado, conectado, enviarLinea, rxSink, terminal, log, selectorFirmware, botonesConexion }) {
   const [campos, setCampos] = useState({ ...CAMPOS_DEF });
   const [orig, setOrig] = useState(null);
@@ -52,6 +66,18 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
   const [aviso, setAviso] = useState('');
   const ocupado = !!leyendo || grabando;
   const bloqueado = !habilitado || !conectado || !orig || ocupado;
+
+  // Descubrir redes WiFi (19/08): `scan_wifi` del FW v2.2 — elegir sin tipear.
+  const [scan, setScan] = useState(null); // { estado:'buscando'|'ok'|'vacio', redes:[] }
+  const buscarRedes = async () => {
+    if (bloqueado || scan?.estado === 'buscando') return;
+    setScan({ estado: 'buscando', redes: [] });
+    try {
+      const ls = await consultar('scan_wifi', 1800, 15000);
+      const redes = parseScan(ls);
+      setScan(redes.length ? { estado: 'ok', redes } : { estado: 'vacio', redes: [] });
+    } catch { setScan({ estado: 'vacio', redes: [] }); }
+  };
   const activo = useRef(true);
   useEffect(() => () => { activo.current = false; if (rxSink) rxSink.current = null; }, [rxSink]);
 
@@ -359,6 +385,26 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
             </div>
             <div className="border-t border-slate-100 pt-2">
               {campoTexto('wifiSsid', 'WiFi — SSID', { placeholder: 'red del lugar' })}
+              {/* Descubrir redes (19/08, FW v2.2): elegir sin tipear el SSID. */}
+              <button onClick={buscarRedes} disabled={bloqueado || scan?.estado === 'buscando'}
+                className="text-[11px] px-2.5 py-1 mb-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+                {scan?.estado === 'buscando' ? 'Buscando redes… (3-6s)' : '🔍 Buscar redes disponibles'}
+              </button>
+              {scan?.estado === 'vacio' && (
+                <p className="text-[10.5px] text-amber-600 mb-1">La placa no devolvió redes: el comando <code>scan_wifi</code> llegó con el firmware v2.2 (¿placa con versión anterior?) o no hay redes al alcance. El SSID se puede tipear igual.</p>
+              )}
+              {scan?.estado === 'ok' && (
+                <div className="mb-1 border border-slate-200 rounded-lg divide-y divide-slate-100 bg-slate-50">
+                  {scan.redes.map((r) => (
+                    <button key={r.ssid} onClick={() => { set('wifiSsid', r.ssid); setScan(null); }}
+                      className="w-full flex flex-wrap items-center gap-1.5 px-2 py-1 text-[11px] text-left hover:bg-white">
+                      <span className="font-medium text-slate-700 flex-1 min-w-[8rem] truncate" title={r.ssid}>{r.ssid}</span>
+                      <span className="text-slate-400">{senial(r.rssi)} · {r.rssi} dBm{r.abierta ? ' · abierta' : ''}</span>
+                    </button>
+                  ))}
+                  <div className="px-2 py-1"><button onClick={() => setScan(null)} className="text-[10.5px] text-slate-400 hover:text-slate-600">cerrar</button></div>
+                </div>
+              )}
               {campoTexto('wifiPass', 'WiFi — Clave', { type: 'password', placeholder: '••••••' })}
               <p className="text-[10.5px] text-slate-400">La clave no es legible: para cambiar el WiFi completá SSID y clave juntos.</p>
             </div>

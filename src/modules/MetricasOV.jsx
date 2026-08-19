@@ -56,6 +56,10 @@ export default function MetricasOV() {
   const [fResp, setFResp] = useState('');
   const [guardando, setGuardando] = useState(null); // itemId en vuelo
   const [seleccion, setSeleccion] = useState({});   // itemId -> { tipo, causa } (bandeja)
+  // Editor del Detalle (19/08, pedido de Leonardo: re-clasificar sin volver a
+  // la bandeja): itemId en edición + su borrador { tipo, causa }.
+  const [editando, setEditando] = useState(null);
+  const [borrador, setBorrador] = useState({ tipo: '', causa: '' });
   const [aplicandoTodas, setAplicandoTodas] = useState(false);
 
   const hoy = new Date();
@@ -442,21 +446,57 @@ export default function MetricasOV() {
                   <th className="px-2 py-1.5 font-medium">Causa</th>
                   <th className="px-2 py-1.5 font-medium text-right">Horas</th>
                   <th className="px-2 py-1.5 font-medium">Clasificó</th>
+                  <th className="px-2 py-1.5 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
-                {visibles.map((t) => (
-                  <tr key={t.itemId} className="border-t border-slate-100">
+                {visibles.map((t) => {
+                  const enEdicion = editando === t.itemId;
+                  return (
+                  <tr key={t.itemId} className={`border-t border-slate-100 ${enEdicion ? 'bg-amber-50/50' : ''}`}>
                     <td className="px-2 py-1.5 whitespace-nowrap text-slate-500">{fmtFecha(t.fecha)}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{t.colaborador}</td>
                     <td className="px-2 py-1.5">{t.text}<div>{t.tags.map(chipTag)}</div></td>
-                    <td className="px-2 py-1.5 whitespace-nowrap"><span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: TIPO[t.ovTipo]?.color }}>{TIPO[t.ovTipo]?.label}</span></td>
-                    <td className="px-2 py-1.5 whitespace-nowrap"><span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: CAUSA[t.ovCausa]?.color }}>{CAUSA[t.ovCausa]?.label}</span></td>
+                    {/* Re-clasificación EN LA FILA (19/08): el ✎ convierte los
+                        chips en selectores — sin volver a la bandeja. */}
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      {enEdicion ? (
+                        <select value={borrador.tipo} onChange={(e) => setBorrador((b) => ({ ...b, tipo: e.target.value }))}
+                          className="border border-slate-300 rounded px-1 py-0.5 text-[11px] bg-white">
+                          {TIPOS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+                        </select>
+                      ) : <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: TIPO[t.ovTipo]?.color }}>{TIPO[t.ovTipo]?.label}</span>}
+                    </td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      {enEdicion ? (
+                        <select value={borrador.causa} onChange={(e) => setBorrador((b) => ({ ...b, causa: e.target.value }))}
+                          className="border border-slate-300 rounded px-1 py-0.5 text-[11px] bg-white">
+                          {CAUSAS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+                        </select>
+                      ) : <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: CAUSA[t.ovCausa]?.color }}>{CAUSA[t.ovCausa]?.label}</span>}
+                    </td>
                     <td className="px-2 py-1.5 text-right whitespace-nowrap">{fmtH(t.horas)}{t.horasReales ? '' : ' *'}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap text-slate-400">{t.ovPor || '—'}{t.ovFecha ? ` · ${fmtFecha(t.ovFecha)}` : ''}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap text-right">
+                      {enEdicion ? (
+                        <span className="inline-flex items-center gap-1">
+                          <button onClick={async () => { await clasificar(t, borrador.tipo, borrador.causa); setEditando(null); }}
+                            disabled={guardando === t.itemId || !borrador.tipo || !borrador.causa}
+                            className="px-2 py-0.5 text-[11px] rounded bg-coop-azul text-white disabled:opacity-40">{guardando === t.itemId ? '…' : 'Guardar'}</button>
+                          <button onClick={async () => { await descartar(t); setEditando(null); }} disabled={guardando === t.itemId}
+                            title="Lo saca de las métricas (reversible desde «Ver descartados»)"
+                            className="px-2 py-0.5 text-[11px] rounded border border-slate-300 text-slate-500 hover:bg-slate-50">No es de OV</button>
+                          <button onClick={() => setEditando(null)} className="px-1.5 py-0.5 text-[11px] rounded text-slate-400 hover:text-slate-600">✕</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => { setEditando(t.itemId); setBorrador({ tipo: t.ovTipo || '', causa: t.ovCausa || '' }); }}
+                          title="Re-clasificar este ticket" className="px-1.5 py-0.5 text-[12px] rounded text-slate-400 hover:text-coop-azul hover:bg-slate-100">✎</button>
+                      )}
+                    </td>
                   </tr>
-                ))}
-                {!visibles.length && <tr><td colSpan={7} className="p-6 text-center text-slate-400">Sin tickets clasificados con estos filtros.</td></tr>}
+                  );
+                })}
+                {!visibles.length && <tr><td colSpan={8} className="p-6 text-center text-slate-400">Sin tickets clasificados con estos filtros.</td></tr>}
               </tbody>
             </table>
           </div>

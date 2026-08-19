@@ -31,6 +31,27 @@ const MQTT_PERFILES = [
 const VACIO = /\(vacio\)|\(sin configurar\)|\(raiz\)|\(ninguno\)|\(no configurado\)|\(sin perfil/i;
 const limpiar = (s) => { const t = String(s ?? '').trim(); return VACIO.test(t) ? '' : t; };
 
+// COMILLAS EN ARGUMENTOS CON ESPACIOS (fix 19/08, caso de campo: el SSID
+// "Interna 2.4" viajaba como `add_wifi 0 Interna 2.4 clave` y el FW tomaba
+// ssid=Interna, pass=2.4). El tokenizador del CLI soporta comillas dobles:
+// se agregan SOLO cuando el valor tiene espacios (sin espacios, el comando
+// viaja idéntico a antes — cero regresión).
+const q = (v) => (/\s/.test(String(v)) ? `"${v}"` : String(v));
+
+// Parser del scan de redes (formato pactado con el FW):
+//   [scan] 1) "Interna 2.4"  -55dBm  protegida
+const parseScan = (ls) => {
+  const redes = [];
+  for (const l of ls || []) {
+    const m = String(l).match(/\[scan\]\s*\d+\)\s*"(.+)"\s+(-?\d+)\s*dBm\s*(\S+)?/i);
+    if (m) redes.push({ ssid: m[1], rssi: Number(m[2]), abierta: /abierta|open/i.test(m[3] || '') });
+  }
+  const vistos = new Set();
+  return redes.sort((a, b) => b.rssi - a.rssi)
+    .filter((r) => (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true)));
+};
+const senial = (rssi) => (rssi >= -60 ? '📶 buena' : rssi >= -75 ? '📶 media' : '📶 baja');
+
 const CAMPOS_DEF = {
   nombre: '', passNueva: '', debug: 'off', tz: '-10800',
   // Máscara con default 255.255.255.0 (pedido 15/08 — el caso típico; si la
@@ -69,6 +90,26 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
   // El formulario está SIEMPRE a la vista (mockup 14/08), pero bloqueado hasta
   // que haya firmware elegido + placa conectada + primera lectura hecha.
   const bloqueado = !habilitado || !conectado || !orig || ocupado;
+
+  // ---------- Descubrir redes WiFi (19/08, pedido de campo: elegir sin
+  // tipear). Manda `scan_wifi` y muestra la lista; cada red se asigna al
+  // perfil que se elija. Si el FW no conoce el comando, se avisa (Lorenzo
+  // lo suma en la próxima versión con el formato pactado).
+  const [scan, setScan] = useState(null); // { estado:'buscando'|'ok'|'vacio', redes:[] }
+  const buscarRedes = async () => {
+    if (bloqueado || scan?.estado === 'buscando') return;
+    setScan({ estado: 'buscando', redes: [] });
+    try {
+      await consultar('comando', 400, 3000); // por si la sesión venció (inofensivo si está viva)
+      const ls = await consultar('scan_wifi', 1800, 15000);
+      const redes = parseScan(ls);
+      setScan(redes.length ? { estado: 'ok', redes } : { estado: 'vacio', redes: [] });
+    } catch { setScan({ estado: 'vacio', redes: [] }); }
+  };
+  const usarRed = (ssid, perfil) => {
+    set(`w${perfil}ssid`, ssid);
+    setScan(null);
+  };
   const activo = useRef(true);
   useEffect(() => () => { activo.current = false; if (rxSink) rxSink.current = null; }, [rxSink]);
 
@@ -299,8 +340,8 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     if (!orig) return [];
     const c = []; const v = campos; const o = orig;
     const dif = (k) => String(v[k]) !== String(o[k]);
-    if (dif('nombre') && v.nombre.trim()) c.push(`dev_name ${v.nombre.trim()}`);
-    if (v.passNueva.trim()) c.push(`set_pass ${v.passNueva.trim()}`);
+    if (dif('nombre') && v.nombre.trim()) c.push(`dev_name ${q(v.nombre.trim())}`);
+    if (v.passNueva.trim()) c.push(`set_pass ${q(v.passNueva.trim())}`);
     if (dif('debug')) c.push(`debug ${v.debug}`);
     if (dif('tz') && String(v.tz).trim()) c.push(`set_tz ${String(v.tz).trim()}`);
     if (dif('ethDhcp') && v.ethDhcp) c.push(`set_eth_dhcp ${v.ethDhcp}`);
@@ -315,7 +356,8 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     for (const i of [0, 1, 2]) {
       const s = `w${i}ssid`; const p = `w${i}pass`; const on = `w${i}on`;
       if (dif(s) || dif(p)) {
-        if (v[s].trim()) c.push(`add_wifi ${i} ${v[s].trim()} ${v[p]}`);
+        // Comillas si hay espacios (fix 19/08: "Interna 2.4" partía en ssid+pass).
+        if (v[s].trim()) c.push(`add_wifi ${i} ${q(v[s].trim())} ${q(v[p])}`);
         else if (o[s]) c.push(`del_wifi ${i}`);
       }
       if (dif(on) && v[s].trim()) c.push(`enable_wifi ${i} ${v[on]}`);
@@ -327,9 +369,9 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     if (dif('ntpFallback')) c.push(`set_ntp_fallback ${v.ntpFallback}`);
     if (dif('ftpHost') && v.ftpHost.trim()) c.push(`set_ftp_host ${v.ftpHost.trim()}`);
     if (dif('ftpPort') && v.ftpPort.trim()) c.push(`set_ftp_port ${v.ftpPort.trim()}`);
-    if (dif('ftpUser') && v.ftpUser.trim()) c.push(`set_ftp_user ${v.ftpUser.trim()}`);
-    if (dif('ftpPass') && v.ftpPass.trim()) c.push(`set_ftp_pass ${v.ftpPass.trim()}`);
-    if (dif('ftpPath') && v.ftpPath.trim()) c.push(`set_ftp_path ${v.ftpPath.trim()}`);
+    if (dif('ftpUser') && v.ftpUser.trim()) c.push(`set_ftp_user ${q(v.ftpUser.trim())}`);
+    if (dif('ftpPass') && v.ftpPass.trim()) c.push(`set_ftp_pass ${q(v.ftpPass.trim())}`);
+    if (dif('ftpPath') && v.ftpPath.trim()) c.push(`set_ftp_path ${q(v.ftpPath.trim())}`);
     if (dif('recoPerfil')) c.push(v.recoPerfil ? `set_recloser ${v.recoPerfil}` : 'clear_recloser');
     if (dif('sn') && v.sn.trim()) c.push(`set_sn ${v.sn.trim()}`);
     if (dif('baud') && v.baud !== '') c.push(`set_baud ${v.baud}`);
@@ -413,6 +455,26 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
   );
   const OPC_ONOFF = [{ v: 'on', t: 'on' }, { v: 'off', t: 'off' }];
   const OPC_ONOFF_SL = [{ v: '', t: '(sin leer)' }, ...OPC_ONOFF];
+  // CHECKBOX on/off (ajuste visual 19/08, mockup de Leonardo estilo
+  // configurador de redes de Windows): tildado = on, destildado = off. El
+  // COMANDO no cambia — sigue viajando `... on|off`; es solo presentación.
+  // Un valor '' (sin leer) se muestra destildado con la aclaración al lado.
+  // Valor '' (sin leer): checkbox ATENUADO en gris + guioncito (estado
+  // indeterminado del navegador) — se distingue de un destildado real sin
+  // texto que ensucie la visual (ajuste 19/08); el tooltip aclara si hace falta.
+  const campoCheck = (k, label) => {
+    const sinLeer = campos[k] === '';
+    return (
+      <label title={sinLeer ? 'Sin leer de la placa todavía — tildá o destildá para definirlo' : undefined}
+        className={`flex items-center gap-2 text-sm mb-1.5 select-none ${sinLeer ? 'text-slate-400' : 'text-slate-700'} ${bloqueado ? 'opacity-50' : 'cursor-pointer'} ${esDirty(k) ? 'bg-amber-50 border border-amber-300 rounded-lg px-1.5 py-0.5 -mx-1.5' : ''}`}>
+        <input type="checkbox" checked={campos[k] === 'on'} disabled={bloqueado}
+          ref={(el) => { if (el) el.indeterminate = sinLeer; }}
+          onChange={(e2) => set(k, e2.target.checked ? 'on' : 'off')}
+          className={`w-4 h-4 accent-[#1e40af] ${sinLeer ? 'opacity-40' : ''}`} />
+        <span>{label}</span>
+      </label>
+    );
+  };
   // Campo IP estilo configurador de redes de Windows: 4 octetos con puntos.
   const campoIp = (k, label) => {
     const partes = String(campos[k] || '').split('.');
@@ -490,7 +552,7 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
               {campoTexto('nombre', 'Nombre del dispositivo', { placeholder: 'DNP3_ejemplo' })}
               {campoTexto('passNueva', 'Nueva contraseña CLI (vacío = no cambiar)', { type: 'password', placeholder: '••••••••' })}
               <div className="grid grid-cols-2 gap-2">
-                {campoSelect('debug', 'Debug', OPC_ONOFF)}
+                <div className="pt-4">{campoCheck('debug', 'Debug')}</div>
                 {campoTexto('tz', 'Timezone (seg; Arg = -10800)')}
               </div>
             </div>
@@ -513,36 +575,62 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
           {/* Columna 2: Red */}
           <div className="border border-slate-100 rounded-lg p-2.5">
             <h4 className="text-sm font-medium text-slate-700 mb-2">🌐 Configuraciones de Red</h4>
-            {/* Responsive celu (15/08): 2 columnas en angosto, 3 en ancho —
-                antes los selects quedaban con el texto cortado. */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {campoSelect('ethDhcp', 'ETH DHCP', OPC_ONOFF_SL)}
-              {campoSelect('ethStatic', 'ETH estática', OPC_ONOFF_SL)}
-              {campoSelect('failover', 'Failover', OPC_ONOFF)}
+            {/* Rediseño 19/08 (mockup de Leonardo, estilo configurador de redes
+                de Windows): los on/off van como CHECKBOX — tildado = on. Los
+                comandos no cambian; es solo presentación. */}
+            {campoCheck('failover', 'Utilizar Failover')}
+            {campoCheck('ethDhcp', 'Obtener una dirección IP automáticamente (DHCP)')}
+            {campoCheck('ethStatic', 'Usar la siguiente dirección IP:')}
+            {/* Grupo de IP anidado bajo el checkbox de estática; atenuado si
+                está destildado (se habilita al tildar «Usar la siguiente…»).
+                Responsive celu (15/08): octetos UNO por fila en angosto. */}
+            <div className={`ml-5 border border-slate-200 rounded-lg px-2.5 pt-2 pb-0.5 mb-2 ${campos.ethStatic !== 'on' ? 'opacity-50 pointer-events-none' : ''}`}>
+              <div className="grid sm:grid-cols-2 gap-x-3">
+                {campoIp('ethIp', 'Dirección IP')}
+                {campoIp('ethMask', 'Máscara de subred')}
+                {campoIp('ethGw', 'Puerta de enlace (gateway)')}
+                {campoIp('ethDns', 'DNS')}
+              </div>
+              <p className="text-[10.5px] text-slate-400 mb-1.5">Con firmware 6.32+ la IP, máscara y gateway se leen solas (el DNS no lo informa la placa: completalo para grabar cambios de IP). Los 4 campos se envían juntos.</p>
             </div>
-            {/* Responsive celu (15/08): los campos de IP por octetos van UNO
-                por fila en pantalla angosta — a dos columnas se desbordaban
-                de la tarjeta (captura de Leonardo). */}
-            <div className="grid sm:grid-cols-2 gap-x-3">
-              {campoIp('ethIp', 'IP estática')}
-              {campoIp('ethMask', 'Máscara')}
-              {campoIp('ethGw', 'Gateway')}
-              {campoIp('ethDns', 'DNS')}
-            </div>
-            <p className="text-[10.5px] text-slate-400 mb-2">Con firmware 6.32+ la IP, máscara y gateway se leen solas (el DNS no lo informa la placa: completalo para grabar cambios de IP). Los 4 campos se envían juntos.</p>
             <div className="border-t border-slate-100 pt-2">
+              <p className="text-sm text-slate-700 mb-1">Utilizar WiFi <span className="text-[10.5px] text-slate-400">(tildar los perfiles a usar)</span></p>
               {[0, 1, 2].map((i) => (
                 <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end mb-1">
-                  <div>{campoTexto(`w${i}ssid`, i === 0 ? 'WiFi — SSID' : '', { placeholder: `perfil ${i}` })}</div>
+                  <div>{campoTexto(`w${i}ssid`, i === 0 ? 'SSID' : '', { placeholder: `perfil ${i}` })}</div>
                   <div>{campoTexto(`w${i}pass`, i === 0 ? 'Clave' : '', { type: 'password', placeholder: '••••••' })}</div>
-                  <div className="mb-1.5">
-                    <select value={campos[`w${i}on`]} onChange={(e2) => set(`w${i}on`, e2.target.value)} disabled={bloqueado}
-                      className={`border rounded-lg px-1.5 py-1.5 text-xs disabled:bg-slate-50 disabled:text-slate-400 ${esDirty(`w${i}on`) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}>
-                      <option value="on">on</option><option value="off">off</option>
-                    </select>
-                  </div>
+                  {/* Checkbox = enable_wifi on/off del perfil (rediseño 19/08). */}
+                  <label title={`Perfil ${i}: tildado = usar esta red (on)`}
+                    className={`mb-2 flex items-center justify-center w-8 h-8 rounded-lg select-none ${bloqueado ? 'opacity-50' : 'cursor-pointer'} ${esDirty(`w${i}on`) ? 'bg-amber-50 border border-amber-300' : ''}`}>
+                    <input type="checkbox" checked={campos[`w${i}on`] === 'on'} disabled={bloqueado}
+                      onChange={(e2) => set(`w${i}on`, e2.target.checked ? 'on' : 'off')}
+                      className="w-4 h-4 accent-[#1e40af]" />
+                  </label>
                 </div>
               ))}
+              {/* Descubrir redes (19/08): scan desde la placa, elegir sin tipear. */}
+              <button onClick={buscarRedes} disabled={bloqueado || scan?.estado === 'buscando'}
+                className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+                {scan?.estado === 'buscando' ? 'Buscando redes… (3-6s)' : '🔍 Buscar redes disponibles'}
+              </button>
+              {scan?.estado === 'vacio' && (
+                <p className="text-[10.5px] text-amber-600 mt-1">La placa no devolvió redes: puede que este firmware todavía no tenga el comando <code>scan_wifi</code> (pedido a Lorenzo) o que no haya redes al alcance. El SSID se puede tipear igual.</p>
+              )}
+              {scan?.estado === 'ok' && (
+                <div className="mt-1 border border-slate-200 rounded-lg divide-y divide-slate-100 bg-slate-50">
+                  {scan.redes.map((r) => (
+                    <div key={r.ssid} className="flex flex-wrap items-center gap-1.5 px-2 py-1 text-[11px]">
+                      <span className="font-medium text-slate-700 flex-1 min-w-[8rem] truncate" title={r.ssid}>{r.ssid}</span>
+                      <span className="text-slate-400">{senial(r.rssi)} · {r.rssi} dBm{r.abierta ? ' · abierta' : ''}</span>
+                      {[0, 1, 2].map((p) => (
+                        <button key={p} onClick={() => usarRed(r.ssid, p)} title={`Usar en el perfil ${p}`}
+                          className="px-1.5 py-0.5 rounded border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">→ {p}</button>
+                      ))}
+                    </div>
+                  ))}
+                  <div className="px-2 py-1"><button onClick={() => setScan(null)} className="text-[10.5px] text-slate-400 hover:text-slate-600">cerrar</button></div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -555,7 +643,7 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
             </div>
             <div className="grid grid-cols-2 gap-2">
               {campoTexto('ntp', 'NTP (auto | ip | host)')}
-              {campoSelect('ntpFallback', 'Fallback pool.ntp.org', OPC_ONOFF)}
+              <div className="pt-4">{campoCheck('ntpFallback', 'Fallback pool.ntp.org')}</div>
             </div>
             <div className="border-t border-slate-100 pt-2 grid grid-cols-2 gap-2">
               {campoTexto('ftpHost', 'FTP host', { placeholder: '(sin configurar)' })}

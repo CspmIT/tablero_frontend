@@ -16,6 +16,9 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
   const [entries, setEntries] = useState({});
   const [wips, setWips] = useState({});
   const [feriadosMap, setFeriadosMap] = useState({});
+  // Grilla típica (default visual; feriado y carga real la pisan por orden de render).
+  const [tipica, setTipica] = useState({});
+  const tipicaDe = (colabId, d) => tipica?.[colabId]?.[String(((d.getDay() + 6) % 7) + 1)] || null;
   const [cargando, setCargando] = useState(true);
   const [dayCtx, setDayCtx] = useState(null);
   const [cards, setCards] = useState([]);
@@ -37,11 +40,14 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
     if (!yo) { setCargando(false); return; }
     setCargando(true);
     try {
-      const [ents, ws, fers] = await Promise.all([
+      const [ents, ws, fers, tip] = await Promise.all([
         api.grilla.list({ colaboradorId: yo.id, desde: fmtISO(weekStart), hasta: fmtISO(weekEnd) }),
         api.grilla.wips(),
         api.feriados.list(),
+        // Grilla típica (19/08): default visual en los días propios sin carga.
+        api.grilla.tipica().catch(() => ({ tipica: {} })),
       ]);
+      setTipica(tip?.tipica || {});
       setEntries(buildEntriesMap(ents));
       setWips(buildWipsMap(ws));
       const fmap = {};
@@ -251,6 +257,12 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
                       <StatusBadge status="feriado" />
                       <div className="text-[11px] text-slate-500 italic leading-tight break-words">{feriadoName}</div>
                     </div>
+                  ) : tipicaDe(yo.id, d) ? (
+                    // Default de la grilla típica: visual — se confirma al guardar el día.
+                    <div className="space-y-0.5 opacity-60">
+                      <StatusBadge status={tipicaDe(yo.id, d).estado} entryTime={tipicaDe(yo.id, d).entryTime} />
+                      <div className="text-[10px] text-slate-400 italic">tu horario típico — tocá para completar el día</div>
+                    </div>
                   ) : (
                     <span className="text-slate-300 text-sm">Sin cargar — tocá para completar</span>
                   )}
@@ -268,6 +280,7 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
         entry={dayCtx ? entries[`${yo.id}:${fmtISO(dayCtx.date)}`] : null}
         weeklyWipText={wipText}
         feriadoName={dayCtx ? feriadosMap[fmtISO(dayCtx.date)] || null : null}
+        tipicaDia={dayCtx ? tipicaDe(yo.id, dayCtx.date) : null}
         onClose={() => setDayCtx(null)}
         onSave={guardarDia}
       />
