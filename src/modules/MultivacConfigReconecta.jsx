@@ -38,17 +38,30 @@ const limpiar = (s) => { const t = String(s ?? '').trim(); return VACIO.test(t) 
 // viaja idéntico a antes — cero regresión).
 const q = (v) => (/\s/.test(String(v)) ? `"${v}"` : String(v));
 
-// Parser del scan de redes (formato pactado con el FW):
-//   [scan] 1) "Interna 2.4"  -55dBm  protegida
+// Parser TOLERANTE del scan de redes (19/08, estándar 6.35): el comando es
+// `discover_wifi` (fallback scan_wifi para placas de banco). El formato del
+// FW DNP3 no está pactado línea a línea, así que se prueban varios patrones:
+//   A) [scan] 1) "Interna 2.4"  -55dBm  ch6  WPA2      (nuestro Itron)
+//   B) cualquier línea con SSID entre comillas + RSSI en dBm
+//   C) lista numerada: `1) Interna 2.4   -55 dBm  ch6  WPA2`
 const parseScan = (ls) => {
   const redes = [];
   for (const l of ls || []) {
-    const m = String(l).match(/\[scan\]\s*\d+\)\s*"(.+)"\s+(-?\d+)\s*dBm\s*(\S+)?/i);
-    if (m) redes.push({ ssid: m[1], rssi: Number(m[2]), abierta: /abierta|open/i.test(m[3] || '') });
+    const t = String(l);
+    if (/comando desconocido|unknown/i.test(t)) return { sinComando: true, redes: [] };
+    let m = t.match(/"(.+)"\s+(-?\d{2,3})\s*dBm\s*(.*)$/i);                        // A y B
+    if (!m) m = t.match(/^\s*\d+[).:-]\s+(.+?)\s{2,}(-\d{2,3})\s*(dBm)?\s*(.*)$/i); // C (ssid hasta doble espacio)
+    if (!m) m = t.match(/^\s*\d+[).:-]\s+(\S+)\s+(-\d{2,3})\s*dBm\s*(.*)$/i);       // C' (ssid sin espacios)
+    if (m) {
+      const resto = String(m[4] ?? m[3] ?? '');
+      redes.push({ ssid: m[1].trim(), rssi: Number(m[2]), abierta: /abierta|open/i.test(resto) });
+    }
   }
   const vistos = new Set();
-  return redes.sort((a, b) => b.rssi - a.rssi)
-    .filter((r) => (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true)));
+  return {
+    redes: redes.sort((a, b) => b.rssi - a.rssi)
+      .filter((r) => r.ssid && (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true))),
+  };
 };
 const senial = (rssi) => (rssi >= -60 ? '📶 buena' : rssi >= -75 ? '📶 media' : '📶 baja');
 
@@ -57,6 +70,8 @@ const CAMPOS_DEF = {
   // Máscara con default 255.255.255.0 (pedido 15/08 — el caso típico; si la
   // placa informa otra al leer, se pisa con la real).
   ethDhcp: '', ethStatic: '', ethIp: '', ethMask: '255.255.255.0', ethGw: '', ethDns: '',
+  // wifiOn = subsistema WiFi global (set_wifi on|off, estándar 6.35); '' = sin leer.
+  wifiOn: '',
   w0ssid: '', w0pass: '', w0on: 'off', w1ssid: '', w1pass: '', w1on: 'off', w2ssid: '', w2pass: '', w2on: 'off',
   failover: 'on',
   mqttPerfil: '', blockPublic: 'no', ntp: 'auto', ntpFallback: 'on',
@@ -95,15 +110,20 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
   // tipear). Manda `scan_wifi` y muestra la lista; cada red se asigna al
   // perfil que se elija. Si el FW no conoce el comando, se avisa (Lorenzo
   // lo suma en la próxima versión con el formato pactado).
-  const [scan, setScan] = useState(null); // { estado:'buscando'|'ok'|'vacio', redes:[] }
+  const [scan, setScan] = useState(null); // { estado:'buscando'|'ok'|'vacio'|'wifi_off', redes:[] }
   const buscarRedes = async () => {
     if (bloqueado || scan?.estado === 'buscando') return;
+    // 6.35: discover_wifi exige el subsistema encendido (set_wifi on).
+    if (campos.wifiOn === 'off') { setScan({ estado: 'wifi_off', redes: [] }); return; }
     setScan({ estado: 'buscando', redes: [] });
     try {
-      await consultar('comando', 400, 3000); // por si la sesión venció (inofensivo si está viva)
-      const ls = await consultar('scan_wifi', 1800, 15000);
-      const redes = parseScan(ls);
-      setScan(redes.length ? { estado: 'ok', redes } : { estado: 'vacio', redes: [] });
+      await consultar('comando', 400, 3000); // por si la sesión venció (60s en 6.35; inofensivo si está viva)
+      let r = parseScan(await consultar('discover_wifi', 1800, 15000));
+      if (!r.redes.length) {
+        // Fallback para FW previos al estándar (nuestro scan_wifi de banco).
+        r = parseScan(await consultar('scan_wifi', 1800, 15000));
+      }
+      setScan(r.redes.length ? { estado: 'ok', redes: r.redes } : { estado: 'vacio', redes: [] });
     } catch { setScan({ estado: 'vacio', redes: [] }); }
   };
   const usarRed = (ssid, perfil) => {
@@ -220,6 +240,10 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     if (g.uptime_s != null) e.uptime = `${g.uptime_s} s`;
     if (g.fw) e.fw = `${g.fw}${g.supported ? ` · ${g.supported}` : ''}`;
     if (g.hw) e.hw = String(g.hw);
+    // 6.35: habilitación GLOBAL del subsistema WiFi (set_wifi on|off). La
+    // clave exacta del JSON puede variar entre builds: se aceptan varias.
+    const wOn = r.wifi_on ?? r.wifi_enabled ?? r.set_wifi ?? r.wifi_habilitado;
+    if (wOn != null) d.wifiOn = (wOn === true || wOn === 'on' || wOn === 1) ? 'on' : 'off';
     (Array.isArray(r.wifi) ? r.wifi : []).slice(0, 3).forEach((w, i) => {
       d[`w${i}ssid`] = limpiar(w?.ssid || '');
       d[`w${i}on`] = w?.enabled ? 'on' : 'off';
@@ -353,6 +377,9 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     if ((dif('ethIp') || dif('ethMask') || dif('ethGw') || dif('ethDns')) && ipCompleta) {
       c.push(`set_eth_ip ${v.ethIp} ${v.ethMask} ${v.ethGw} ${v.ethDns}`);
     }
+    // 6.35: habilitación global del subsistema ANTES de tocar perfiles (si se
+    // acaba de prender, los add_wifi/enable_wifi siguientes ya la encuentran on).
+    if (dif('wifiOn') && v.wifiOn !== '') c.push(`set_wifi ${v.wifiOn}`);
     for (const i of [0, 1, 2]) {
       const s = `w${i}ssid`; const p = `w${i}pass`; const on = `w${i}on`;
       if (dif(s) || dif(p)) {
@@ -594,7 +621,13 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
               <p className="text-[10.5px] text-slate-400 mb-1.5">Con firmware 6.32+ la IP, máscara y gateway se leen solas (el DNS no lo informa la placa: completalo para grabar cambios de IP). Los 4 campos se envían juntos.</p>
             </div>
             <div className="border-t border-slate-100 pt-2">
-              <p className="text-sm text-slate-700 mb-1">Utilizar WiFi <span className="text-[10.5px] text-slate-400">(tildar los perfiles a usar)</span></p>
+              {/* 6.35: «Utilizar WiFi» = set_wifi on|off (subsistema global).
+                  Con off el failover nunca elige WiFi y la radio queda libre
+                  para BLE; los perfiles siguen configurables «en frío», por
+                  eso se atenúan pero NO se bloquean. */}
+              {campoCheck('wifiOn', 'Utilizar WiFi')}
+              <div className={campos.wifiOn === 'off' ? 'opacity-60' : ''}>
+              <p className="text-[10.5px] text-slate-400 mb-1">El perfil 0 es la red principal (el failover los intenta en orden).</p>
               {[0, 1, 2].map((i) => (
                 <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end mb-1">
                   <div>{campoTexto(`w${i}ssid`, i === 0 ? 'SSID' : '', { placeholder: `perfil ${i}` })}</div>
@@ -613,8 +646,11 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
                 className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
                 {scan?.estado === 'buscando' ? 'Buscando redes… (3-6s)' : '🔍 Buscar redes disponibles'}
               </button>
+              {scan?.estado === 'wifi_off' && (
+                <p className="text-[10.5px] text-amber-600 mt-1">El firmware exige el subsistema WiFi encendido para escanear: tildá «Utilizar WiFi», tocá «Grabar cambios» y después buscá.</p>
+              )}
               {scan?.estado === 'vacio' && (
-                <p className="text-[10.5px] text-amber-600 mt-1">La placa no devolvió redes: puede que este firmware todavía no tenga el comando <code>scan_wifi</code> (pedido a Lorenzo) o que no haya redes al alcance. El SSID se puede tipear igual.</p>
+                <p className="text-[10.5px] text-amber-600 mt-1">La placa no devolvió redes: firmware sin <code>discover_wifi</code> (6.35+), subsistema WiFi apagado, o sin redes al alcance — el detalle queda en el monitor (bloque 4). El SSID se puede tipear igual.</p>
               )}
               {scan?.estado === 'ok' && (
                 <div className="mt-1 border border-slate-200 rounded-lg divide-y divide-slate-100 bg-slate-50">
@@ -631,6 +667,7 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
                   <div className="px-2 py-1"><button onClick={() => setScan(null)} className="text-[10.5px] text-slate-400 hover:text-slate-600">cerrar</button></div>
                 </div>
               )}
+              </div>{/* fin del grupo atenuado por «Utilizar WiFi» off */}
             </div>
           </div>
 

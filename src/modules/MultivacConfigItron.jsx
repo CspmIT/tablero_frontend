@@ -39,17 +39,23 @@ const sinCeros = (v) => (String(v || '') === '0.0.0.0' ? '' : String(v || ''));
 // Comillas dobles si el valor lleva espacios (el CLI las soporta en one-shot).
 const q = (v) => (/\s/.test(String(v)) ? `"${v}"` : String(v));
 
-// Parser del scan de redes (formato pactado con el FW v2.2):
-//   [scan] 1) "Interna 2.4"  -55dBm  protegida
+// Parser TOLERANTE del scan de redes (estándar 6.35: `discover_wifi`; el
+// v2.2 de banco respondía a `scan_wifi` — mismo formato):
+//   [scan] 1) "Interna 2.4"  -55dBm  ch6  WPA2
 const parseScan = (ls) => {
   const redes = [];
   for (const l of ls || []) {
-    const m = String(l).match(/\[scan\]\s*\d+\)\s*"(.+)"\s+(-?\d+)\s*dBm\s*(\S+)?/i);
-    if (m) redes.push({ ssid: m[1], rssi: Number(m[2]), abierta: /abierta|open/i.test(m[3] || '') });
+    const t = String(l);
+    let m = t.match(/"(.+)"\s+(-?\d{2,3})\s*dBm\s*(.*)$/i);
+    if (!m) m = t.match(/^\s*\d+[).:-]\s+(.+?)\s{2,}(-\d{2,3})\s*(dBm)?\s*(.*)$/i);
+    if (m) {
+      const resto = String(m[4] ?? m[3] ?? '');
+      redes.push({ ssid: m[1].trim(), rssi: Number(m[2]), abierta: /abierta|open/i.test(resto) });
+    }
   }
   const vistos = new Set();
   return redes.sort((a, b) => b.rssi - a.rssi)
-    .filter((r) => (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true)));
+    .filter((r) => r.ssid && (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true)));
 };
 const senial = (rssi) => (rssi >= -60 ? '📶 buena' : rssi >= -75 ? '📶 media' : '📶 baja');
 
@@ -67,17 +73,21 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
   const ocupado = !!leyendo || grabando;
   const bloqueado = !habilitado || !conectado || !orig || ocupado;
 
-  // Descubrir redes WiFi (19/08): `scan_wifi` del FW v2.2 — elegir sin tipear.
+  // Descubrir redes WiFi (estándar 6.35): `discover_wifi`, con fallback a
+  // `scan_wifi` para la placa de banco con v2.2.
   const [scan, setScan] = useState(null); // { estado:'buscando'|'ok'|'vacio', redes:[] }
   const buscarRedes = async () => {
     if (bloqueado || scan?.estado === 'buscando') return;
     setScan({ estado: 'buscando', redes: [] });
     try {
-      const ls = await consultar('scan_wifi', 1800, 15000);
-      const redes = parseScan(ls);
+      let redes = parseScan(await consultar('discover_wifi', 1800, 15000));
+      if (!redes.length) redes = parseScan(await consultar('scan_wifi', 1800, 15000));
       setScan(redes.length ? { estado: 'ok', redes } : { estado: 'vacio', redes: [] });
     } catch { setScan({ estado: 'vacio', redes: [] }); }
   };
+  // Versión del CLI de la placa (para elegir la sintaxis de credenciales:
+  // v2.3+ habla el estándar `add_wifi 0 ...`; v2.1/2.2 usaban `set_wifi ssid pass`).
+  const fwCliNum = (() => { const m = String(estado.fw || '').match(/(\d+)\.(\d+)/); return m ? Number(m[1]) + Number(m[2]) / 10 : 0; })();
   const activo = useRef(true);
   useEffect(() => () => { activo.current = false; if (rxSink) rxSink.current = null; }, [rxSink]);
 
@@ -215,7 +225,11 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
     // WiFi: el CLI pide ssid Y clave juntos (la clave no es legible: si cambiás
     // el SSID, completala — sin clave el comando no se arma).
     if ((dif('wifiSsid') || dif('wifiPass')) && v.wifiSsid.trim() && v.wifiPass.trim()) {
-      c.push(`set_wifi ${q(v.wifiSsid.trim())} ${q(v.wifiPass.trim())}`);
+      // Estándar 6.35 (CLI v2.3+): credenciales por add_wifi. Las placas de
+      // banco con v2.1/2.2 siguen entendiendo la sintaxis vieja set_wifi.
+      c.push(fwCliNum >= 2.3
+        ? `add_wifi 0 ${q(v.wifiSsid.trim())} ${q(v.wifiPass.trim())}`
+        : `set_wifi ${q(v.wifiSsid.trim())} ${q(v.wifiPass.trim())}`);
     }
     const ipOk = (x) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(x || ''));
     const ipCompleta = ipOk(v.ethIp) && ipOk(v.ethMask) && ipOk(v.ethGw) && ipOk(v.ethDns);
@@ -391,7 +405,7 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
                 {scan?.estado === 'buscando' ? 'Buscando redes… (3-6s)' : '🔍 Buscar redes disponibles'}
               </button>
               {scan?.estado === 'vacio' && (
-                <p className="text-[10.5px] text-amber-600 mb-1">La placa no devolvió redes: el comando <code>scan_wifi</code> llegó con el firmware v2.2 (¿placa con versión anterior?) o no hay redes al alcance. El SSID se puede tipear igual.</p>
+                <p className="text-[10.5px] text-amber-600 mb-1">La placa no devolvió redes: el descubrimiento llegó con el CLI v2.2+ (<code>discover_wifi</code> desde v2.3, estándar 6.35) o no hay redes al alcance. El SSID se puede tipear igual.</p>
               )}
               {scan?.estado === 'ok' && (
                 <div className="mb-1 border border-slate-200 rounded-lg divide-y divide-slate-100 bg-slate-50">
@@ -488,7 +502,7 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
             <h3 className="font-semibold mb-1">💾 Grabar {confirmar.comandos.length} cambio{confirmar.comandos.length === 1 ? '' : 's'}</h3>
             <p className="text-xs text-slate-400 mb-2">Estos comandos se envían a la placa y al final se ejecuta <b>restart</b> (los cambios aplican con el reinicio):</p>
             <div className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-mono text-[11px] text-slate-700 max-h-56 overflow-y-auto">
-              {confirmar.comandos.map((cmd, i) => <div key={i}>{cmd.replace(/(set_pass|set_wifi\s+\S+)\s+\S+$/, '$1 ••••••')}</div>)}
+              {confirmar.comandos.map((cmd, i) => <div key={i}>{cmd.replace(/(set_pass|(?:set_wifi|add_wifi\s+0)\s+(?:"[^"]*"|\S+))\s+(?:"[^"]*"|\S+)$/, '$1 ••••••')}</div>)}
               <div>restart</div>
             </div>
             <div className="flex justify-end gap-2 mt-4">

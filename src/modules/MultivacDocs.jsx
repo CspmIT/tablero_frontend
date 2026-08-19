@@ -220,6 +220,9 @@ export default function MultivacDocs() {
   const [visor, setVisor] = useState(null);       // {estado:'cargando'|'ok'|'error', pdf?, paginas?, msg?}
   const [escala, setEscala] = useState(1);
   const [anchoBase, setAnchoBase] = useState(700);
+  // Pantalla completa (pedido 19/08, uso en celu): overlay propio con botón
+  // de salir — CSS puro, sin la API Fullscreen (en Tauri/WebView es caprichosa).
+  const [full, setFull] = useState(false);
   const marcoRef = useRef(null);
 
   useEffect(() => {
@@ -230,7 +233,35 @@ export default function MultivacDocs() {
     medir();
     window.addEventListener('resize', medir);
     return () => window.removeEventListener('resize', medir);
-  }, [docSel]);
+  }, [docSel, full]);
+
+  // ---------- Descarga del PDF (pedido 19/08 — mismo patrón probado del
+  // backup de firmware: objectURL + <a download>, CON feedback visible). ----
+  const [descarga, setDescarga] = useState(null); // { id, estado: 'bajando'|'ok' }
+  const descargar = async (doc) => {
+    if (descarga?.estado === 'bajando') return;
+    setDescarga({ id: doc.id, estado: 'bajando' });
+    try {
+      const objUrl = await getImage(doc.key);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = /\.pdf$/i.test(doc.nombre) ? doc.nombre : `${doc.nombre}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+      setDescarga({ id: doc.id, estado: 'ok' });
+      setTimeout(() => setDescarga((d) => (d?.id === doc.id && d.estado === 'ok' ? null : d)), 4000);
+    } catch (e) {
+      setDescarga(null);
+      setError(e.message || 'No se pudo descargar el PDF');
+    }
+  };
+  const btnDescarga = (doc, compacto = false) => (
+    <button onClick={(ev) => { ev.stopPropagation(); descargar(doc); }} disabled={descarga?.estado === 'bajando'}
+      title="Descargar el PDF"
+      className="px-2 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40 whitespace-nowrap">
+      {descarga?.id === doc.id ? (descarga.estado === 'bajando' ? '…' : '✓') : (compacto ? '⬇' : '⬇ PDF')}
+    </button>
+  );
 
   const abrir = async (doc) => {
     setDocSel(doc); setEscala(1); setVisor({ estado: 'cargando' });
@@ -247,7 +278,7 @@ export default function MultivacDocs() {
   };
   const cerrarVisor = () => {
     try { visor?.pdf?.destroy(); } catch { /* nada */ }
-    setDocSel(null); setVisor(null);
+    setDocSel(null); setVisor(null); setFull(false);
   };
 
   // ---------- Borrado en 2 pasos (NUNCA confirm() nativo — lección 13/08) ----
@@ -263,6 +294,44 @@ export default function MultivacDocs() {
 
   // =================== VISTA: VISOR ===================
   if (docSel) {
+    const zoom = (
+      <div className="flex items-center gap-1">
+        <button onClick={() => setEscala((e) => Math.max(0.6, +(e - 0.2).toFixed(1)))} className="w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul">−</button>
+        <button onClick={() => setEscala(1)} className="px-2 h-8 rounded-lg border border-slate-300 bg-white text-xs text-slate-500 hover:border-coop-azul">{Math.round(escala * 100)}%</button>
+        <button onClick={() => setEscala((e) => Math.min(3, +(e + 0.2).toFixed(1)))} className="w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul">＋</button>
+      </div>
+    );
+    const paginas = (
+      <>
+        {visor?.estado === 'cargando' && <p className="text-sm text-slate-500 p-6 text-center">Cargando el documento…</p>}
+        {visor?.estado === 'error' && <p className="text-sm text-red-600 p-6 text-center">{visor.msg}</p>}
+        {visor?.estado === 'ok' && Array.from({ length: visor.paginas }, (_, i) => (
+          <PaginaPdf key={i + 1} pdf={visor.pdf} num={i + 1} escala={escala} anchoBase={anchoBase} />
+        ))}
+      </>
+    );
+    // Un TAP sobre el documento entra a pantalla completa — solo en pantallas
+    // táctiles (en PC el click queda libre para seleccionar/scrollear).
+    const tapFull = () => {
+      if (!full && typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches) setFull(true);
+    };
+
+    // -------- PANTALLA COMPLETA: overlay fijo, barra mínima, salir visible --------
+    if (full) {
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col">
+          <div className="flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 shrink-0">
+            <button onClick={() => setFull(false)}
+              className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white shrink-0">✕ Salir</button>
+            <span className="text-sm font-medium text-slate-700 truncate flex-1" title={docSel.nombre}>{docSel.nombre}</span>
+            {btnDescarga(docSel, true)}
+            {zoom}
+          </div>
+          <div ref={marcoRef} className="flex-1 overflow-auto p-2">{paginas}</div>
+        </div>
+      );
+    }
+
     return (
       <div>
         <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -271,19 +340,15 @@ export default function MultivacDocs() {
           {carpetaDe(docSel) && <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">📁 {carpetaDe(docSel)}</span>}
           {visor?.estado === 'ok' && <span className="text-xs text-slate-400">{visor.paginas} pág. · {fmtTam(docSel.tamano)}</span>}
           <span className="flex-1" />
-          <div className="flex items-center gap-1">
-            <button onClick={() => setEscala((e) => Math.max(0.6, +(e - 0.2).toFixed(1)))} className="w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul">−</button>
-            <button onClick={() => setEscala(1)} className="px-2 h-8 rounded-lg border border-slate-300 bg-white text-xs text-slate-500 hover:border-coop-azul">{Math.round(escala * 100)}%</button>
-            <button onClick={() => setEscala((e) => Math.min(3, +(e + 0.2).toFixed(1)))} className="w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul">＋</button>
-          </div>
+          {btnDescarga(docSel)}
+          <button onClick={() => setFull(true)} title="Pantalla completa"
+            className="w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">⛶</button>
+          {zoom}
         </div>
-        <div ref={marcoRef} className="bg-slate-100 border border-slate-200 rounded-xl p-2 overflow-auto" style={{ maxHeight: '75vh' }}>
-          {visor?.estado === 'cargando' && <p className="text-sm text-slate-500 p-6 text-center">Cargando el documento…</p>}
-          {visor?.estado === 'error' && <p className="text-sm text-red-600 p-6 text-center">{visor.msg}</p>}
-          {visor?.estado === 'ok' && Array.from({ length: visor.paginas }, (_, i) => (
-            <PaginaPdf key={i + 1} pdf={visor.pdf} num={i + 1} escala={escala} anchoBase={anchoBase} />
-          ))}
+        <div ref={marcoRef} onClick={tapFull} className="bg-slate-100 border border-slate-200 rounded-xl p-2 overflow-auto" style={{ maxHeight: '75vh' }}>
+          {paginas}
         </div>
+        <p className="text-[10.5px] text-slate-400 mt-1 sm:hidden">Tocá el documento para verlo en pantalla completa.</p>
       </div>
     );
   }
@@ -373,6 +438,7 @@ export default function MultivacDocs() {
                 )}
                 <span className="text-xs text-slate-400 whitespace-nowrap">{fmtTam(d.tamano)} · {fmtFecha(d.createdAt)}</span>
                 <button onClick={() => abrir(d)} className="px-3 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">Ver</button>
+                {btnDescarga(d, true)}
                 {puedeCurar && (
                   <select value={carpetaDe(d)} onChange={(e) => mover(d, e.target.value)} title="Mover a carpeta"
                     className="border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] bg-white text-slate-500 max-w-[9rem]">

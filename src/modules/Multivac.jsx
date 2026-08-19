@@ -626,6 +626,30 @@ export default function Multivac() {
       if (fwForm.fuenteArchivo) { const r0 = await subir(fwForm.fuenteArchivo); fuente = { key: r0.key, sha256: r0.sha256, nombre: fwForm.fuenteArchivo.name, tamano: fwForm.fuenteArchivo.size }; }
       let merged = null;
       if (fwForm.mergedArchivo) { const r1 = await subir(fwForm.mergedArchivo); merged = { key: r1.key, sha256: r1.sha256, nombre: fwForm.mergedArchivo.name, tamano: fwForm.mergedArchivo.size }; }
+      // AUTO-MERGED (19/08, pedido de Leonardo — caso: el técnico agarra una
+      // placa sin configurar o con OTRO firmware y necesita «Volver a fábrica»,
+      // pero Arduino 1.8.x solo exporta la app). Un merged NO tiene magia: es
+      // cada segmento en su offset con relleno 0xFF en los huecos (lo mismo
+      // que hace esptool merge_bin). Si el release trae bootloader (0x0/0x1000)
+      // + particiones (0x8000) + app (0x10000) y NO se adjuntó merged, se
+      // COMPONE acá y se sube como un archivo más (misma verificación SHA-256).
+      // El otadata (0xE000) puede faltar: borrado (0xFF) el bootloader arranca
+      // ota_0 igual — es el estado normal tras un erase-all.
+      else {
+        const offs = filas.map((f) => Number(f.offset.trim()));
+        const tieneBoot = offs.some((o) => o === 0x0 || o === 0x1000);
+        if (tieneBoot && offs.some((o) => o === 0x8000) && offs.some((o) => o === 0x10000)) {
+          const bufs = await Promise.all(filas.map(async (f) => ({ off: Number(f.offset.trim()), b: new Uint8Array(await f.archivo.arrayBuffer()) })));
+          const total = Math.max(...bufs.map((x) => x.off + x.b.length));
+          if (total <= 16 * 1024 * 1024) {
+            const img = new Uint8Array(total).fill(0xFF);
+            for (const x of bufs) img.set(x.b, x.off);
+            const nombreM = `${(fwForm.modelo || 'fw').trim().replace(/\s+/g, '_')}_${fwForm.version.trim()}.merged.bin`;
+            const rM = await subir(new File([img], nombreM, { type: 'application/octet-stream' }));
+            merged = { key: rM.key, sha256: rM.sha256, nombre: nombreM, tamano: img.length, auto: true };
+          }
+        }
+      }
       const release = {
         modelo: fwForm.modelo.trim(), chip: fwForm.chip, producto: fwForm.producto || 'General',
         version: fwForm.version.trim(), nombre: (fwForm.nombre || '').trim(),
@@ -1962,7 +1986,7 @@ export default function Multivac() {
               <div>
                 <label className="block text-xs text-slate-500 mb-0.5">🏭 Merged (volver a fábrica) — opcional</label>
                 <input type="file" accept=".bin" onChange={(e) => setFwForm((f) => ({ ...f, mergedArchivo: e.target.files?.[0] || null }))} className="w-full text-xs" />
-                <p className="text-[10px] text-slate-400 mt-0.5">El .ino.merged.bin del build. Borra config y mediciones al usarlo.</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">El .ino.merged.bin del build. Borra config y mediciones al usarlo. Si no lo tenés (Arduino 1.8.x no lo exporta), <b>se genera solo</b> cuando los segmentos incluyen bootloader (0x0/0x1000) + particiones (0x8000) + app (0x10000).</p>
               </div>
               <div>
                 <label className="block text-xs text-slate-500 mb-0.5">📦 Proyecto completo (backup) — opcional</label>
