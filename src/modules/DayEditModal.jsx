@@ -102,7 +102,7 @@ function TagChips({ tags, onAdd, onRemove, catalogo = [] }) {
   );
 }
 
-export default function DayEditModal({ open, onClose, collaborator, date, entry, weeklyWipText, feriadoName, onSave, onReunionCreada }) {
+export default function DayEditModal({ open, onClose, collaborator, date, entry, weeklyWipText, feriadoName, tipicaDia, onSave, onReunionCreada }) {
   const { api, me, tags: tagsRegistro } = useData();
   // Ola reuniones: crear una reunión directamente desde el día de la grilla
   // (el ítem lo agrega el backend en la grilla de todos los participantes; el
@@ -147,16 +147,18 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
       setHsIng(hx?.ingreso || '18:00');
       setHsSal(hx?.salida || '20:00');
     } else {
-      // Día sin carga: si hay feriado nacional, queda pre-asignado como "Feriado".
-      setStatus(feriadoName ? 'feriado' : 'present');
-      setEntryTime('08:00');
+      // Día sin carga: si hay feriado nacional, queda pre-asignado como
+      // "Feriado"; si no, manda la GRILLA TÍPICA del colaborador (19/08) —
+      // estado y hora de ingreso default, listos para guardar tal cual.
+      setStatus(feriadoName ? 'feriado' : (tipicaDia?.estado || 'present'));
+      setEntryTime(tipicaDia?.entryTime || '08:00');
       setViajeLabel('');
       setItems(weeklyWipText ? [{ text: weeklyWipText, wip: true, tags: [], horas: null }] : [{ text: '', wip: false, tags: [], horas: null }]);
       setHsExtraOn(false);
       setHsIng('18:00');
       setHsSal('20:00');
     }
-  }, [open, entry, weeklyWipText, feriadoName]);
+  }, [open, entry, weeklyWipText, feriadoName, tipicaDia]);
 
   // Reparto del día (8 hs): los ítems con horas explícitas las usan; el resto
   // del día se divide entre los que no especifican. Igual criterio que las

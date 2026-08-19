@@ -21,6 +21,10 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   const [entries, setEntries] = useState({});
   const [wips, setWips] = useState({});
   const [feriadosMap, setFeriadosMap] = useState({});
+  // Grilla típica: { colaboradorId: { '1'..'5': { estado, entryTime } } }.
+  // Solo VISUAL en días sin carga; feriado y carga real la pisan (orden del render).
+  const [tipica, setTipica] = useState({});
+  const tipicaDe = (colabId, d) => tipica?.[colabId]?.[String(((d.getDay() + 6) % 7) + 1)] || null;
   const [guardWeeks, setGuardWeeks] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [dayCtx, setDayCtx] = useState(null); // { collab, date }
@@ -68,13 +72,16 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   const recargar = useCallback(async () => {
     setCargando(true);
     try {
-      const [ents, ws, fers, guds, rs] = await Promise.all([
+      const [ents, ws, fers, guds, rs, tip] = await Promise.all([
         api.grilla.list({ desde: fmtISO(weekStart), hasta: fmtISO(weekEnd) }),
         api.grilla.wips(),
         api.feriados.list(),
         api.guardias.list(weekStart.getFullYear()),
         api.grilla.resumenSemana(fmtISO(weekStart)).catch(() => ({ resumenes: {}, cooptechPct: {} })),
+        // Grilla típica (19/08): default visual por colaborador y día de semana.
+        api.grilla.tipica().catch(() => ({ tipica: {} })),
       ]);
+      setTipica(tip?.tipica || {});
       setResumenes(rs.resumenes || {});
       setEntries(buildEntriesMap(ents));
       setWips(buildWipsMap(ws));
@@ -237,6 +244,13 @@ export default function Grilla({ vista = 'grilla', setVista }) {
                                 <StatusBadge status="feriado" />
                                 <div className="text-[11px] text-slate-500 italic leading-tight break-words">{feriadoName}</div>
                               </div>
+                            ) : tipicaDe(c.id, d) ? (
+                              // Default de la grilla típica: solo visual (nada
+                              // escrito en la base hasta que el día se guarde).
+                              <div className="space-y-0.5 opacity-60">
+                                <StatusBadge status={tipicaDe(c.id, d).estado} entryTime={tipicaDe(c.id, d).entryTime} />
+                                <div className="text-[10px] text-slate-400 italic">típico · + cargar</div>
+                              </div>
                             ) : (
                               <span className="text-slate-300 text-xs">+ cargar</span>
                             )}
@@ -274,6 +288,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
         entry={dayCtx ? entries[`${dayCtx.collab.id}:${fmtISO(dayCtx.date)}`] : null}
         weeklyWipText={dayCtx ? wips[getWeekKey(dayCtx.collab.id, weekStart)] || '' : ''}
         feriadoName={dayCtx ? feriadosMap[fmtISO(dayCtx.date)] || null : null}
+        tipicaDia={dayCtx ? tipicaDe(dayCtx.collab.id, dayCtx.date) : null}
         onClose={() => setDayCtx(null)}
         onSave={guardarDia}
         onReunionCreada={() => { setDayCtx(null); recargar(); }}

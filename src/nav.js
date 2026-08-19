@@ -27,7 +27,9 @@ export const INFO = [
   { id: 'analisis', label: 'Reportes', icon: FileText, listo: true, roles: ['manager', 'gerencial', 'externo'] },
   // Métricas OV (18/08, pedido de Gerencia de Operaciones): tickets de
   // Oficina Virtual clasificados por tipo × causa. Manager + gerencial.
-  { id: 'metricas-ov', label: 'Métricas Oficina Virtual', icon: BarChart3, listo: true, roles: ['manager', 'gerencial'] },
+  // 19/08: los colaboradores internos del área ven y clasifican por default
+  // (el backend acompaña; externos/tercerizados siguen afuera).
+  { id: 'metricas-ov', label: 'Métricas Oficina Virtual', icon: BarChart3, listo: true, roles: ['manager', 'gerencial', 'collaborator'] },
 ];
 
 // Configuración (engranaje): panel de permisos + ajustes del sistema.
