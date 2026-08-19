@@ -21,6 +21,7 @@ import MultivacConfigReconecta from './MultivacConfigReconecta.jsx';
 // no existe (el picker solo lista Bluetooth) — se usa WebUSB con driver
 // CP210x propio, con la misma interfaz que un SerialPort.
 import { soportaWebUsb, pedirPuertoUsbSerie } from '../api/cp210x.js';
+import MultivacDocs from './MultivacDocs.jsx';
 // Flujo guiado DLMS Itron (16/08): contra el CLI que le agregamos a
 // DLMS_ITRON_2.ino v2.1b (mismo protocolo que el FW DNP3, validado en banco).
 import MultivacConfigItron from './MultivacConfigItron.jsx';
@@ -938,7 +939,29 @@ export default function Multivac() {
   const hayUsb = usarWebUsb || soportaSerial;
   // ÚNICO punto de pedido de puerto serie por cable: PC → Web Serial nativo;
   // Android → WebUSB + driver según puente. El resto del código no distingue.
-  const pedirPuertoSerie = () => (usarWebUsb ? pedirPuertoUsbSerie() : navigator.serial.requestPort());
+  // DIAGNÓSTICO DE CAMPO (18/08, caso Multivac que ni el terminal serie del
+  // celu ve): si el picker sale vacío o se cancela, el terminal explica cómo
+  // distinguir un problema FÍSICO (cable OTG/conector/alimentación — Android
+  // no enumera nada) de uno de driver (el picker SÍ lista la placa).
+  const pedirPuertoSerie = async () => {
+    if (!usarWebUsb) return navigator.serial.requestPort();
+    try {
+      return await pedirPuertoUsbSerie();
+    } catch (e) {
+      if (e?.name === 'NotFoundError') {
+        let autorizados = [];
+        try { autorizados = await navigator.usb.getDevices(); } catch { /* sin datos */ }
+        log('sys', '⚠ No se eligió ningún dispositivo USB.');
+        log('sys', 'Si la lista salió VACÍA con la placa enchufada, Android no la está viendo: probá otro cable/adaptador OTG, revisá el conector y que la placa encienda. Prueba cruzada: si una app de terminal serie tampoco la lista, es problema físico (cable/conector), no de esta app.');
+        if (autorizados.length) {
+          const hex = (n) => '0x' + n.toString(16).toUpperCase().padStart(4, '0');
+          log('sys', `Dispositivos USB ya autorizados antes en este celular: ${autorizados.map((d) => `${d.productName || 'sin nombre'} (VID ${hex(d.vendorId)}/PID ${hex(d.productId)})`).join(' · ')}`);
+        }
+        log('sys', 'Si la placa SÍ aparece en la lista pero al elegirla da error, mandame el VID/PID que muestra el mensaje para agregar su driver.');
+      }
+      throw e;
+    }
+  };
 
   const log = (t, txt) => setLineas((ls) => [...ls.slice(-500), { t, txt }]);
   // Autoscroll con CHECKBOX explícito estilo Arduino (pedido 14/08): marcado
@@ -1333,6 +1356,7 @@ export default function Multivac() {
           { id: 'firmware', label: 'Actualizaciones de firmware' },
           { id: 'config', label: 'Configuraciones' },
           { id: 'sniffer', label: 'Terminal Sniffer' },
+          { id: 'docs', label: 'Documentación' },
           ...(puedeGestionar ? [{ id: 'gestion', label: 'Gestión de versiones' }] : []),
         ].map((s) => (
           <button key={s.id} onClick={() => setSolapa(s.id)}
@@ -1790,6 +1814,9 @@ export default function Multivac() {
           </div>
         </div>
       )}
+
+      {/* ============ SOLAPA: DOCUMENTACIÓN (biblioteca PDF compartida, 18/08) ============ */}
+      {solapa === 'docs' && <MultivacDocs />}
 
       {/* ============ SOLAPA: GESTIÓN DE VERSIONES (uso interno del área) ============ */}
       {solapa === 'gestion' && puedeGestionar && (
