@@ -60,7 +60,8 @@ const parseScan = (ls) => {
   const vistos = new Set();
   return {
     redes: redes.sort((a, b) => b.rssi - a.rssi)
-      .filter((r) => r.ssid && (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true))),
+      .filter((r) => r.ssid && r.ssid !== '(oculta)' // el 6.35 lista tambien las ocultas: no son elegibles
+        && (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true))),
   };
 };
 const senial = (rssi) => (rssi >= -60 ? '📶 buena' : rssi >= -75 ? '📶 media' : '📶 baja');
@@ -118,10 +119,17 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
     setScan({ estado: 'buscando', redes: [] });
     try {
       await consultar('comando', 400, 3000); // por si la sesión venció (60s en 6.35; inofensivo si está viva)
-      let r = parseScan(await consultar('discover_wifi', 1800, 15000));
+      // QUIET LARGO (fix 19/08, verificado contra el 6.35 REAL): discover_wifi
+      // imprime "Escaneando redes WiFi..." y recién 2-4 s DESPUÉS (escaneo
+      // bloqueante) la lista — con quiet de 1,8 s cortábamos antes de que
+      // llegaran las redes. finRx cierra rápido en los finales conocidos.
+      const FIN = /\[scan\] fin|Sin redes detectadas|Error de escaneo|WiFi global deshabilitado|desconocido/i;
+      let ls = await consultar('discover_wifi', 6000, 25000, FIN);
+      if (ls.some((l) => /WiFi global deshabilitado/i.test(l))) { setScan({ estado: 'wifi_off', redes: [] }); return; }
+      let r = parseScan(ls);
       if (!r.redes.length) {
         // Fallback para FW previos al estándar (nuestro scan_wifi de banco).
-        r = parseScan(await consultar('scan_wifi', 1800, 15000));
+        r = parseScan(await consultar('scan_wifi', 6000, 25000, FIN));
       }
       setScan(r.redes.length ? { estado: 'ok', redes: r.redes } : { estado: 'vacio', redes: [] });
     } catch { setScan({ estado: 'vacio', redes: [] }); }
@@ -135,7 +143,11 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
 
   // Motor: manda un comando y junta la respuesta hasta que la línea queda en
   // silencio (quietMs). El sink lo inyecta el padre en procesarEntrada.
-  const consultar = (cmd, quietMs = 400, maxMs = 6000) => new Promise((resolve) => {
+  // finRx (19/08, bug del scan): línea terminadora — al verla se cierra a los
+  // 250 ms sin esperar el silencio (para respuestas con PAUSAS largas en el
+  // medio, como discover_wifi: 2-4 s de escaneo bloqueante entre el aviso y
+  // los resultados, que con quiet corto cortaban la respuesta a la mitad).
+  const consultar = (cmd, quietMs = 400, maxMs = 6000, finRx = null) => new Promise((resolve) => {
     const acumulado = [];
     let tQuiet = null; let tMax = null;
     const fin = () => {
@@ -143,9 +155,13 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
       if (rxSink.current === sink) rxSink.current = null;
       resolve(acumulado);
     };
-    const sink = (l) => { acumulado.push(l); clearTimeout(tQuiet); tQuiet = setTimeout(fin, quietMs); };
+    const sink = (l) => {
+      acumulado.push(l);
+      clearTimeout(tQuiet);
+      tQuiet = setTimeout(fin, finRx && finRx.test(String(l)) ? 250 : quietMs);
+    };
     rxSink.current = sink;
-    tQuiet = setTimeout(fin, 1500);
+    tQuiet = setTimeout(fin, Math.max(1500, quietMs));
     tMax = setTimeout(fin, maxMs);
     enviarLinea(cmd);
   });
@@ -644,7 +660,7 @@ export default function MultivacConfigReconecta({ habilitado, conectado, enviarL
               {/* Descubrir redes (19/08): scan desde la placa, elegir sin tipear. */}
               <button onClick={buscarRedes} disabled={bloqueado || scan?.estado === 'buscando'}
                 className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
-                {scan?.estado === 'buscando' ? 'Buscando redes… (3-6s)' : '🔍 Buscar redes disponibles'}
+                {scan?.estado === 'buscando' ? 'Buscando redes… (hasta ~10 s)' : '🔍 Buscar redes disponibles'}
               </button>
               {scan?.estado === 'wifi_off' && (
                 <p className="text-[10.5px] text-amber-600 mt-1">El firmware exige el subsistema WiFi encendido para escanear: tildá «Utilizar WiFi», tocá «Grabar cambios» y después buscá.</p>
