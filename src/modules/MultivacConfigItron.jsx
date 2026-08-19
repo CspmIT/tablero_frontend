@@ -10,8 +10,9 @@
 // - Los cambios aplican con `restart`: Grabar envía los comandos, REINICIA la
 //   placa sola y re-lee tras el reboot — la verificación es contra la
 //   realidad post-restart, no contra la intención.
-// - El modo de stack (WIFI/STATIC_IP/DHCP) es COMPILADO en ese firmware: acá
-//   se muestra solo-lectura.
+// - El modo de stack (WIFI/STATIC_IP/DHCP) era COMPILADO hasta el FW v2.3:
+//   ahí se muestra solo-lectura. Desde v2.4 es runtime (set_wifi on /
+//   set_eth_static on / set_eth_dhcp on, semántica 6.35) y acá es un select.
 import { useEffect, useRef, useState } from 'react';
 
 const MQTT_PERFILES = [
@@ -25,10 +26,16 @@ const INSTALACIONES = [
   { v: 'CONSUMO_INTERNO', t: 'CONSUMO_INTERNO' },
 ];
 const COMUNICACIONES = [{ v: 'RS_232', t: 'RS-232' }, { v: 'RS_485', t: 'RS-485' }];
+const MODOS_RED = [
+  { v: 'STATIC_IP', t: 'Ethernet — IP estática' },
+  { v: 'DHCP', t: 'Ethernet — DHCP' },
+  { v: 'WIFI', t: 'WiFi' },
+];
 const BAUDS_SERIE = ['1200', '2400', '4800', '9600', '19200', '38400', '57600', '115200'];
 
 const CAMPOS_DEF = {
   nombre: '', passNueva: '',
+  modo: 'STATIC_IP',
   wifiSsid: '', wifiPass: '',
   ethIp: '', ethMask: '255.255.255.0', ethGw: '', ethDns: '',
   mqttPerfil: '1',
@@ -55,7 +62,8 @@ const parseScan = (ls) => {
   }
   const vistos = new Set();
   return redes.sort((a, b) => b.rssi - a.rssi)
-    .filter((r) => r.ssid && (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true)));
+    .filter((r) => r.ssid && r.ssid !== '(oculta)' // las ocultas no son elegibles
+      && (vistos.has(r.ssid) ? false : (vistos.add(r.ssid), true)));
 };
 const senial = (rssi) => (rssi >= -60 ? '📶 buena' : rssi >= -75 ? '📶 media' : '📶 baja');
 
@@ -80,8 +88,12 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
     if (bloqueado || scan?.estado === 'buscando') return;
     setScan({ estado: 'buscando', redes: [] });
     try {
-      let redes = parseScan(await consultar('discover_wifi', 1800, 15000));
-      if (!redes.length) redes = parseScan(await consultar('scan_wifi', 1800, 15000));
+      // QUIET LARGO (fix 19/08): el escaneo bloqueante mete 2-4 s de silencio
+      // en plena respuesta — con quiet de 1,8 s cortábamos antes de las redes.
+      // finRx cierra rápido en el "[scan] fin" de nuestro FW.
+      const FIN = /\[scan\] fin|desconocido/i;
+      let redes = parseScan(await consultar('discover_wifi', 6000, 25000, FIN));
+      if (!redes.length) redes = parseScan(await consultar('scan_wifi', 6000, 25000, FIN));
       setScan(redes.length ? { estado: 'ok', redes } : { estado: 'vacio', redes: [] });
     } catch { setScan({ estado: 'vacio', redes: [] }); }
   };
@@ -91,7 +103,11 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
   const activo = useRef(true);
   useEffect(() => () => { activo.current = false; if (rxSink) rxSink.current = null; }, [rxSink]);
 
-  const consultar = (cmd, quietMs = 400, maxMs = 6000) => new Promise((resolve) => {
+  // finRx (19/08, bug del scan): línea terminadora — al verla se cierra a los
+  // 250 ms sin esperar el silencio (para respuestas con PAUSAS largas en el
+  // medio, como discover_wifi: el escaneo bloqueante mete 2-4 s de silencio
+  // entre el aviso y los resultados, y el quiet corto cortaba antes).
+  const consultar = (cmd, quietMs = 400, maxMs = 6000, finRx = null) => new Promise((resolve) => {
     const acumulado = [];
     let tQuiet = null; let tMax = null;
     const fin = () => {
@@ -99,9 +115,13 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
       if (rxSink.current === sink) rxSink.current = null;
       resolve(acumulado);
     };
-    const sink = (l) => { acumulado.push(l); clearTimeout(tQuiet); tQuiet = setTimeout(fin, quietMs); };
+    const sink = (l) => {
+      acumulado.push(l);
+      clearTimeout(tQuiet);
+      tQuiet = setTimeout(fin, finRx && finRx.test(String(l)) ? 250 : quietMs);
+    };
     rxSink.current = sink;
-    tQuiet = setTimeout(fin, 1500);
+    tQuiet = setTimeout(fin, Math.max(1500, quietMs));
     tMax = setTimeout(fin, maxMs);
     enviarLinea(cmd);
   });
@@ -146,7 +166,7 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
     if (g.fw) e.fw = `${g.fw}${g.supported ? ` · ${g.supported}` : ''}`;
     if (g.hw) e.hw = String(g.hw);
     if (g.uptime_s != null) e.uptime = `${g.uptime_s} s`;
-    if (r.modo) e.modo = String(r.modo);
+    if (r.modo) { e.modo = String(r.modo); d.modo = String(r.modo); }  // v2.4: también editable
     const w0 = Array.isArray(r.wifi) ? r.wifi[0] : null;
     if (w0 && w0.ssid != null) { d.wifiSsid = String(w0.ssid); d.wifiPass = ''; }
     const et = r.eth || {};
@@ -235,6 +255,10 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
     const ipCompleta = ipOk(v.ethIp) && ipOk(v.ethMask) && ipOk(v.ethGw) && ipOk(v.ethDns);
     if ((dif('ethIp') || dif('ethMask') || dif('ethGw') || dif('ethDns')) && ipCompleta) {
       c.push(`set_eth_ip ${v.ethIp} ${v.ethMask} ${v.ethGw} ${v.ethDns}`);
+    }
+    // Modo de red (FW v2.4+, semántica 6.35): un solo comando "on" del modo destino.
+    if (dif('modo') && fwCliNum >= 2.4) {
+      c.push(v.modo === 'WIFI' ? 'set_wifi on' : v.modo === 'DHCP' ? 'set_eth_dhcp on' : 'set_eth_static on');
     }
     if (dif('mqttPerfil')) c.push(`change_mqtt ${v.mqttPerfil}`);
     if (dif('instalacion')) c.push(`set_instalacion ${v.instalacion}`);
@@ -390,7 +414,16 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
           {/* Columna 2: Red */}
           <div className="border border-slate-100 rounded-lg p-2.5">
             <h4 className="text-sm font-medium text-slate-700 mb-2">🌐 Configuraciones de Red</h4>
-            <p className="text-[10.5px] text-slate-400 mb-2">Modo de conexión: <b>{estado.modo || '(se lee al conectar)'}</b> — compilado en el firmware (no se cambia por CLI).</p>
+            {fwCliNum >= 2.4 ? (
+              <>
+                {campoSelect('modo', 'Modo de conexión (por dónde sale TODO: MQTT y NTP)', MODOS_RED)}
+                {campos.modo === 'WIFI' && String(campos.modo) !== String(orig?.modo) && !campos.wifiSsid.trim() && (
+                  <p className="text-[10.5px] text-amber-600 mb-1.5">Para pasar a WiFi cargá también SSID y clave acá abajo (sin red guardada la placa queda sin conexión).</p>
+                )}
+              </>
+            ) : (
+              <p className="text-[10.5px] text-slate-400 mb-2">Modo de conexión: <b>{estado.modo || '(se lee al conectar)'}</b> — en este firmware es compilado; desde el FW v2.4 se cambia por CLI (actualizá desde «Actualizaciones de firmware»).</p>
+            )}
             <div className="grid sm:grid-cols-2 gap-x-3">
               {campoIp('ethIp', 'IP estática')}
               {campoIp('ethMask', 'Máscara')}
@@ -402,7 +435,7 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
               {/* Descubrir redes (19/08, FW v2.2): elegir sin tipear el SSID. */}
               <button onClick={buscarRedes} disabled={bloqueado || scan?.estado === 'buscando'}
                 className="text-[11px] px-2.5 py-1 mb-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
-                {scan?.estado === 'buscando' ? 'Buscando redes… (3-6s)' : '🔍 Buscar redes disponibles'}
+                {scan?.estado === 'buscando' ? 'Buscando redes… (hasta ~10 s)' : '🔍 Buscar redes disponibles'}
               </button>
               {scan?.estado === 'vacio' && (
                 <p className="text-[10.5px] text-amber-600 mb-1">La placa no devolvió redes: el descubrimiento llegó con el CLI v2.2+ (<code>discover_wifi</code> desde v2.3, estándar 6.35) o no hay redes al alcance. El SSID se puede tipear igual.</p>
