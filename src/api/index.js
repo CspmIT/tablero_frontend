@@ -67,6 +67,8 @@ export const api = {
     // se registra acá su referencia (key + metadata) como JSON.
     create: (body) => http.post('/archivos', body),
     get: (id) => http.get(`/archivos/${id}`),
+    // Mover de carpeta (url) o retitular (nombre) — biblioteca de Documentación.
+    update: (id, body) => http.patch(`/archivos/${id}`, body),
     remove: (id) => http.del(`/archivos/${id}`),
   },
 
@@ -103,6 +105,8 @@ export const api = {
     guardarBotones: (botones) => http.put('/multivac/botones', { botones }),
     recetas: () => http.get('/multivac/recetas'),
     guardarRecetas: (recetas) => http.put('/multivac/recetas', { recetas }),
+    docsCarpetas: () => http.get('/multivac/docs-carpetas'),
+    guardarDocsCarpetas: (carpetas) => http.put('/multivac/docs-carpetas', { carpetas }),
     plantillaSensor: () => http.get('/multivac/plantilla-sensor'),
     guardarPlantillaSensor: (plantilla) => http.put('/multivac/plantilla-sensor', { plantilla }),
     leadsConPlanteo: () => http.get('/multivac/aprovisionamiento'),
