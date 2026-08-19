@@ -6,9 +6,24 @@ import { getImage, saveImage } from '../api/minio.js';
 // principal de esta solapa, así que el PDF se dibuja en canvas dentro de la
 // app y se ve igual en PC, Tauri y celular, sin descargar nada.
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// WORKER COMO .JS, NO COMO URL .MJS (fix 19/08, capturas del celu): con
+// `?url` el build emitía assets/pdf.worker…MJS y nginx en producción no tiene
+// tipo MIME para .mjs → lo sirve como binario y el navegador rechaza el
+// módulo ("Setting up fake worker failed: Failed to fetch dynamically
+// imported module"). En PC (Tauri) andaba porque los assets se sirven
+// localmente sin pasar por nginx. Con `?worker` Vite empaqueta el worker como
+// chunk .js común y lo instancia él mismo — sin depender del MIME de .mjs.
+import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+// Singleton perezoso: el worker se crea recién al abrir el primer PDF (no al
+// entrar a AutonomIA). Si el navegador no puede crearlo, pdf.js sigue en el
+// hilo principal (más lento pero funcional).
+let workerCreado = false;
+function asegurarWorkerPdf() {
+  if (workerCreado) return;
+  workerCreado = true;
+  try { pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker(); } catch { /* fallback main thread */ }
+}
 
 // Los PDF viven en el MISMO lugar que los binarios de firmware: el gateway
 // storageov → MinIO (que digiere PDFs sin drama — es el formato que usamos
@@ -220,6 +235,7 @@ export default function MultivacDocs() {
   const abrir = async (doc) => {
     setDocSel(doc); setEscala(1); setVisor({ estado: 'cargando' });
     try {
+      asegurarWorkerPdf();
       const objUrl = await getImage(doc.key);
       const data = await (await fetch(objUrl)).arrayBuffer();
       URL.revokeObjectURL(objUrl);
