@@ -178,6 +178,16 @@ export const api = {
     aprobar: (id, body) => http.post(`/deseos/${id}/aprobar`, body),
     del: (id) => http.del(`/deseos/${id}`),
   },
+
+  // Inbox → Tickets (20/08): mini sistema espejo de la Mesa de ayuda.
+  tickets: {
+    list: (query) => http.get('/tickets', query),
+    get: (id) => http.get(`/tickets/${id}`),
+    create: (body) => http.post('/tickets', body),
+    update: (id, body) => http.patch(`/tickets/${id}`, body),
+    mensaje: (id, texto) => http.post(`/tickets/${id}/mensajes`, { texto }),
+    del: (id) => http.del(`/tickets/${id}`),
+  },
   etiquetas: {
     sugerencias: () => http.get('/etiquetas/sugerencias'),
     uso: (anio) => http.get('/etiquetas/uso', anio ? { anio } : undefined),

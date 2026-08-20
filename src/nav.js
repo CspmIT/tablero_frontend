@@ -2,7 +2,7 @@
 // `roles`: si está, sólo esos tipos ven el ítem por defecto; si falta, todos.
 // El panel de Configuración puede otorgar (extra) u ocultar (ocultas) solapas
 // por usuario, por encima de estos defaults.
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Lightbulb, Settings, Wrench } from 'lucide-react';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Inbox, Settings, Wrench } from 'lucide-react';
 
 export const MODULOS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true, roles: ['manager', 'gerencial'] },
@@ -12,7 +12,9 @@ export const MODULOS = [
   { id: 'kanban', label: 'Kanban', icon: SquareKanban, listo: true },
   { id: 'objetivos', label: 'Objetivos', icon: Target, listo: true },
   { id: 'asistente', label: 'Asistente IA', icon: Sparkles, listo: true },
-  { id: 'deseos', label: 'Mis deseos', icon: Lightbulb, listo: true },
+  // 20/08: "Mis deseos" se amplía a "Inbox" (solapas Tickets + Mis deseos).
+  // El id NO cambia (permisos por id intactos — lección 07/08); solo label e icono.
+  { id: 'deseos', label: 'Inbox', icon: Inbox, listo: true },
   { id: 'visitas', label: 'Campo', icon: Wrench, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
 ];
 
