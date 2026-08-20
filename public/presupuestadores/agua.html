@@ -7801,7 +7801,7 @@ async function boot() {
       L.push("");
     }
     if (p.advertencias && p.advertencias.length) {
-      L.push("Consideraciones y advertencias:");
+      L.push("Verificaciones previstas en campo:");
       p.advertencias.forEach(function (a) { L.push("- " + a); });
     }
     return L.join("\n").trim() || "Generar el planteo con CriterIA o completar manualmente.";
@@ -7853,7 +7853,10 @@ async function boot() {
     var tc = tipoClienteActual();
     var imp = tc.importancia;
     var p = (state.criteria && state.criteria.planteo) || {};
-    if (p.advertencias && p.advertencias.length) imp += "\n\nPuntos de atención detectados en el relevamiento:\n" + p.advertencias.map(function (a) { return "- " + a; }).join("\n");
+    // 20/08 bis: las advertencias YA NO se inyectan acá — "Importancia del
+    // monitoreo en {cliente}" es la sección COMERCIAL del documento y una
+    // lista de problemas ahí espanta (feedback de Leonardo sobre Balnearia).
+    // Viven solo en la Propuesta, como "Verificaciones previstas en campo".
     var tipoPrevio = (state.documento && state.documento.tipoCliente) || "cooperativa";
     state.documento = {
       tipoCliente: tipoPrevio,
@@ -8078,27 +8081,40 @@ async function boot() {
       var marcaCoop = await cargarImg("marca_coopmorteros.png");
       var marcaTech = await cargarImg("marca_cooptech.png");
 
-      // Tipografía institucional (20/08): Poppins embebida desde /fonts (OFL).
-      // Si algo falla (sin internet al primer uso, archivo ausente) se sigue
-      // con helvetica: el PDF sale igual.
-      var FONT = "helvetica";
-      async function cargarFuente(archivo, estilo) {
+      // Tipografía (20/08, ajustada 20/08 bis por pedido de Leonardo):
+      // TÍTULOS y cromo en Poppins (identidad CoopTech); CUERPO de párrafos en
+      // Carlito 12pt negro justificado — Carlito es el clon MÉTRICO de Calibri
+      // con licencia libre (Calibri es propietaria de Microsoft y no se puede
+      // embeber). Si algo falla, se degrada con elegancia hasta helvetica.
+      var FONT = "helvetica";   // títulos / encabezado
+      var BODY = "helvetica";   // cuerpo (Carlito ≈ Calibri)
+      var BODY_PT = 12, LHF = 1.35;
+      var lineaH = BODY_PT * 0.352778 * LHF; // ≈5.7 mm por renglón
+      async function cargarFuente(archivo, familia, estilo) {
         var r = await fetch("fonts/" + archivo); if (!r.ok) return false;
         var bytes = new Uint8Array(await r.arrayBuffer());
         var bin = ""; var CH = 0x8000;
         for (var bi = 0; bi < bytes.length; bi += CH) bin += String.fromCharCode.apply(null, bytes.subarray(bi, bi + CH));
         doc.addFileToVFS(archivo, btoa(bin));
-        doc.addFont(archivo, "Poppins", estilo);
+        doc.addFont(archivo, familia, estilo);
         return true;
       }
       try {
-        var okF = await cargarFuente("Poppins-Regular.ttf", "normal");
+        var okF = await cargarFuente("Poppins-Regular.ttf", "Poppins", "normal");
         if (okF) {
-          await cargarFuente("Poppins-SemiBold.ttf", "bold");
-          await cargarFuente("Poppins-Italic.ttf", "italic");
+          await cargarFuente("Poppins-SemiBold.ttf", "Poppins", "bold");
+          await cargarFuente("Poppins-Italic.ttf", "Poppins", "italic");
           FONT = "Poppins";
         }
       } catch (eFont) { FONT = "helvetica"; }
+      try {
+        var okC = await cargarFuente("Carlito-Regular.ttf", "Carlito", "normal");
+        if (okC) {
+          await cargarFuente("Carlito-Bold.ttf", "Carlito", "bold");
+          await cargarFuente("Carlito-Italic.ttf", "Carlito", "italic");
+          BODY = "Carlito";
+        } else { BODY = FONT; }
+      } catch (eBody) { BODY = FONT; }
 
       // Sanitizado para el PDF (20/08): símbolos que la fuente no tiene se
       // degradan a ASCII (la flecha → salía como "!'" en producción).
@@ -8130,7 +8146,8 @@ async function boot() {
         // en 6.5pt (la del subtítulo) y todo lo que seguía a un salto de página
         // en medio de un párrafo salía enano, con interlineado doble y cortes
         // de línea calculados para otro tamaño (el PDF "roto" de Balnearia).
-        doc.setFont(FONT, "normal"); doc.setTextColor(30); doc.setFontSize(10.5);
+        // 20/08 bis: cuerpo = Carlito (Calibri) 12, NEGRO (pedido de Leonardo).
+        doc.setFont(BODY, "normal"); doc.setTextColor(0); doc.setFontSize(BODY_PT);
       }
       function nuevaPagina() {
         // Conservar el estado tipográfico a través del salto (fix 20/08).
@@ -8159,10 +8176,10 @@ async function boot() {
             var epi = (fotos[fi].caption || "").trim() ||
               [fotos[fi].origen, (fotos[fi].name || "").replace(/\.[a-z0-9]+$/i, "")].filter(Boolean).join(" — ");
             if (epi) {
-              doc.setFontSize(8.5); doc.setFont(FONT, "italic"); doc.setTextColor(90);
+              doc.setFontSize(8.5); doc.setFont(BODY, "italic"); doc.setTextColor(90);
               var cap = doc.splitTextToSize(txtPdf("Figura " + (++figN) + ": " + epi), W - MX * 2);
               cap.forEach(function (ln) { doc.text(ln, W / 2, y, { align: "center" }); y += 4; });
-              doc.setTextColor(30); doc.setFont(FONT, "normal"); doc.setFontSize(10.5);
+              doc.setTextColor(0); doc.setFont(BODY, "normal"); doc.setFontSize(BODY_PT);
             } else { figN++; }
             y += 5;
           } catch (e) { /* foto ilegible */ }
@@ -8202,18 +8219,36 @@ async function boot() {
         var sec = secciones[si];
         espacio(30); if (y > MT + 6 && si > 0) { nuevaPagina(); }
         indice.push({ titulo: sec.titulo, pagina: doc.getNumberOfPages() });
-        doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text(txtPdf(sec.titulo), MX, y);
+        doc.setFont(FONT, "bold"); doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text(txtPdf(sec.titulo), MX, y);
         doc.setDrawColor(140, 198, 63); doc.setLineWidth(.6); doc.line(MX, y + 2, MX + 60, y + 2);
-        doc.setTextColor(30); y += 10; doc.setFontSize(10.5);
+        // Cuerpo (pedido 20/08): Carlito (Calibri) 12, negro, párrafo JUSTIFICADO.
+        doc.setTextColor(0); y += 10; doc.setFontSize(BODY_PT); doc.setFont(BODY, "normal");
+        var anchoTx = W - MX * 2;
         var parrafos = String(sec.cuerpo || "").split("\n");
         parrafos.forEach(function (par) {
           if (!par.trim()) { y += 3; return; }
           var negrita = /^[A-ZÁÉÍÓÚÑ¿][^a-z]*$/.test(par.trim()) && par.trim().length < 60;
-          doc.setFont(FONT, negrita ? "bold" : "normal");
-          var lineas = doc.splitTextToSize(txtPdf(par), W - MX * 2);
-          lineas.forEach(function (ln) { espacio(6); doc.text(ln, MX, y); y += 5.4; });
+          doc.setFont(BODY, negrita ? "bold" : "normal");
+          var texto = txtPdf(par);
+          var lineas = doc.splitTextToSize(texto, anchoTx);
+          var alto = lineas.length * lineaH;
+          // El párrafo entra completo en lo que queda (o en una página nueva):
+          // se dibuja de una, justificado. Si es más largo que una página
+          // entera, cae al modo línea por línea (sin justificar).
+          if (alto <= H - MB - MT && y + alto > H - MB) nuevaPagina();
+          var justificable = lineas.length > 1 && !negrita;
+          if (y + alto <= H - MB && justificable) {
+            try {
+              doc.text(texto, MX, y, { maxWidth: anchoTx, align: "justify", lineHeightFactor: LHF });
+              y += alto;
+            } catch (eJ) {
+              lineas.forEach(function (ln) { espacio(lineaH + 0.5); doc.text(ln, MX, y); y += lineaH; });
+            }
+          } else {
+            lineas.forEach(function (ln) { espacio(lineaH + 0.5); doc.text(ln, MX, y); y += lineaH; });
+          }
         });
-        doc.setFont(FONT, "normal");
+        doc.setFont(BODY, "normal");
 
         // Fotos del relevamiento al final de su sección
         if (sec.id === "relevamiento" && d.incluirFotos) {
@@ -8226,9 +8261,9 @@ async function boot() {
             var mw = 150, mh = mw * prM.height / prM.width;
             espacio(mh + 16);
             doc.addImage(d.mapa, "JPEG", (W - mw) / 2, y, mw, mh); y += mh + 4;
-            doc.setFontSize(8.5); doc.setFont(FONT, "italic"); doc.setTextColor(90);
+            doc.setFontSize(8.5); doc.setFont(BODY, "italic"); doc.setTextColor(90);
             doc.text(txtPdf("Figura 1: Mapa de la localidad — " + ((window.__coopLeadMeta && window.__coopLeadMeta.razon) || "")), W / 2, y, { align: "center" });
-            doc.setTextColor(30); doc.setFont(FONT, "normal"); doc.setFontSize(10.5); y += 8;
+            doc.setTextColor(0); doc.setFont(BODY, "normal"); doc.setFontSize(BODY_PT); y += 8;
           } catch (eM) { /* mapa ilegible */ }
         }
       }
@@ -8243,17 +8278,17 @@ async function boot() {
       if (d.incluirFotos && fotosSel.length && !relevIncluida) {
         nuevaPagina();
         indice.push({ titulo: "Registro fotográfico del relevamiento", pagina: doc.getNumberOfPages() });
-        doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text("Registro fotográfico del relevamiento", MX, y);
+        doc.setFont(FONT, "bold"); doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text("Registro fotográfico del relevamiento", MX, y);
         doc.setDrawColor(140, 198, 63); doc.setLineWidth(.6); doc.line(MX, y + 2, MX + 60, y + 2);
-        doc.setTextColor(30); y += 10; doc.setFontSize(10.5);
+        doc.setTextColor(0); y += 10; doc.setFontSize(BODY_PT); doc.setFont(BODY, "normal");
         await volcarFotos(fotosSel);
       }
 
       // --- Contenido (segunda pasada): página 2, corrigiendo numeración ---
       doc.insertPage(2); doc.setPage(2); marco();
       var cy = MT;
-      doc.setFontSize(16); doc.setTextColor(21, 44, 84); doc.text("Contenido", MX, cy); cy += 12;
-      doc.setFontSize(10.5); doc.setTextColor(30);
+      doc.setFont(FONT, "bold"); doc.setFontSize(16); doc.setTextColor(21, 44, 84); doc.text("Contenido", MX, cy); cy += 12;
+      doc.setFont(BODY, "normal"); doc.setFontSize(11); doc.setTextColor(0);
       indice.forEach(function (it) {
         var pag = it.pagina + 1; // el índice insertado corre todo una página
         var titulo = txtPdf(it.titulo.length > 70 ? it.titulo.slice(0, 67) + "..." : it.titulo);

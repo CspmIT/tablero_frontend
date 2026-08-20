@@ -8,9 +8,10 @@
 // categoría de falla a/b/c (mandato M1) y vínculo a un ítem de grilla
 // (antidoble-conteo: manda el ticket, el ítem aporta las horas).
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { Paperclip, Send, Trash2, Link2, MessageSquare, Download } from 'lucide-react';
+import { Paperclip, Send, Trash2, Link2, MessageSquare, Download, Pencil } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { getImage, saveImage } from '../api/minio.js';
+import { comprimirImagen } from '../lib/comprimirImagen.js';
 
 const ESTADOS = {
   abierto:    { label: 'Abierto',    cls: 'bg-slate-100 text-slate-600',    dot: 'bg-slate-400' },
@@ -48,6 +49,10 @@ export default function TicketsInbox() {
   const [form, setForm] = useState(null);      // FORM_DEF | null
   const [detalle, setDetalle] = useState(null); // ticket abierto (panel)
   const [colabs, setColabs] = useState([]);
+  // Orden (20/08, feedback de Juan: las cargas retroactivas del WhatsApp
+  // desordenan la lista). Default: fecha REAL del reclamo (ocurridoAt||createdAt).
+  const [orden, setOrden] = useState('fecha'); // fecha | carga
+  const [errorGlobal, setErrorGlobal] = useState('');
 
   const cargar = useCallback(async () => {
     try { const r = await api.tickets.list(); setTickets(r.tickets || []); }
@@ -73,14 +78,17 @@ export default function TicketsInbox() {
       return [t.titulo, t.descripcion, t.solicitante, t.sector, `#${t.id}`].some((x) => norm(x).includes(n));
     }
     return true;
-  });
+  }).sort((a, b) => (orden === 'carga'
+    ? b.id - a.id
+    : String(b.ocurridoAt || b.createdAt || '').localeCompare(String(a.ocurridoAt || a.createdAt || '')) || b.id - a.id));
 
   const patch = async (t, body) => {
     try {
       const r = await api.tickets.update(t.id, body);
       setTickets((ls) => ls.map((x) => (x.id === t.id ? { ...x, ...r } : x)));
       if (detalle?.id === t.id) setDetalle((d) => ({ ...d, ...r }));
-    } catch (e) { alert(e.message || 'No se pudo actualizar'); }
+      return true;
+    } catch (e) { setErrorGlobal(e.message || 'No se pudo actualizar'); return false; }
   };
 
   return (
@@ -99,6 +107,11 @@ export default function TicketsInbox() {
         })}
         <span className="text-xs text-slate-400">{sinResolver} sin resolver</span>
         <div className="flex-1" />
+        <select value={orden} onChange={(e) => setOrden(e.target.value)} title="Ordenar la lista"
+          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-600">
+          <option value="fecha">Por fecha del reclamo</option>
+          <option value="carga">Por N° de carga</option>
+        </select>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar ticket…"
           className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-44" />
         <button onClick={() => setForm({ ...FORM_DEF })}
@@ -108,6 +121,12 @@ export default function TicketsInbox() {
         Digitalizá acá los reclamos que llegan por el WhatsApp de guardia o que el cliente interno no cargó en la Mesa de ayuda.
         Cuando la Mesa de ayuda exponga su API, los tickets del área Desarrollo van a entrar solos.
       </p>
+      {errorGlobal && (
+        <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700 flex items-center justify-between gap-2">
+          <span>{errorGlobal}</span>
+          <button onClick={() => setErrorGlobal('')} className="text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
 
       {tickets !== null && lista.length === 0 && (
         <div className="text-center text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl p-8">
@@ -188,8 +207,10 @@ function NuevoTicketModal({ api, form, setForm, onDone }) {
     try {
       const t = await api.tickets.create({ ...form, ovTipo: form.ovTipo || undefined, ovCausa: form.ovCausa || undefined, categoriaFalla: form.categoriaFalla || undefined, ocurridoAt: form.ocurridoAt || undefined });
       // Adjuntos: al gateway (misma vía que Documentación) + referencia con contexto 'ticket'.
-      for (const f of archivos.slice(0, 5)) {
+      // Las imágenes se comprimen antes de subir (20/08, sugerencia de Juan).
+      for (const f0 of archivos.slice(0, 5)) {
         try {
+          const f = await comprimirImagen(f0);
           const key = await saveImage(f);
           await api.archivos.create({ key, nombre: f.name, mime: f.type || null, tamano: f.size, contexto: 'ticket', url: `ticket:${t.id}` });
         } catch { setError((e) => e || 'El ticket se creó pero algún adjunto no se pudo subir — reintentá desde el detalle.'); }
@@ -323,6 +344,17 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
   const [adjuntos, setAdjuntos] = useState([]);
   const [confirmaBorrar, setConfirmaBorrar] = useState(false);
   const [vinculo, setVinculo] = useState(null); // null | { candidatos, cargando }
+  const [err, setErr] = useState('');
+  // Edición del texto (20/08, feedback de Juan: errores ortográficos): solo el
+  // autor que digitalizó + manager/gerencial (el backend acompaña con 403).
+  const puedeEditarTexto = esGestor || (t.creadoPorId != null && t.creadoPorId === me?.colaboradorId);
+  const [editando, setEditando] = useState(null); // null | { titulo, descripcion }
+  const guardarTexto = async () => {
+    const tit = editando.titulo.trim(), desc = editando.descripcion.trim();
+    if (!tit || !desc) { setErr('El título y la descripción no pueden quedar vacíos.'); return; }
+    const ok = await onPatch(t, { titulo: tit, descripcion: desc });
+    if (ok) { setEditando(null); setErr(''); }
+  };
 
   useEffect(() => {
     api.tickets.get(t.id).then((r) => setMensajes(r.mensajes || [])).catch(() => setMensajes([]));
@@ -337,24 +369,25 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
     try {
       const m = await api.tickets.mensaje(t.id, texto.trim());
       setMensajes((ms) => [...(ms || []), m]); setTexto('');
-    } catch (e) { alert(e.message || 'No se pudo enviar'); }
+    } catch (e) { setErr(e.message || 'No se pudo enviar'); }
   };
 
   const verAdjunto = async (a) => {
     try {
       const url = await getImage(a.key);
       const w = window.open(url, '_blank');
-      if (!w) alert('El navegador bloqueó la ventana — habilitá popups para ver el adjunto.');
-    } catch { alert('No se pudo descargar el adjunto'); }
+      if (!w) setErr('El navegador bloqueó la ventana — habilitá popups para ver el adjunto.');
+    } catch { setErr('No se pudo descargar el adjunto'); }
   };
 
   const subirAdjunto = async (files) => {
-    for (const f of Array.from(files || []).slice(0, 5 - adjuntos.length)) {
+    for (const f0 of Array.from(files || []).slice(0, 5 - adjuntos.length)) {
       try {
+        const f = await comprimirImagen(f0); // imágenes se achican antes de subir
         const key = await saveImage(f);
         const ref = await api.archivos.create({ key, nombre: f.name, mime: f.type || null, tamano: f.size, contexto: 'ticket', url: `ticket:${t.id}` });
         setAdjuntos((as) => [...as, ref]);
-      } catch (e) { alert(e.message || `No se pudo subir ${f.name}`); }
+      } catch (e) { setErr(e.message || `No se pudo subir ${f.name}`); }
     }
   };
 
@@ -375,7 +408,15 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
       <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-1">
-          <h3 className="font-semibold">#{t.id} · {t.titulo}</h3>
+          <h3 className="font-semibold flex items-center gap-2 min-w-0">
+            <span className="break-words">#{t.id} · {t.titulo}</span>
+            {puedeEditarTexto && !editando && (
+              <button onClick={() => setEditando({ titulo: t.titulo, descripcion: t.descripcion })}
+                title="Corregir título y descripción" className="text-slate-300 hover:text-coop-azul shrink-0">
+                <Pencil size={14} />
+              </button>
+            )}
+          </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
         <p className="text-xs text-slate-400 mb-3">
@@ -383,7 +424,26 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
           {' '}{dstr(t.ocurridoAt || t.createdAt)} · {t.tipo} · prioridad {t.prioridad}
           {t.creadoPor ? ` · digitalizó ${t.creadoPor}` : ''}
         </p>
-        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words bg-slate-50 border border-slate-100 rounded-lg p-3 mb-3">{t.descripcion}</p>
+        {err && (
+          <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700 flex items-center justify-between gap-2">
+            <span>{err}</span>
+            <button onClick={() => setErr('')} className="text-red-400 hover:text-red-600">✕</button>
+          </div>
+        )}
+        {editando ? (
+          <div className="border border-coop-azul/40 rounded-lg p-3 mb-3 space-y-2 bg-blue-50/30">
+            <input value={editando.titulo} onChange={(e) => setEditando((ed) => ({ ...ed, titulo: e.target.value }))}
+              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-medium" placeholder="Título" />
+            <textarea value={editando.descripcion} onChange={(e) => setEditando((ed) => ({ ...ed, descripcion: e.target.value }))}
+              rows={5} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" placeholder="Descripción" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setEditando(null); setErr(''); }} className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-500">Cancelar</button>
+              <button onClick={guardarTexto} className="px-3 py-1 text-xs rounded-lg bg-coop-azul text-white">Guardar</button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-700 whitespace-pre-wrap break-words bg-slate-50 border border-slate-100 rounded-lg p-3 mb-3">{t.descripcion}</p>
+        )}
         {t.copiarA && <p className="text-xs text-slate-400 mb-3">Copiar a: {t.copiarA}</p>}
 
         {/* Estado + asignación */}
@@ -504,7 +564,7 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
             {confirmaBorrar ? (
               <span className="text-xs text-red-600 flex items-center gap-2">
                 ¿Borrar el ticket #{t.id} y sus mensajes?
-                <button onClick={async () => { try { await api.tickets.del(t.id); onDelete(); } catch (e) { alert(e.message); } }}
+                <button onClick={async () => { try { await api.tickets.del(t.id); onDelete(); } catch (e) { setErr(e.message || 'No se pudo borrar'); } }}
                   className="bg-red-600 text-white rounded px-2 py-1">Sí, borrar</button>
                 <button onClick={() => setConfirmaBorrar(false)} className="text-slate-500 underline">Cancelar</button>
               </span>

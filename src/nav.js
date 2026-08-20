@@ -2,7 +2,7 @@
 // `roles`: si está, sólo esos tipos ven el ítem por defecto; si falta, todos.
 // El panel de Configuración puede otorgar (extra) u ocultar (ocultas) solapas
 // por usuario, por encima de estos defaults.
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Inbox, Settings, Wrench } from 'lucide-react';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Inbox, Settings, Wrench, Megaphone } from 'lucide-react';
 
 export const MODULOS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true, roles: ['manager', 'gerencial'] },
@@ -15,6 +15,10 @@ export const MODULOS = [
   // 20/08: "Mis deseos" se amplía a "Inbox" (solapas Tickets + Mis deseos).
   // El id NO cambia (permisos por id intactos — lección 07/08); solo label e icono.
   { id: 'deseos', label: 'Inbox', icon: Inbox, listo: true },
+  // Marketing (20/08): repositorio + planificación del material de los
+  // tercerizados (Booster). Ola 1 solo interna; cuando Booster tenga usuarios,
+  // se les otorga por el panel de permisos (extra por id).
+  { id: 'marketing', label: 'Marketing', icon: Megaphone, listo: true, roles: ['manager', 'gerencial', 'collaborator'] },
   { id: 'visitas', label: 'Campo', icon: Wrench, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
 ];
 
