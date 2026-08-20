@@ -35,6 +35,15 @@ function asegurarWorkerPdf() {
 const CONTEXTO = 'multivac_doc';
 const SIN_CARPETA = '(sin carpeta)';
 
+// Comprimidos (20/08, pedido de Leonardo): los protocolos con mucha
+// documentación (DLMS COSEM, DNP3) conviene subirlos como .zip/.rar enteros.
+// Viajan por la misma vía que los binarios de firmware (el gateway digiere
+// cualquier binario); no tienen visor — se descargan.
+const esComprimido = (nombre) => /\.(zip|rar|7z)$/i.test(String(nombre || ''));
+const esPdf = (nombre) => /\.pdf$/i.test(String(nombre || ''));
+const MIME_POR_EXT = { pdf: 'application/pdf', zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed' };
+const mimeDe = (nombre) => MIME_POR_EXT[(String(nombre || '').split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
+
 const fmtTam = (n) => {
   if (n == null) return '—';
   if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -186,12 +195,25 @@ export default function MultivacDocs() {
   const subir = async () => {
     const f = archivoSel;
     if (!f) return;
-    if (!/\.pdf$/i.test(f.name)) { setSubida({ err: 'Solo PDF en esta biblioteca.' }); return; }
+    if (!esPdf(f.name) && !esComprimido(f.name)) { setSubida({ err: 'Esta biblioteca acepta PDF y comprimidos (.zip, .rar, .7z).' }); return; }
     setSubida({ txt: 'Subiendo al almacenamiento…' });
     try {
       const buf = await f.arrayBuffer();
       const sha256 = await sha256Hex(buf);
-      const key = await saveImage(f);
+      // Plan A: subir tal cual. Plan B (mismo patrón probado de los releases
+      // de firmware): el gateway storageov nació para imágenes y puede
+      // rechazar extensiones como .zip/.rar — se reintenta el MISMO contenido
+      // byte a byte camuflado como .pdf solo para atravesarlo (el nombre real
+      // queda en la referencia y la descarga usa esa extensión). La
+      // verificación de ida y vuelta garantiza que nada se alteró.
+      let key;
+      try {
+        key = await saveImage(f);
+      } catch (e1) {
+        if (!esComprimido(f.name)) throw e1;
+        const camuflado = new File([buf], f.name + '.pdf', { type: 'application/pdf' });
+        key = await saveImage(camuflado);
+      }
       // Verificación de ida y vuelta (mismo patrón que los releases de
       // firmware): se baja lo recién subido y se compara la huella — si el
       // gateway alteró un bit, no se publica la referencia.
@@ -200,17 +222,21 @@ export default function MultivacDocs() {
       const vuelta = await (await fetch(objUrl)).arrayBuffer();
       URL.revokeObjectURL(objUrl);
       if (await sha256Hex(vuelta) !== sha256) {
-        throw new Error('El almacenamiento devolvió el PDF alterado (huella distinta). No se publicó — avisar a Juan (gateway storageov).');
+        throw new Error('El almacenamiento devolvió el archivo alterado (huella distinta). No se publicó — avisar a Juan (gateway storageov).');
       }
-      await api.archivos.create({ key, nombre: (titulo.trim() || f.name), mime: 'application/pdf', tamano: f.size, contexto: CONTEXTO, url: carpetaSubida || undefined });
+      // El título visible conserva la extensión real (el nombre de descarga sale de ahí).
+      const ext = (f.name.split('.').pop() || '').toLowerCase();
+      let nombreVisible = titulo.trim() || f.name;
+      if (titulo.trim() && !new RegExp(`\\.${ext}$`, 'i').test(nombreVisible)) nombreVisible += `.${ext}`;
+      await api.archivos.create({ key, nombre: nombreVisible, mime: mimeDe(f.name), tamano: f.size, contexto: CONTEXTO, url: carpetaSubida || undefined });
       setArchivoSel(null); setTitulo('');
       if (inputRef.current) inputRef.current.value = '';
-      setSubida({ txt: `✓ "${titulo.trim() || f.name}" publicado${carpetaSubida ? ` en "${carpetaSubida}"` : ' en la biblioteca'}.`, ok: true });
+      setSubida({ txt: `✓ "${nombreVisible}" publicado${carpetaSubida ? ` en "${carpetaSubida}"` : ' en la biblioteca'}.`, ok: true });
       cargar();
     } catch (e) {
       const msg = /413|entity too large|Failed to fetch/i.test(e.message || '')
-        ? `${e.message} — probablemente el PDF supera el límite del gateway de almacenamiento (pedir a Juan subir client_max_body_size).`
-        : (e.message || 'No se pudo subir el PDF');
+        ? `${e.message} — probablemente el archivo supera el límite del gateway de almacenamiento (pedir a Juan subir client_max_body_size; los zip de protocolos suelen pesar más que un PDF).`
+        : (e.message || 'No se pudo subir el archivo');
       setSubida({ err: msg });
     }
   };
@@ -245,7 +271,10 @@ export default function MultivacDocs() {
       const objUrl = await getImage(doc.key);
       const a = document.createElement('a');
       a.href = objUrl;
-      a.download = /\.pdf$/i.test(doc.nombre) ? doc.nombre : `${doc.nombre}.pdf`;
+      // Nombre de descarga: el visible si ya trae extensión; si no, la extensión
+      // real sale de la key subida (los zip no deben bajar como .pdf).
+      const extKey = (String(doc.key || '').split('.').pop() || 'pdf').toLowerCase();
+      a.download = /\.[a-z0-9]{2,4}$/i.test(doc.nombre) ? doc.nombre : `${doc.nombre}.${extKey}`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
       setDescarga({ id: doc.id, estado: 'ok' });
@@ -257,13 +286,15 @@ export default function MultivacDocs() {
   };
   const btnDescarga = (doc, compacto = false) => (
     <button onClick={(ev) => { ev.stopPropagation(); descargar(doc); }} disabled={descarga?.estado === 'bajando'}
-      title="Descargar el PDF"
+      title="Descargar el archivo"
       className="px-2 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40 whitespace-nowrap">
-      {descarga?.id === doc.id ? (descarga.estado === 'bajando' ? '…' : '✓') : (compacto ? '⬇' : '⬇ PDF')}
+      {descarga?.id === doc.id ? (descarga.estado === 'bajando' ? '…' : '✓') : (compacto ? '⬇' : (esComprimido(doc.nombre) || esComprimido(doc.key) ? '⬇ ZIP' : '⬇ PDF'))}
     </button>
   );
 
   const abrir = async (doc) => {
+    // Los comprimidos no tienen visor: el click descarga directo.
+    if (esComprimido(doc.nombre) || esComprimido(doc.key)) { descargar(doc); return; }
     setDocSel(doc); setEscala(1); setVisor({ estado: 'cargando' });
     try {
       asegurarWorkerPdf();
@@ -359,9 +390,9 @@ export default function MultivacDocs() {
       {/* ---- 1 · Subir documentación (todos) ---- */}
       <div className="bg-white border border-slate-200 rounded-xl p-4">
         <h3 className="text-sm font-semibold text-slate-700 mb-2">1 · Subir documentación</h3>
-        <p className="text-xs text-slate-500 mb-3">Manuales, hojas de datos y guías de uso frecuente, en PDF. Quedan compartidos para todo el equipo (también desde el celular). Ordenar y eliminar queda reservado a la conducción.</p>
+        <p className="text-xs text-slate-500 mb-3">Manuales, hojas de datos y guías de uso frecuente en PDF, o el <b>comprimido entero</b> de un protocolo (.zip/.rar — ej: DLMS COSEM, DNP3). Quedan compartidos para todo el equipo (también desde el celular); los comprimidos se descargan, los PDF se ven acá mismo. Ordenar y eliminar queda reservado a la conducción.</p>
         <div className="flex flex-wrap items-center gap-2">
-          <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(e) => { setArchivoSel(e.target.files?.[0] || null); setSubida(null); }}
+          <input ref={inputRef} type="file" accept="application/pdf,.pdf,.zip,.rar,.7z" onChange={(e) => { setArchivoSel(e.target.files?.[0] || null); setSubida(null); }}
             className="text-xs text-slate-600 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-slate-300 file:bg-white file:text-slate-600 file:text-xs" />
           <input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Título visible (opcional)"
             className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-52" />
@@ -371,7 +402,9 @@ export default function MultivacDocs() {
             {todasCarpetas.map((c) => <option key={c} value={c}>📁 {c}</option>)}
           </select>
           <button onClick={subir} disabled={!archivoSel || (subida && subida.txt && !subida.ok)}
-            className="px-4 py-1.5 text-sm rounded-lg bg-coop-azul text-white disabled:opacity-40">Subir PDF</button>
+            className="px-4 py-1.5 text-sm rounded-lg bg-coop-azul text-white disabled:opacity-40">
+            {archivoSel && esComprimido(archivoSel.name) ? 'Subir comprimido' : 'Subir PDF'}
+          </button>
         </div>
         {subida?.txt && <p className={`text-xs mt-2 ${subida.ok ? 'text-green-600' : 'text-slate-500'}`}>{subida.txt}</p>}
         {subida?.err && <p className="text-xs mt-2 text-red-600">{subida.err}</p>}
@@ -428,8 +461,9 @@ export default function MultivacDocs() {
           <ul className="divide-y divide-slate-100">
             {[...visibles].reverse().map((d) => (
               <li key={d.id} className="py-2 flex flex-wrap items-center gap-2">
-                <button onClick={() => abrir(d)} className="text-sm text-coop-azul hover:underline text-left flex-1 min-w-[12rem] truncate" title={d.nombre}>
-                  📄 {d.nombre}
+                <button onClick={() => abrir(d)} className="text-sm text-coop-azul hover:underline text-left flex-1 min-w-[12rem] truncate"
+                  title={esComprimido(d.nombre) || esComprimido(d.key) ? `${d.nombre} (comprimido: se descarga)` : d.nombre}>
+                  {esComprimido(d.nombre) || esComprimido(d.key) ? '🗜' : '📄'} {d.nombre}
                 </button>
                 {/* Con el buscador activo o mirando "Todas", cada resultado dice dónde vive. */}
                 {(nb || carpetaSel === null) && carpetaDe(d) && (
@@ -437,8 +471,12 @@ export default function MultivacDocs() {
                     className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200" title="Ir a la carpeta">📁 {carpetaDe(d)}</button>
                 )}
                 <span className="text-xs text-slate-400 whitespace-nowrap">{fmtTam(d.tamano)} · {fmtFecha(d.createdAt)}</span>
-                <button onClick={() => abrir(d)} className="px-3 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">Ver</button>
-                {btnDescarga(d, true)}
+                {esComprimido(d.nombre) || esComprimido(d.key)
+                  ? btnDescarga(d) /* sin visor para comprimidos: botón de descarga con etiqueta */
+                  : (<>
+                      <button onClick={() => abrir(d)} className="px-3 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">Ver</button>
+                      {btnDescarga(d, true)}
+                    </>)}
                 {puedeCurar && (
                   <select value={carpetaDe(d)} onChange={(e) => mover(d, e.target.value)} title="Mover a carpeta"
                     className="border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] bg-white text-slate-500 max-w-[9rem]">

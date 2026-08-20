@@ -7411,6 +7411,25 @@ async function boot() {
       guardarPlanteo(msg.resultado);
       cw.paso = 5; cw.error = null; pintar();
     }
+    // Corrección dirigida (20/08): los ajustes del validador CORRIGEN el
+    // planteo (equipamiento/asignación recalculados), no quedan de comentario.
+    if (msg.type === "criteria_corregir_resultado") {
+      cw.corrigiendo = false;
+      if (cw.timer) { clearInterval(cw.timer); cw.timer = null; }
+      if (msg.error) { cw.error = msg.error + ". El planteo anterior quedó intacto: podés reintentar."; pintar(); return; }
+      var plc = msg.resultado && msg.resultado.planteo;
+      if (plc && state.criteria) {
+        // Conservar las notas a terceros YA redactadas (viven fuera del esquema corregido).
+        plc.notas_a_terceros = (state.criteria.planteo && state.criteria.planteo.notas_a_terceros) || [];
+        state.criteria.planteo = plc;
+        state.criteria.metadata = state.criteria.metadata || {};
+        state.criteria.metadata.version = (state.criteria.metadata.version || 1) + 1;
+        state.criteria.metadata.estado = "borrador"; // corregido ⇒ revalidar
+        state.criteria.notasRevision = "";           // los ajustes ya se aplicaron
+        emitirSnapshot();
+      }
+      cw.error = null; pintar();
+    }
   });
 
   function guardarPlanteo(resultado) {
@@ -7487,6 +7506,20 @@ async function boot() {
     cw.timer = setInterval(function () { var n = $("#cw-segs"); if (n) n.textContent = Math.round((Date.now() - cw.t0) / 1000) + " s"; }, 500);
     armarPayload().then(function (pl) { post("criteria_generar", pl); });
   }
+  // 20/08: manda el planteo actual + las notas de revisión (y el feedback de
+  // la presentación, si lo hay) para que CriterIA lo CORRIJA de verdad.
+  function corregirPlanteo() {
+    var c = state.criteria; if (!c || !c.planteo) return;
+    var ajustes = String(c.notasRevision || "").trim();
+    var fb = (state.documento && state.documento.feedback) || null;
+    var hayFb = fb && Object.keys(fb).length > 0;
+    if (!ajustes && !hayFb) { alert("Escribí tus ajustes en «Notas de revisión» (o cargá reacciones en la presentación al cliente) antes de pedir la corrección."); return; }
+    emitirSnapshot();
+    cw.corrigiendo = true; cw.error = null; cw.t0 = Date.now(); pintar();
+    cw.timer = setInterval(function () { var n = $("#cw-segs"); if (n) n.textContent = Math.round((Date.now() - cw.t0) / 1000) + " s"; }, 500);
+    post("criteria_corregir", { relevamiento: relevamientoLiviano(), planteo: c.planteo, ajustes: ajustes, feedback: hayFb ? fb : null });
+  }
+
   function validar() {
     if (!state.criteria) return;
     var meta = window.__coopLeadMeta || {};
@@ -7634,7 +7667,15 @@ async function boot() {
       h5 += "<div class='cw-rev'><b>A REVISAR — CON LA INFORMACIÓN PROPORCIONADA NO ES POSIBLE GENERAR UN PLAN</b><ul style='margin:6px 0 0;padding-left:18px'>" +
         p.a_revisar.map(function (a) { return "<li><b>" + esc(a.aspecto) + "</b>: " + esc(a.que_falta) + " — " + esc(a.por_que_bloquea) + "</li>"; }).join("") + "</ul></div>";
     }
-    h5 += "<div class='cw-sec'>Notas de revisión (tuyas)</div><textarea rows='3' data-cwnotas style='width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font-size:13px'>" + esc(c.notasRevision || "") + "</textarea>";
+    h5 += "<div class='cw-sec'>Ajustes al planteo (tuyos)</div>" +
+      "<p style='margin:0 0 6px;color:#64748b;font-size:12px'>Escribí las correcciones como órdenes (ej: «son 3 bombas idénticas, dimensioná accesorios y TI por las 3») y tocá el botón: CriterIA <b>recalcula el planteo</b> — no las agrega como comentario.</p>" +
+      "<textarea rows='3' data-cwnotas placeholder='Ej: Son 3 bombas trifásicas idénticas; el caudalímetro es ultrasónico con 4-20 mA disponible, no hace falta conversor…' style='width:100%;border:1px solid #cbd5e1;border-radius:7px;padding:6px 8px;font-size:13px'>" + esc(c.notasRevision || "") + "</textarea>";
+    if (cw.corrigiendo) {
+      h5 += "<p style='margin:8px 0 0'>⚙️ CriterIA está corrigiendo el planteo… <b id='cw-segs'>0 s</b> <span class='cw-meta'>(suele demorar ~1 minuto)</span></p>";
+    } else {
+      h5 += "<button class='cw-btn pri' data-cwact='corregir' style='margin-top:8px'>↻ Aplicar mis ajustes al planteo</button>" +
+        ((state.documento && state.documento.feedback && Object.keys(state.documento.feedback).length) ? "<span class='cw-meta' style='margin-left:8px'>Incluye las reacciones de la presentación al cliente.</span>" : "");
+    }
     return h5;
   }
 
@@ -7760,7 +7801,7 @@ async function boot() {
       L.push("");
     }
     if (p.advertencias && p.advertencias.length) {
-      L.push("Consideraciones y advertencias:");
+      L.push("Verificaciones previstas en campo:");
       p.advertencias.forEach(function (a) { L.push("- " + a); });
     }
     return L.join("\n").trim() || "Generar el planteo con CriterIA o completar manualmente.";
@@ -7812,7 +7853,10 @@ async function boot() {
     var tc = tipoClienteActual();
     var imp = tc.importancia;
     var p = (state.criteria && state.criteria.planteo) || {};
-    if (p.advertencias && p.advertencias.length) imp += "\n\nPuntos de atención detectados en el relevamiento:\n" + p.advertencias.map(function (a) { return "- " + a; }).join("\n");
+    // 20/08 bis: las advertencias YA NO se inyectan acá — "Importancia del
+    // monitoreo en {cliente}" es la sección COMERCIAL del documento y una
+    // lista de problemas ahí espanta (feedback de Leonardo sobre Balnearia).
+    // Viven solo en la Propuesta, como "Verificaciones previstas en campo".
     var tipoPrevio = (state.documento && state.documento.tipoCliente) || "cooperativa";
     state.documento = {
       tipoCliente: tipoPrevio,
@@ -8037,24 +8081,110 @@ async function boot() {
       var marcaCoop = await cargarImg("marca_coopmorteros.png");
       var marcaTech = await cargarImg("marca_cooptech.png");
 
+      // Tipografía (20/08, ajustada 20/08 bis por pedido de Leonardo):
+      // TÍTULOS y cromo en Poppins (identidad CoopTech); CUERPO de párrafos en
+      // Carlito 12pt negro justificado — Carlito es el clon MÉTRICO de Calibri
+      // con licencia libre (Calibri es propietaria de Microsoft y no se puede
+      // embeber). Si algo falla, se degrada con elegancia hasta helvetica.
+      var FONT = "helvetica";   // títulos / encabezado
+      var BODY = "helvetica";   // cuerpo (Carlito ≈ Calibri)
+      var BODY_PT = 12, LHF = 1.35;
+      var lineaH = BODY_PT * 0.352778 * LHF; // ≈5.7 mm por renglón
+      async function cargarFuente(archivo, familia, estilo) {
+        var r = await fetch("fonts/" + archivo); if (!r.ok) return false;
+        var bytes = new Uint8Array(await r.arrayBuffer());
+        var bin = ""; var CH = 0x8000;
+        for (var bi = 0; bi < bytes.length; bi += CH) bin += String.fromCharCode.apply(null, bytes.subarray(bi, bi + CH));
+        doc.addFileToVFS(archivo, btoa(bin));
+        doc.addFont(archivo, familia, estilo);
+        return true;
+      }
+      try {
+        var okF = await cargarFuente("Poppins-Regular.ttf", "Poppins", "normal");
+        if (okF) {
+          await cargarFuente("Poppins-SemiBold.ttf", "Poppins", "bold");
+          await cargarFuente("Poppins-Italic.ttf", "Poppins", "italic");
+          FONT = "Poppins";
+        }
+      } catch (eFont) { FONT = "helvetica"; }
+      try {
+        var okC = await cargarFuente("Carlito-Regular.ttf", "Carlito", "normal");
+        if (okC) {
+          await cargarFuente("Carlito-Bold.ttf", "Carlito", "bold");
+          await cargarFuente("Carlito-Italic.ttf", "Carlito", "italic");
+          BODY = "Carlito";
+        } else { BODY = FONT; }
+      } catch (eBody) { BODY = FONT; }
+
+      // Sanitizado para el PDF (20/08): símbolos que la fuente no tiene se
+      // degradan a ASCII (la flecha → salía como "!'" en producción).
+      function txtPdf(s) {
+        return String(s == null ? "" : s)
+          .replace(/[→⇒➔➜]/g, "->").replace(/[←⇐]/g, "<-")
+          .replace(/[‘’‚′]/g, "'").replace(/[“”„″]/g, '"')
+          .replace(/[–—]/g, "-").replace(/…/g, "...")
+          .replace(/≥/g, ">=").replace(/≤/g, "<=").replace(/≈/g, "~")
+          .replace(/[•●▪◦]/g, "-").replace(/[✓✔]/g, "[ok]").replace(/⚠️?/g, "(!)")
+          .replace(/ /g, " ");
+      }
+
       function marco() {
         doc.setFillColor(21, 44, 84); doc.rect(0, 0, W, 20, "F");
         var tx = MX;
         if (marcaTech) { try { doc.addImage(marcaTech, "PNG", MX, 4, 12, 12); tx = MX + 15; } catch (e) { } }
-        doc.setTextColor(255); doc.setFontSize(13); doc.setFont("helvetica", "bold");
+        doc.setTextColor(255); doc.setFontSize(13); doc.setFont(FONT, "bold");
         doc.text("CoopTech", tx, 11);
-        doc.setFontSize(6.5); doc.setFont("helvetica", "normal");
+        doc.setFontSize(6.5); doc.setFont(FONT, "normal");
         doc.text("S O L U C I O N E S   4 . 0", tx, 15.5);
         if (marcaCoop) {
           try { var pr = doc.getImageProperties(marcaCoop); var lw = 34; doc.addImage(marcaCoop, "PNG", MX, H - 8 - lw * pr.height / pr.width, lw, lw * pr.height / pr.width); } catch (e) { }
         } else {
-          doc.setTextColor(30); doc.setFontSize(9); doc.setFont("helvetica", "bold");
+          doc.setTextColor(30); doc.setFontSize(9); doc.setFont(FONT, "bold");
           doc.text("COOPMORTEROS", MX, H - 10);
         }
-        doc.setFont("helvetica", "normal"); doc.setTextColor(30);
+        // Restaurar tipografía de CUERPO (fix 20/08): marco() dejaba la fuente
+        // en 6.5pt (la del subtítulo) y todo lo que seguía a un salto de página
+        // en medio de un párrafo salía enano, con interlineado doble y cortes
+        // de línea calculados para otro tamaño (el PDF "roto" de Balnearia).
+        // 20/08 bis: cuerpo = Carlito (Calibri) 12, NEGRO (pedido de Leonardo).
+        doc.setFont(BODY, "normal"); doc.setTextColor(0); doc.setFontSize(BODY_PT);
       }
-      function nuevaPagina() { doc.addPage(); marco(); y = MT; }
+      function nuevaPagina() {
+        // Conservar el estado tipográfico a través del salto (fix 20/08).
+        var _fs = doc.getFontSize(); var _f = doc.getFont();
+        doc.addPage(); marco();
+        try { doc.setFont(_f.fontName, _f.fontStyle); } catch (e) { doc.setFont(FONT, "normal"); }
+        doc.setFontSize(_fs); y = MT;
+      }
       function espacio(alto) { if (y + alto > H - MB) nuevaPagina(); }
+
+      // Volcado de fotos con epígrafe (20/08): compartido entre la sección
+      // Relevamiento y el Registro fotográfico. Si la foto no tiene epígrafe,
+      // usa su origen (zona › componente) + nombre de archivo como respaldo.
+      var figN = 0; // Figura 1 = mapa (si existe); se ajusta antes de usarlo
+      async function volcarFotos(fotos) {
+        for (var fi = 0; fi < fotos.length; fi++) {
+          try {
+            var data = await getPhotoData(fotos[fi].id); if (!data) continue;
+            var img = await reescalar(data, 1000); if (!img) img = data;
+            var fmtF = String(img).indexOf("image/png") >= 0 ? "PNG" : "JPEG";
+            var props = doc.getImageProperties(img);
+            var iw = 130, ih = iw * props.height / props.width;
+            if (ih > 110) { ih = 110; iw = ih * props.width / props.height; }
+            espacio(ih + 14);
+            doc.addImage(img, fmtF, (W - iw) / 2, y, iw, ih); y += ih + 4;
+            var epi = (fotos[fi].caption || "").trim() ||
+              [fotos[fi].origen, (fotos[fi].name || "").replace(/\.[a-z0-9]+$/i, "")].filter(Boolean).join(" — ");
+            if (epi) {
+              doc.setFontSize(8.5); doc.setFont(BODY, "italic"); doc.setTextColor(90);
+              var cap = doc.splitTextToSize(txtPdf("Figura " + (++figN) + ": " + epi), W - MX * 2);
+              cap.forEach(function (ln) { doc.text(ln, W / 2, y, { align: "center" }); y += 4; });
+              doc.setTextColor(0); doc.setFont(BODY, "normal"); doc.setFontSize(BODY_PT);
+            } else { figN++; }
+            y += 5;
+          } catch (e) { /* foto ilegible */ }
+        }
+      }
 
       // --- Portada oficial ---
       try {
@@ -8067,10 +8197,10 @@ async function boot() {
       // --- Carátula del proyecto ---
       nuevaPagina();
       doc.setFontSize(10); doc.text("MORTEROS, " + new Date().toLocaleDateString("es-AR", { day: "numeric", month: "long", year: "numeric" }), W - MX, y, { align: "right" }); y += 14;
-      doc.setFontSize(17); doc.setFont("helvetica", "bold");
-      var tit = doc.splitTextToSize("Proyecto: " + d.tituloProyecto, W - MX * 2);
+      doc.setFontSize(17); doc.setFont(FONT, "bold");
+      var tit = doc.splitTextToSize(txtPdf("Proyecto: " + d.tituloProyecto), W - MX * 2);
       doc.text(tit, MX, y); y += tit.length * 8 + 6;
-      doc.setFont("helvetica", "normal");
+      doc.setFont(FONT, "normal");
       if (d.logoCliente) {
         try {
           var fmtL = d.logoCliente.indexOf("image/png") >= 0 ? "PNG" : "JPEG";
@@ -8084,44 +8214,45 @@ async function boot() {
 
       // --- Secciones ---
       var secciones = d.secciones.filter(function (x) { return x.incluir && (x.vista || "ambas") !== "cliente"; });
+      figN = d.mapa ? 1 : 0; // la Figura 1 es el mapa cuando existe
       for (var si = 0; si < secciones.length; si++) {
         var sec = secciones[si];
         espacio(30); if (y > MT + 6 && si > 0) { nuevaPagina(); }
         indice.push({ titulo: sec.titulo, pagina: doc.getNumberOfPages() });
-        doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text(sec.titulo, MX, y);
+        doc.setFont(FONT, "bold"); doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text(txtPdf(sec.titulo), MX, y);
         doc.setDrawColor(140, 198, 63); doc.setLineWidth(.6); doc.line(MX, y + 2, MX + 60, y + 2);
-        doc.setTextColor(30); y += 10; doc.setFontSize(10.5);
+        // Cuerpo (pedido 20/08): Carlito (Calibri) 12, negro, párrafo JUSTIFICADO.
+        doc.setTextColor(0); y += 10; doc.setFontSize(BODY_PT); doc.setFont(BODY, "normal");
+        var anchoTx = W - MX * 2;
         var parrafos = String(sec.cuerpo || "").split("\n");
         parrafos.forEach(function (par) {
           if (!par.trim()) { y += 3; return; }
           var negrita = /^[A-ZÁÉÍÓÚÑ¿][^a-z]*$/.test(par.trim()) && par.trim().length < 60;
-          doc.setFont("helvetica", negrita ? "bold" : "normal");
-          var lineas = doc.splitTextToSize(par, W - MX * 2);
-          lineas.forEach(function (ln) { espacio(6); doc.text(ln, MX, y); y += 5.4; });
+          doc.setFont(BODY, negrita ? "bold" : "normal");
+          var texto = txtPdf(par);
+          var lineas = doc.splitTextToSize(texto, anchoTx);
+          var alto = lineas.length * lineaH;
+          // El párrafo entra completo en lo que queda (o en una página nueva):
+          // se dibuja de una, justificado. Si es más largo que una página
+          // entera, cae al modo línea por línea (sin justificar).
+          if (alto <= H - MB - MT && y + alto > H - MB) nuevaPagina();
+          var justificable = lineas.length > 1 && !negrita;
+          if (y + alto <= H - MB && justificable) {
+            try {
+              doc.text(texto, MX, y, { maxWidth: anchoTx, align: "justify", lineHeightFactor: LHF });
+              y += alto;
+            } catch (eJ) {
+              lineas.forEach(function (ln) { espacio(lineaH + 0.5); doc.text(ln, MX, y); y += lineaH; });
+            }
+          } else {
+            lineas.forEach(function (ln) { espacio(lineaH + 0.5); doc.text(ln, MX, y); y += lineaH; });
+          }
         });
-        doc.setFont("helvetica", "normal");
+        doc.setFont(BODY, "normal");
 
         // Fotos del relevamiento al final de su sección
         if (sec.id === "relevamiento" && d.incluirFotos) {
-          var fotos = (cw.fotos || []).filter(function (f) { return f.sel; });
-          for (var fi = 0; fi < fotos.length; fi++) {
-            try {
-              var data = await getPhotoData(fotos[fi].id); if (!data) continue;
-              var img = await reescalar(data, 1000); if (!img) img = data;
-              var props = doc.getImageProperties(img);
-              var iw = 130, ih = iw * props.height / props.width;
-              if (ih > 110) { ih = 110; iw = ih * props.width / props.height; }
-              espacio(ih + 14);
-              doc.addImage(img, "JPEG", (W - iw) / 2, y, iw, ih); y += ih + 4;
-              if (fotos[fi].caption) {
-                doc.setFontSize(8.5); doc.setFont("helvetica", "italic"); doc.setTextColor(90);
-                var cap = doc.splitTextToSize("Figura " + (fi + (d.mapa ? 2 : 1)) + ": " + fotos[fi].caption, W - MX * 2);
-                cap.forEach(function (ln) { doc.text(ln, W / 2, y, { align: "center" }); y += 4; });
-                doc.setTextColor(30); doc.setFont("helvetica", "normal"); doc.setFontSize(10.5);
-              }
-              y += 5;
-            } catch (e) { /* foto ilegible */ }
-          }
+          await volcarFotos((cw.fotos || []).filter(function (f) { return f.sel; }));
         }
         y += 6;
         if (sec.id === "objetivo" && d.mapa) {
@@ -8130,21 +8261,37 @@ async function boot() {
             var mw = 150, mh = mw * prM.height / prM.width;
             espacio(mh + 16);
             doc.addImage(d.mapa, "JPEG", (W - mw) / 2, y, mw, mh); y += mh + 4;
-            doc.setFontSize(8.5); doc.setFont("helvetica", "italic"); doc.setTextColor(90);
-            doc.text("Figura 1: Mapa de la localidad — " + ((window.__coopLeadMeta && window.__coopLeadMeta.razon) || ""), W / 2, y, { align: "center" });
-            doc.setTextColor(30); doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); y += 8;
+            doc.setFontSize(8.5); doc.setFont(BODY, "italic"); doc.setTextColor(90);
+            doc.text(txtPdf("Figura 1: Mapa de la localidad — " + ((window.__coopLeadMeta && window.__coopLeadMeta.razon) || "")), W / 2, y, { align: "center" });
+            doc.setTextColor(0); doc.setFont(BODY, "normal"); doc.setFontSize(BODY_PT); y += 8;
           } catch (eM) { /* mapa ilegible */ }
         }
+      }
+
+      // --- Registro fotográfico (20/08) ---
+      // Antes las fotos SOLO salían dentro de una sección con id "relevamiento";
+      // si el documento no la incluía (caso Balnearia), el PDF iba sin fotos.
+      // Ahora, si hay fotos seleccionadas y no se volcaron, van en una sección
+      // propia al final, con su epígrafe (u origen+nombre como respaldo).
+      var fotosSel = (cw.fotos || []).filter(function (f) { return f.sel; });
+      var relevIncluida = secciones.some(function (s) { return s.id === "relevamiento"; });
+      if (d.incluirFotos && fotosSel.length && !relevIncluida) {
+        nuevaPagina();
+        indice.push({ titulo: "Registro fotográfico del relevamiento", pagina: doc.getNumberOfPages() });
+        doc.setFont(FONT, "bold"); doc.setFontSize(15); doc.setTextColor(21, 44, 84); doc.text("Registro fotográfico del relevamiento", MX, y);
+        doc.setDrawColor(140, 198, 63); doc.setLineWidth(.6); doc.line(MX, y + 2, MX + 60, y + 2);
+        doc.setTextColor(0); y += 10; doc.setFontSize(BODY_PT); doc.setFont(BODY, "normal");
+        await volcarFotos(fotosSel);
       }
 
       // --- Contenido (segunda pasada): página 2, corrigiendo numeración ---
       doc.insertPage(2); doc.setPage(2); marco();
       var cy = MT;
-      doc.setFontSize(16); doc.setTextColor(21, 44, 84); doc.text("Contenido", MX, cy); cy += 12;
-      doc.setFontSize(10.5); doc.setTextColor(30);
+      doc.setFont(FONT, "bold"); doc.setFontSize(16); doc.setTextColor(21, 44, 84); doc.text("Contenido", MX, cy); cy += 12;
+      doc.setFont(BODY, "normal"); doc.setFontSize(11); doc.setTextColor(0);
       indice.forEach(function (it) {
         var pag = it.pagina + 1; // el índice insertado corre todo una página
-        var titulo = it.titulo.length > 70 ? it.titulo.slice(0, 67) + "…" : it.titulo;
+        var titulo = txtPdf(it.titulo.length > 70 ? it.titulo.slice(0, 67) + "..." : it.titulo);
         doc.text(titulo, MX, cy);
         doc.text(String(pag), W - MX, cy, { align: "right" });
         doc.setDrawColor(200); doc.setLineDashPattern([0.5, 1.2], 0);
@@ -8645,6 +8792,7 @@ async function boot() {
     if (act === "regenerar") { cw.paso = 1; cw.error = null; cw.preguntas = null; cw.respuestas = {}; pintar(); }
     if (act === "guardar") { emitirSnapshot(); btn.textContent = "✓ Guardado"; setTimeout(function () { btn.textContent = "Guardar"; }, 1200); }
     if (act === "validar") { if (confirm("¿Validar el planteo? Queda registrado tu nombre y la fecha, y la versión se congela para el informe.")) validar(); }
+    if (act === "corregir") corregirPlanteo();
     if (act === "descargar") descargarPlanteoMd();
     if (act === "documento") abrirDocumento();
     if (act === "doc_volver") { cw.docAbierto = false; pintar(); }
