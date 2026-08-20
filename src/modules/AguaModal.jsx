@@ -45,6 +45,12 @@ export default function AguaModal({ open, lead, modo, estadoInicial, onAutoSave,
             .then((r) => win?.postMessage({ __coop: true, type: 'criteria_resultado', resultado: r }, '*'))
             .catch((e) => win?.postMessage({ __coop: true, type: 'criteria_resultado', error: [e?.message, e?.status && `HTTP ${e.status}`].filter(Boolean).join(' · ') || 'Error al generar el planteo' }, '*'));
           break;
+        // 20/08: corrección dirigida — los ajustes del validador corrigen el planteo.
+        case 'criteria_corregir':
+          api.criteria.corregir(msg.payload || {})
+            .then((r) => win?.postMessage({ __coop: true, type: 'criteria_corregir_resultado', resultado: r }, '*'))
+            .catch((e) => win?.postMessage({ __coop: true, type: 'criteria_corregir_resultado', error: [e?.message, e?.status && `HTTP ${e.status}`].filter(Boolean).join(' · ') || 'Error al corregir el planteo' }, '*'));
+          break;
       }
     }
     window.addEventListener('message', handler);
