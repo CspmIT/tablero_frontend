@@ -456,7 +456,16 @@ export default function MetricasOV() {
                   <tr key={t.itemId} className={`border-t border-slate-100 ${enEdicion ? 'bg-amber-50/50' : ''}`}>
                     <td className="px-2 py-1.5 whitespace-nowrap text-slate-500">{fmtFecha(t.fecha)}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">{t.colaborador}</td>
-                    <td className="px-2 py-1.5">{t.text}<div>{t.tags.map(chipTag)}</div></td>
+                    <td className="px-2 py-1.5">
+                      {t.text}
+                      {/* Fuente Tickets (20/08, Inbox): chip de origen */}
+                      {t.origen && t.origen !== 'grilla' && (
+                        <span className="ml-1 inline-block px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px]">
+                          {t.origen === 'ticket_whatsapp' ? 'Ticket · WhatsApp' : t.origen === 'ticket_mesa' ? 'Ticket · Mesa de ayuda' : 'Ticket'}
+                        </span>
+                      )}
+                      <div>{t.tags.map(chipTag)}</div>
+                    </td>
                     {/* Re-clasificación EN LA FILA (19/08): el ✎ convierte los
                         chips en selectores — sin volver a la bandeja. */}
                     <td className="px-2 py-1.5 whitespace-nowrap">
@@ -488,6 +497,10 @@ export default function MetricasOV() {
                             className="px-2 py-0.5 text-[11px] rounded border border-slate-300 text-slate-500 hover:bg-slate-50">No es de OV</button>
                           <button onClick={() => setEditando(null)} className="px-1.5 py-0.5 text-[11px] rounded text-slate-400 hover:text-slate-600">✕</button>
                         </span>
+                      ) : (t.origen && t.origen !== 'grilla') ? (
+                        // Los tickets del Inbox se re-clasifican allá (PATCH /tickets),
+                        // no por /analisis/ov/clasificar (que edita ítems de grilla).
+                        <span className="text-[10px] text-slate-300" title="Se clasifica desde Inbox → Tickets">Inbox</span>
                       ) : (
                         <button onClick={() => { setEditando(t.itemId); setBorrador({ tipo: t.ovTipo || '', causa: t.ovCausa || '' }); }}
                           title="Re-clasificar este ticket" className="px-1.5 py-0.5 text-[12px] rounded text-slate-400 hover:text-coop-azul hover:bg-slate-100">✎</button>

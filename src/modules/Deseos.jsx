@@ -17,7 +17,7 @@ const ESTADOS = {
 
 const dstr = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '');
 
-export default function Deseos() {
+export default function Deseos({ embebido = false }) { // embebido: dentro del Inbox (20/08) — sin título propio
   const { api, me } = useData();
   const esManager = me?.tipo === 'manager';
   const [proyectos, setProyectos] = useState([]);
@@ -59,11 +59,14 @@ export default function Deseos() {
   const lista = deseos || [];
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className={embebido ? 'max-w-4xl' : 'p-4 max-w-4xl mx-auto'}>
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-xl font-semibold text-coop-negro flex items-center gap-2">
-          <Lightbulb size={20} className="text-coop-naranja" /> Mis deseos
-        </h2>
+        {!embebido && (
+          <h2 className="text-xl font-semibold text-coop-negro flex items-center gap-2">
+            <Lightbulb size={20} className="text-coop-naranja" /> Mis deseos
+          </h2>
+        )}
+        {embebido && <span />}
         <div className="flex items-center gap-2">
           {esManager && (
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
