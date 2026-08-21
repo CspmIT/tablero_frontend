@@ -14,10 +14,20 @@
 // El binario vive en el gateway storageov → MinIO (misma vía que fotos y
 // firmwares). Subida con plan B de camuflaje .pdf si el gateway rechaza la
 // extensión (nació para imágenes; rechazó .bin con 500 el 12/08).
+//
+// PESADOS (21/08): arriba de 90 MB el archivo NO puede ir en un solo request
+// (Cloudflare rechaza con 413 todo lo que pase los 100 MB), así que va en trozos
+// de 32 MiB por el release 'marketing-releases' y se lee por URL directa, en
+// streaming. Ese camino queda marcado en la key ('release:...') y lo maneja
+// api/storageGrande.js — ojo que esas URLs son PÚBLICAS.
 import { useEffect, useRef, useState } from 'react';
 import { Megaphone } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { getImage, saveImage } from '../api/minio.js';
+// Archivos pesados (21/08): Cloudflare corta en 100 MB, así que arriba de 90 MB
+// la subida va en trozos por el release 'marketing-releases' y la lectura sale
+// por URL directa (streaming con range requests). Ver api/storageGrande.js.
+import { LIMITE_UNA_PASADA, subirEnPartes, esGrande, urlDirecta } from '../api/storageGrande.js';
 
 const CONTEXTO = 'marketing';
 
@@ -40,9 +50,10 @@ const CATS_MARCA = [
 // videos .mp4, imágenes .jpg; sumamos gif/webp y comprimidos por las dudas).
 const EXTS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'zip', 'rar', '7z'];
 const ACCEPT = EXTS.map((e) => `.${e}`).join(',');
-// Tope de subida (decisión 20/08): videos más pesados van por link externo.
-// El client_max_body_size de nginx (Juan, pendiente) puede cortar antes.
-const TOPE_MB = 100;
+// Tope de subida. El 20/08 eran 100 MB (el techo de Cloudflare) y los videos
+// más pesados iban por link externo; desde el 21/08 lo que pasa de 90 MB sube en
+// trozos de 32 MiB, así que el tope real es la paciencia: 500 MB son 16 requests.
+const TOPE_MB = 500;
 
 const extDe = (nombre) => (String(nombre || '').split('.').pop() || '').toLowerCase();
 const esImagen = (n) => ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extDe(n));
@@ -94,6 +105,8 @@ function Miniatura({ archivo }) {
   const [src, setSrc] = useState(null);
   useEffect(() => {
     let url = null, cancelado = false;
+    // Los pesados se sirven por URL directa: nada que bajar ni que revocar.
+    if (esGrande(archivo.key)) { setSrc(urlDirecta(archivo.key)); return undefined; }
     (async () => {
       try {
         url = await getImage(archivo.key);
@@ -148,13 +161,31 @@ export default function Marketing() {
     for (const f of lista) {
       if (!EXTS.includes(extDe(f.name))) { setSubida({ err: `"${f.name}": tipo no aceptado (${EXTS.join(', ')}).` }); return; }
       if (f.size > TOPE_MB * 1024 * 1024) {
-        setSubida({ err: `"${f.name}" pesa ${fmtTam(f.size)} — el tope es ${TOPE_MB} MB. Los videos pesados van por link externo (o pedile a Juan subir el límite del gateway).` });
+        setSubida({ err: `"${f.name}" pesa ${fmtTam(f.size)} — el tope es ${TOPE_MB} MB. Un archivo así conviene comprimirlo (para Feed, Historias o LinkedIn alcanza H.264 1080p) o dejarlo por link externo.` });
         return;
       }
     }
     for (const f of lista) {
       setSubida({ txt: `Subiendo "${f.name}"…` });
       try {
+        // PESADO (> 90 MB): en trozos de 32 MiB por el release, porque Cloudflare
+        // rechaza con 413 cualquier request que pase los 100 MB. No se baja de
+        // vuelta para comparar el SHA-256 (duplicaría la transferencia): el
+        // tamaño ensamblado que devuelve el gateway ya delata un trozo perdido.
+        if (f.size > LIMITE_UNA_PASADA) {
+          const { key } = await subirEnPartes(f, {
+            // El Content-Type del objeto final es el del primer trozo: si no va
+            // el real, el navegador no reproduce el video (lo baja).
+            mime: mimeDe(f.name),
+            onProgress: ({ parte, total, recuperando }) => setSubida({
+              txt: recuperando
+                ? `Subiendo "${f.name}" — recuperando el trozo ${parte} de ${total}…`
+                : `Subiendo "${f.name}" en partes — trozo ${parte} de ${total} (${Math.round(((parte - 1) / total) * 100)}%)…`,
+            }),
+          });
+          await api.archivos.create({ key, nombre: f.name, mime: mimeDe(f.name), tamano: f.size, contexto: CONTEXTO, url: ruta });
+          continue;
+        }
         const buf = await f.arrayBuffer();
         const sha256 = await sha256Hex(buf);
         // Plan A: tal cual. Plan B (patrón releases/Documentación): el gateway
@@ -180,7 +211,7 @@ export default function Marketing() {
         await api.archivos.create({ key, nombre: f.name, mime: mimeDe(f.name), tamano: f.size, contexto: CONTEXTO, url: ruta });
       } catch (e) {
         const msg = /413|entity too large|Failed to fetch/i.test(e.message || '')
-          ? `${e.message} — probablemente supera el límite del gateway (pedir a Juan subir client_max_body_size; con videos e imágenes de campaña es urgente).`
+          ? `${e.message} — el borde (Cloudflare) rechaza cualquier request de más de 100 MB. Los archivos de más de 90 MB tendrían que ir en trozos: si esto pasó con uno grande, es un bug, avisá a Juan.`
           : (e.message || `No se pudo subir "${f.name}"`);
         setSubida({ err: msg });
         cargar();
@@ -200,6 +231,13 @@ export default function Marketing() {
   const [descarga, setDescarga] = useState(null); // { id, estado }
   const descargar = async (a) => {
     if (descarga?.estado === 'bajando') return;
+    // Pesados: la URL directa se abre en una pestaña y la baja el navegador
+    // (progreso propio, sin cargar 200 MB en memoria). El atributo `download`
+    // no sirve acá: es cross-origin y el navegador lo ignora.
+    if (esGrande(a.key)) {
+      window.open(urlDirecta(a.key), '_blank', 'noopener');
+      return;
+    }
     setDescarga({ id: a.id, estado: 'bajando' });
     try {
       const objUrl = await getImage(a.key);
@@ -214,19 +252,42 @@ export default function Marketing() {
   };
 
   // ---------- Vista ampliada de imágenes (modal propio, sin visor externo) ----------
-  const [ampliada, setAmpliada] = useState(null); // { nombre, src }
+  const [ampliada, setAmpliada] = useState(null); // { nombre, src, directa? }
   const ampliar = async (a) => {
+    if (esGrande(a.key)) { setAmpliada({ nombre: a.nombre, src: urlDirecta(a.key), directa: true }); return; }
     try {
       const src = await getImage(a.key);
       setAmpliada({ nombre: a.nombre, src });
     } catch (e) { setError(e.message || 'No se pudo abrir la imagen'); }
   };
   const cerrarAmpliada = () => {
-    if (ampliada?.src) URL.revokeObjectURL(ampliada.src);
+    if (ampliada?.src && !ampliada.directa) URL.revokeObjectURL(ampliada.src); // la directa no es objectURL
     setAmpliada(null);
   };
 
+  // ---------- Reproductor de video (modal propio) ----------
+  // Los pesados se ven en STREAMING: el <video> pide rangos sobre la URL directa,
+  // arranca al instante y se puede adelantar. Los chicos (≤ 90 MB) siguen saliendo
+  // por el gateway con credenciales, así que hay que bajarlos a un objectURL.
+  const [video, setVideo] = useState(null); // { nombre, src, directa? }
+  const reproducir = async (a) => {
+    if (esGrande(a.key)) { setVideo({ nombre: a.nombre, src: urlDirecta(a.key), directa: true }); return; }
+    try {
+      setVideo({ nombre: a.nombre, src: null });
+      const src = await getImage(a.key);
+      setVideo({ nombre: a.nombre, src });
+    } catch (e) { setVideo(null); setError(e.message || 'No se pudo abrir el video'); }
+  };
+  const cerrarVideo = () => {
+    if (video?.src && !video.directa) URL.revokeObjectURL(video.src);
+    setVideo(null);
+  };
+
   // ---------- Borrado (manager/gerencial) con confirmación PROPIA (jamás confirm()) ----------
+  // OJO: borra la REFERENCIA, no el binario — el gateway no expone borrado de
+  // objetos (comprobado el 21/08: DELETE sin uploadId → 400). Para los pesados
+  // eso significa que el archivo sigue accesible por su URL pública aunque
+  // desaparezca de la vista; si hay que borrarlo de verdad, es a mano en MinIO.
   const [borrando, setBorrando] = useState(null); // id pidiendo confirmación
   const borrar = async (a) => {
     try { await api.archivos.remove(a.id); setBorrando(null); cargar(); }
@@ -238,6 +299,8 @@ export default function Marketing() {
     <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-50 group">
       {esImagen(a.nombre) ? (
         <button onClick={() => ampliar(a)} title="Ver la imagen" className="shrink-0"><Miniatura archivo={a} /></button>
+      ) : esVideo(a.nombre) ? (
+        <button onClick={() => reproducir(a)} title="Reproducir el video" className="shrink-0 w-9 h-9 flex items-center justify-center rounded bg-slate-100 text-slate-500 hover:bg-coop-azul/10 hover:text-coop-azul">▶</button>
       ) : (
         <span className="text-lg w-9 h-9 flex items-center justify-center shrink-0">{iconoDe(a.nombre)}</span>
       )}
@@ -344,7 +407,7 @@ export default function Marketing() {
             {mes !== mesHoy() && (
               <button onClick={() => setMes(mesHoy())} className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-coop-azul hover:text-coop-azul">Hoy</button>
             )}
-            <span className="text-xs text-slate-400 ml-2">Tope por archivo: {TOPE_MB} MB — videos más pesados, por link.</span>
+            <span className="text-xs text-slate-400 ml-2">Tope por archivo: {TOPE_MB} MB — arriba de 90 MB sube en partes (tarda, pero entra).</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             {CATS_PLAN.map((c) => <Zona key={c.id} cat={c} ruta={`plan/${mes}/${c.id}`} />)}
@@ -352,11 +415,29 @@ export default function Marketing() {
         </>
       ) : (
         <>
-          <p className="text-xs text-slate-400 mb-3">Material permanente de marca — no depende del mes. Tope por archivo: {TOPE_MB} MB.</p>
+          <p className="text-xs text-slate-400 mb-3">Material permanente de marca — no depende del mes. Tope por archivo: {TOPE_MB} MB (arriba de 90 MB sube en partes).</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             {CATS_MARCA.map((c) => <Zona key={c.id} cat={c} ruta={`marca/${c.id}`} />)}
           </div>
         </>
+      )}
+
+      {/* Reproductor propio: streaming para los pesados, objectURL para los chicos */}
+      {video && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={cerrarVideo}>
+          <div className="w-full max-w-4xl flex flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {video.src ? (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video src={video.src} controls autoPlay className="w-full max-h-[80vh] rounded-lg shadow-2xl bg-black" />
+            ) : (
+              <p className="text-white/70 text-sm py-12">Bajando el video…</p>
+            )}
+            <div className="flex items-center gap-3">
+              <p className="text-white/80 text-sm truncate max-w-[60vw]">{video.nombre}</p>
+              <button onClick={cerrarVideo} className="px-3 py-1 text-sm rounded-lg bg-white/90 text-slate-700">Cerrar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal propio de imagen ampliada */}
