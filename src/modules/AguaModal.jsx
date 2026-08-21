@@ -1,15 +1,93 @@
 import { useEffect, useRef } from 'react';
 import { useData } from '../data/DataContext.jsx';
+import { getImage, saveImage } from '../api/minio.js';
 
 // Aloja el presupuestador / relevamiento +Agua (asset autónomo) en un iframe.
-// Puente "__coop": modos relevamiento|presupuesto; las fotos viajan como data-URI
-// dentro del snapshot (el offload a MinIO queda como optimización futura).
+// Puente "__coop": modos relevamiento|presupuesto.
+//
+// IMÁGENES DEL DOCUMENTO AL GATEWAY (21/08, decisión de Leonardo sobre el punto 5
+// del doc de Juan — causa de fondo del crash MySQL 1038): el mapa de la localidad
+// y el logo del cliente se guardaban en base64 DENTRO del JSON del lead (390 KB la
+// fila de Balnearia) y cada autosave reescribía todo. Ahora el TABLERO (que tiene
+// las credenciales del gateway; el iframe es un asset estático y no las ve):
+//   · DESHIDRATA cada snapshot antes de guardarlo: sube mapa/logoCliente a MinIO
+//     (modelo Archivo, contexto 'agua_doc') y deja en el JSON solo `gw:<key>`.
+//     Cache por contenido: el mismo dataURL no se re-sube en cada autosave.
+//   · HIDRATA el estado antes de mandarlo al iframe: baja `gw:<key>` con getImage
+//     y lo convierte a dataURL — adentro del iframe todo sigue siendo base64, así
+//     que agua.html (y su PDF) NO SE TOCAN.
+//   · Compatibilidad: un lead viejo con base64 adentro sigue andando y se
+//     auto-migra al gateway en el primer guardado. Si el gateway falla, el
+//     snapshot se guarda como venía (gordo pero nunca se pierde).
+// agua.html ya comprime las FOTOS del relevamiento desde el origen; esto cubre
+// las dos imágenes del documento, que eran las que inflaban la fila del lead.
 export default function AguaModal({ open, lead, modo, estadoInicial, onAutoSave, onFinalizarRelevamiento, onPdfDescargado, onClose }) {
   const iframeRef = useRef(null);
   const { api, me } = useData();
+  // Cache dataURL→key (y key→dataURL al hidratar) para no re-subir en cada autosave.
+  const cacheRef = useRef(new Map());
 
   useEffect(() => {
     if (!open) return;
+    const cache = cacheRef.current;
+
+    const dataUrlDe = async (key) => {
+      const objUrl = await getImage(key);
+      const blob = await (await fetch(objUrl)).blob();
+      URL.revokeObjectURL(objUrl);
+      return await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(blob);
+      });
+    };
+
+    // gw:<key> → dataURL (para el iframe). Ante error, null (el doc queda sin esa imagen).
+    const hidratar = async (estado) => {
+      const doc = estado?.documento;
+      if (!doc) return estado;
+      const salida = { ...estado, documento: { ...doc } };
+      for (const campo of ['mapa', 'logoCliente']) {
+        const v = salida.documento[campo];
+        if (typeof v === 'string' && v.startsWith('gw:')) {
+          const key = v.slice(3);
+          try {
+            const data = await dataUrlDe(key);
+            salida.documento[campo] = data;
+            cache.set(data, key); // mismo contenido → misma key al guardar (cero re-subida)
+          } catch { salida.documento[campo] = null; }
+        }
+      }
+      return salida;
+    };
+
+    // dataURL → gw:<key> (para el lead). Ante error, deja el base64 como venía.
+    const deshidratar = async (snap) => {
+      const doc = snap?.documento;
+      if (!doc) return snap;
+      const salida = { ...snap, documento: { ...doc } };
+      for (const campo of ['mapa', 'logoCliente']) {
+        const v = salida.documento[campo];
+        if (typeof v === 'string' && v.startsWith('data:')) {
+          try {
+            let key = cache.get(v);
+            if (!key) {
+              const blob = await (await fetch(v)).blob();
+              const ext = /image\/png/.test(v.slice(0, 30)) ? 'png' : 'jpg';
+              const archivo = new File([blob], `${campo}_lead${lead?.id || 's'}.${ext}`, { type: blob.type || 'image/jpeg' });
+              key = await saveImage(archivo);
+              cache.set(v, key);
+              // Referencia para auditoría/limpieza futura (no bloquea si falla).
+              api.archivos.create({ key, nombre: archivo.name, mime: archivo.type, tamano: blob.size, contexto: 'agua_doc', url: lead?.id ? `lead:${lead.id}` : null }).catch(() => {});
+            }
+            salida.documento[campo] = `gw:${key}`;
+          } catch { /* gateway caído: viaja el base64 como siempre */ }
+        }
+      }
+      return salida;
+    };
+
     function handler(ev) {
       const msg = ev.data;
       if (!msg || msg.__coop !== true) return;
@@ -17,16 +95,19 @@ export default function AguaModal({ open, lead, modo, estadoInicial, onAutoSave,
       switch (msg.type) {
         case 'iframe_listo':
           if (lead) win?.postMessage({ __coop: true, type: 'precargar_datos', meta: { leadId: lead.id, razon: lead.organizacion || '', localidad: lead.ciudad || '', contacto: lead.contactoNombre || '', userId: me?.colaboradorId ?? me?.id ?? null, userNombre: me?.nombre || null } }, '*');
-          win?.postMessage({ __coop: true, type: 'cargar_estado', estado: estadoInicial || null, modo: modo || 'relevamiento' }, '*');
+          // El estado puede traer imágenes gw:<key> → se hidratan antes de entrar al iframe.
+          hidratar(estadoInicial || null)
+            .catch(() => estadoInicial || null)
+            .then((estado) => win?.postMessage({ __coop: true, type: 'cargar_estado', estado, modo: modo || 'relevamiento' }, '*'));
           break;
         case 'finalizar_relevamiento':
-          onFinalizarRelevamiento && onFinalizarRelevamiento(msg.snapshot || null);
+          deshidratar(msg.snapshot || null).then((s) => onFinalizarRelevamiento && onFinalizarRelevamiento(s));
           break;
         case 'pdf_descargado':
-          onPdfDescargado && onPdfDescargado(msg.snapshot || null, msg.totales || null);
+          deshidratar(msg.snapshot || null).then((s) => onPdfDescargado && onPdfDescargado(s, msg.totales || null));
           break;
         case 'snapshot':
-          onAutoSave && onAutoSave(msg.snapshot || null);
+          deshidratar(msg.snapshot || null).then((s) => onAutoSave && onAutoSave(s));
           break;
         // CriterIA: el iframe pide preguntas o generación; el tablero llama al
         // backend (único frente a Claude) y devuelve el resultado por el puente.
