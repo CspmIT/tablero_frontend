@@ -22,6 +22,7 @@ import ImportarGrilla from './modules/ImportarGrilla.jsx';
 import Asistente from './modules/Asistente.jsx';
 import Analisis from './modules/Analisis.jsx';
 import Inbox from './modules/Inbox.jsx'; // 20/08: Mis deseos → Inbox (solapas Tickets + Mis deseos)
+import Marketing from './modules/Marketing.jsx'; // 20/08: planificación + repositorio de marca
 import Configuracion from './modules/Configuracion.jsx';
 import { MODULOS, INFO, CONFIGURACION } from './nav.js';
 import Campo from './modules/Campo.jsx';
@@ -61,6 +62,7 @@ function Contenido({ activo }) {
   if (activo === 'asistente') return <Asistente />;
   if (activo === 'analisis') return <Analisis />;
   if (activo === 'deseos') return <Inbox />;
+  if (activo === 'marketing') return <Marketing />;
   if (activo === 'visitas') return <Campo />;
   if (activo === 'configuracion') return <Configuracion />;
   if (activo === 'importar') return <Importar />;

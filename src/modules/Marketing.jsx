@@ -1,0 +1,376 @@
+// Marketing (20/08) — botón principal del menú. Entorno de trabajo y
+// repositorio del material que hoy vive desparramado en el Drive de los
+// tercerizados (antes Afternoon, hoy Booster). Dos solapas:
+//   · Planificación — mes a mes (como la grilla), 4 categorías fijas que
+//     espejan las carpetas reales del Drive: Feed, Historia, LinkedIn, Mailing.
+//   · Marca — repositorio permanente: manual de marca, logos, videos, imágenes.
+// Ola 1 = SOLO archivos con drag & drop (decisión de Leonardo 20/08); el
+// calendario de publicaciones con ítems/estados queda para otra ola.
+// Diseño congelado: claude/Marketing_seccion_diseno_20_08.md
+//
+// CERO migraciones (patrón Documentación 18/08): referencia en el modelo
+// Archivo con contexto 'marketing'; la ubicación lógica viaja en `url`:
+//   plan/<YYYY-MM>/<categoria>   |   marca/<carpeta>
+// El binario vive en el gateway storageov → MinIO (misma vía que fotos y
+// firmwares). Subida con plan B de camuflaje .pdf si el gateway rechaza la
+// extensión (nació para imágenes; rechazó .bin con 500 el 12/08).
+import { useEffect, useRef, useState } from 'react';
+import { Megaphone } from 'lucide-react';
+import { useData } from '../data/DataContext.jsx';
+import { getImage, saveImage } from '../api/minio.js';
+
+const CONTEXTO = 'marketing';
+
+// Categorías de la planificación mensual (espejo de las carpetas del Drive).
+const CATS_PLAN = [
+  { id: 'feed', label: 'Feed', emoji: '🖼️' },
+  { id: 'historia', label: 'Historias', emoji: '📱' },
+  { id: 'linkedin', label: 'LinkedIn', emoji: '💼' },
+  { id: 'mailing', label: 'Mailing', emoji: '✉️' },
+];
+// Carpetas permanentes del repositorio de marca.
+const CATS_MARCA = [
+  { id: 'manual', label: 'Manual de marca', emoji: '📕' },
+  { id: 'logos', label: 'Logos', emoji: '🔷' },
+  { id: 'videos', label: 'Videos', emoji: '🎬' },
+  { id: 'imagenes', label: 'Imágenes', emoji: '🖼️' },
+];
+
+// Extensiones aceptadas (pedido de Leonardo: manual .pdf, logos .svg/.png,
+// videos .mp4, imágenes .jpg; sumamos gif/webp y comprimidos por las dudas).
+const EXTS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'zip', 'rar', '7z'];
+const ACCEPT = EXTS.map((e) => `.${e}`).join(',');
+// Tope de subida (decisión 20/08): videos más pesados van por link externo.
+// El client_max_body_size de nginx (Juan, pendiente) puede cortar antes.
+const TOPE_MB = 100;
+
+const extDe = (nombre) => (String(nombre || '').split('.').pop() || '').toLowerCase();
+const esImagen = (n) => ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extDe(n));
+const esVideo = (n) => extDe(n) === 'mp4';
+const esComprimido = (n) => ['zip', 'rar', '7z'].includes(extDe(n));
+const MIME_POR_EXT = {
+  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', mp4: 'video/mp4',
+  zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
+};
+const mimeDe = (n) => MIME_POR_EXT[extDe(n)] || 'application/octet-stream';
+const iconoDe = (n) => (esImagen(n) ? '🖼' : esVideo(n) ? '🎬' : esComprimido(n) ? '🗜' : extDe(n) === 'svg' ? '🔷' : '📄');
+
+const fmtTam = (n) => {
+  if (n == null) return '—';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+const fmtFecha = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-AR');
+};
+const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+const sha256Hex = async (buf) => {
+  const h = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, '0')).join('');
+};
+
+// Mes lógico 'YYYY-MM' ↔ etiqueta legible.
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const mesHoy = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+const mesLabel = (ym) => {
+  const [y, m] = String(ym).split('-').map(Number);
+  return `${MESES[(m || 1) - 1]} ${y}`;
+};
+const mesSumar = (ym, delta) => {
+  const [y, m] = String(ym).split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
+// Miniatura perezosa de imágenes: baja el objeto recién cuando la fila existe.
+function Miniatura({ archivo }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let url = null, cancelado = false;
+    (async () => {
+      try {
+        url = await getImage(archivo.key);
+        if (!cancelado) setSrc(url); else URL.revokeObjectURL(url);
+      } catch { /* sin miniatura: queda el icono */ }
+    })();
+    return () => { cancelado = true; if (url) URL.revokeObjectURL(url); };
+  }, [archivo.key]);
+  if (!src) return <span className="text-lg w-9 h-9 flex items-center justify-center">🖼</span>;
+  return <img src={src} alt="" className="w-9 h-9 rounded object-cover border border-slate-200" />;
+}
+
+export default function Marketing() {
+  const { api, me } = useData();
+  const puedeCurar = ['manager', 'gerencial'].includes(me?.tipo);
+
+  const [solapa, setSolapa] = useState('plan'); // plan | marca
+  const [mes, setMes] = useState(mesHoy());
+  const [archivos, setArchivos] = useState(null); // null = cargando (todas las refs del contexto)
+  const [error, setError] = useState('');
+  const [busca, setBusca] = useState('');
+
+  const cargar = async () => {
+    try {
+      const r = await api.archivos.list({ contexto: CONTEXTO });
+      setArchivos(Array.isArray(r?.data) ? r.data : []);
+      setError('');
+    } catch (e) { setArchivos([]); setError(e.message || 'No se pudo cargar Marketing'); }
+  };
+  useEffect(() => { cargar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  // Ubicación lógica: 'plan/2026-08/feed' | 'marca/logos'.
+  const rutaDe = (a) => String(a.url || '').trim();
+  const enRuta = (ruta) => (archivos || []).filter((a) => rutaDe(a) === ruta)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+  // Buscador global: con texto, cruza meses, categorías y marca.
+  const nb = norm(busca.trim());
+  const resultados = nb
+    ? (archivos || []).filter((a) => norm(a.nombre).includes(nb) || norm(rutaDe(a)).includes(nb))
+    : null;
+
+  // ---------- Subida (todos pueden subir; curaduría manager/gerencial) ----------
+  const [subida, setSubida] = useState(null); // { txt, ok? } | { err }
+  const [arrastrando, setArrastrando] = useState(null); // ruta destino resaltada
+  const inputRef = useRef(null);
+  const rutaInputRef = useRef(null); // adónde caen los archivos del picker
+
+  const subirArchivos = async (files, ruta) => {
+    const lista = Array.from(files || []).filter(Boolean);
+    if (!lista.length) return;
+    for (const f of lista) {
+      if (!EXTS.includes(extDe(f.name))) { setSubida({ err: `"${f.name}": tipo no aceptado (${EXTS.join(', ')}).` }); return; }
+      if (f.size > TOPE_MB * 1024 * 1024) {
+        setSubida({ err: `"${f.name}" pesa ${fmtTam(f.size)} — el tope es ${TOPE_MB} MB. Los videos pesados van por link externo (o pedile a Juan subir el límite del gateway).` });
+        return;
+      }
+    }
+    for (const f of lista) {
+      setSubida({ txt: `Subiendo "${f.name}"…` });
+      try {
+        const buf = await f.arrayBuffer();
+        const sha256 = await sha256Hex(buf);
+        // Plan A: tal cual. Plan B (patrón releases/Documentación): el gateway
+        // nació para imágenes — si rechaza la extensión (.svg/.mp4/.zip), se
+        // reintenta el MISMO contenido camuflado como .pdf; el nombre real
+        // queda en la referencia y la descarga restituye la extensión.
+        let key;
+        try {
+          key = await saveImage(f);
+        } catch (e1) {
+          if (esImagen(f.name)) throw e1; // una imagen rechazada es otro problema
+          const camuflado = new File([buf], f.name + '.pdf', { type: 'application/pdf' });
+          key = await saveImage(camuflado);
+        }
+        // Verificación de ida y vuelta: huella igual o no se publica.
+        setSubida({ txt: `Verificando "${f.name}"…` });
+        const objUrl = await getImage(key);
+        const vuelta = await (await fetch(objUrl)).arrayBuffer();
+        URL.revokeObjectURL(objUrl);
+        if (await sha256Hex(vuelta) !== sha256) {
+          throw new Error('El almacenamiento devolvió el archivo alterado (huella distinta). No se publicó — avisar a Juan (gateway storageov).');
+        }
+        await api.archivos.create({ key, nombre: f.name, mime: mimeDe(f.name), tamano: f.size, contexto: CONTEXTO, url: ruta });
+      } catch (e) {
+        const msg = /413|entity too large|Failed to fetch/i.test(e.message || '')
+          ? `${e.message} — probablemente supera el límite del gateway (pedir a Juan subir client_max_body_size; con videos e imágenes de campaña es urgente).`
+          : (e.message || `No se pudo subir "${f.name}"`);
+        setSubida({ err: msg });
+        cargar();
+        return;
+      }
+    }
+    setSubida({ txt: `✓ ${lista.length === 1 ? `"${lista[0].name}" publicado` : `${lista.length} archivos publicados`}.`, ok: true });
+    cargar();
+  };
+
+  const abrirPicker = (ruta) => {
+    rutaInputRef.current = ruta;
+    if (inputRef.current) { inputRef.current.value = ''; inputRef.current.click(); }
+  };
+
+  // ---------- Descarga (objectURL + <a download>, patrón Documentación) ----------
+  const [descarga, setDescarga] = useState(null); // { id, estado }
+  const descargar = async (a) => {
+    if (descarga?.estado === 'bajando') return;
+    setDescarga({ id: a.id, estado: 'bajando' });
+    try {
+      const objUrl = await getImage(a.key);
+      const el = document.createElement('a');
+      el.href = objUrl;
+      el.download = /\.[a-z0-9]{2,4}$/i.test(a.nombre) ? a.nombre : `${a.nombre}.${extDe(a.key) || 'bin'}`;
+      document.body.appendChild(el); el.click(); el.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+      setDescarga({ id: a.id, estado: 'ok' });
+      setTimeout(() => setDescarga((d) => (d?.id === a.id && d.estado === 'ok' ? null : d)), 4000);
+    } catch (e) { setDescarga(null); setError(e.message || 'No se pudo descargar'); }
+  };
+
+  // ---------- Vista ampliada de imágenes (modal propio, sin visor externo) ----------
+  const [ampliada, setAmpliada] = useState(null); // { nombre, src }
+  const ampliar = async (a) => {
+    try {
+      const src = await getImage(a.key);
+      setAmpliada({ nombre: a.nombre, src });
+    } catch (e) { setError(e.message || 'No se pudo abrir la imagen'); }
+  };
+  const cerrarAmpliada = () => {
+    if (ampliada?.src) URL.revokeObjectURL(ampliada.src);
+    setAmpliada(null);
+  };
+
+  // ---------- Borrado (manager/gerencial) con confirmación PROPIA (jamás confirm()) ----------
+  const [borrando, setBorrando] = useState(null); // id pidiendo confirmación
+  const borrar = async (a) => {
+    try { await api.archivos.remove(a.id); setBorrando(null); cargar(); }
+    catch (e) { setBorrando(null); setError(e.message || 'No se pudo eliminar'); }
+  };
+
+  // ---------- Fila de archivo ----------
+  const Fila = ({ a, conRuta = false }) => (
+    <div className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-50 group">
+      {esImagen(a.nombre) ? (
+        <button onClick={() => ampliar(a)} title="Ver la imagen" className="shrink-0"><Miniatura archivo={a} /></button>
+      ) : (
+        <span className="text-lg w-9 h-9 flex items-center justify-center shrink-0">{iconoDe(a.nombre)}</span>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-slate-700 truncate" title={a.nombre}>{a.nombre}</p>
+        <p className="text-[11px] text-slate-400">
+          {fmtTam(a.tamano)} · {fmtFecha(a.createdAt)}{conRuta ? ` · ${rutaDe(a)}` : ''}
+        </p>
+      </div>
+      <button onClick={() => descargar(a)} disabled={descarga?.estado === 'bajando'}
+        title="Descargar" className="px-2 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+        {descarga?.id === a.id ? (descarga.estado === 'bajando' ? '…' : '✓') : '⬇'}
+      </button>
+      {puedeCurar && (borrando === a.id ? (
+        <span className="flex items-center gap-1 text-xs">
+          <button onClick={() => borrar(a)} className="px-2 py-1 rounded-lg bg-red-600 text-white">Eliminar</button>
+          <button onClick={() => setBorrando(null)} className="px-2 py-1 rounded-lg border border-slate-300 text-slate-500">No</button>
+        </span>
+      ) : (
+        <button onClick={() => setBorrando(a.id)} title="Eliminar de la biblioteca"
+          className="px-2 py-1 text-xs rounded-lg border border-slate-200 text-slate-400 hover:border-red-400 hover:text-red-500 opacity-0 group-hover:opacity-100">
+          🗑
+        </button>
+      ))}
+    </div>
+  );
+
+  // ---------- Zona (categoría/carpeta) con drag & drop ----------
+  const Zona = ({ cat, ruta }) => {
+    const items = enRuta(ruta);
+    const activa = arrastrando === ruta;
+    return (
+      <div
+        onDragOver={(e) => { e.preventDefault(); setArrastrando(ruta); }}
+        onDragLeave={(e) => { e.preventDefault(); setArrastrando((r) => (r === ruta ? null : r)); }}
+        onDrop={(e) => { e.preventDefault(); setArrastrando(null); subirArchivos(e.dataTransfer.files, ruta); }}
+        className={`bg-white rounded-xl border ${activa ? 'border-coop-azul ring-2 ring-coop-azul/30' : 'border-slate-200'} p-3 flex flex-col min-h-[180px]`}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-coop-negro flex items-center gap-1.5">
+            <span>{cat.emoji}</span> {cat.label}
+            <span className="text-[11px] font-normal text-slate-400">({items.length})</span>
+          </h3>
+          <button onClick={() => abrirPicker(ruta)}
+            className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul">
+            ＋ subir
+          </button>
+        </div>
+        {items.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg py-6">
+            Arrastrá archivos acá
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">{items.map((a) => <Fila key={a.id} a={a} />)}</div>
+        )}
+      </div>
+    );
+  };
+
+  const cargando = archivos === null;
+
+  return (
+    <div className="p-4">
+      {/* input global del picker: la ruta destino viaja en rutaInputRef */}
+      <input ref={inputRef} type="file" multiple accept={ACCEPT} className="hidden"
+        onChange={(e) => { if (rutaInputRef.current) subirArchivos(e.target.files, rutaInputRef.current); }} />
+
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <h2 className="text-xl font-semibold text-coop-negro flex items-center gap-2">
+          <Megaphone size={20} className="text-coop-naranja" /> Marketing
+        </h2>
+        <div className="flex gap-1.5">
+          {[{ id: 'plan', label: 'Planificación' }, { id: 'marca', label: 'Marca' }].map((s) => (
+            <button key={s.id} onClick={() => setSolapa(s.id)}
+              className={`px-3.5 py-1.5 rounded-full text-sm ${solapa === s.id ? 'bg-coop-azul text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-coop-azul hover:text-coop-azul'}`}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar en todo Marketing…"
+          className="ml-auto px-3 py-1.5 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-coop-azul w-56" />
+      </div>
+
+      {error && <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">{error}</div>}
+      {subida && (
+        <div className={`mb-3 rounded-lg px-3 py-2 text-sm border ${subida.err ? 'bg-red-50 border-red-200 text-red-700' : subida.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+          {subida.err || subida.txt}
+        </div>
+      )}
+
+      {cargando ? <p className="text-slate-400 text-sm">Cargando…</p> : resultados ? (
+        // Resultados del buscador: cruza meses, categorías y marca.
+        <div className="bg-white rounded-xl border border-slate-200 p-3">
+          <p className="text-xs text-slate-400 mb-1">{resultados.length} resultado{resultados.length === 1 ? '' : 's'} en todo Marketing</p>
+          {resultados.length === 0 ? <p className="text-sm text-slate-300 py-4 text-center">Nada con “{busca.trim()}”.</p>
+            : <div className="divide-y divide-slate-100">{resultados.map((a) => <Fila key={a.id} a={a} conRuta />)}</div>}
+        </div>
+      ) : solapa === 'plan' ? (
+        <>
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={() => setMes((m) => mesSumar(m, -1))} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">◀</button>
+            <span className="text-base font-semibold text-coop-negro min-w-[150px] text-center">{mesLabel(mes)}</span>
+            <button onClick={() => setMes((m) => mesSumar(m, 1))} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">▶</button>
+            {mes !== mesHoy() && (
+              <button onClick={() => setMes(mesHoy())} className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-coop-azul hover:text-coop-azul">Hoy</button>
+            )}
+            <span className="text-xs text-slate-400 ml-2">Tope por archivo: {TOPE_MB} MB — videos más pesados, por link.</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {CATS_PLAN.map((c) => <Zona key={c.id} cat={c} ruta={`plan/${mes}/${c.id}`} />)}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-slate-400 mb-3">Material permanente de marca — no depende del mes. Tope por archivo: {TOPE_MB} MB.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {CATS_MARCA.map((c) => <Zona key={c.id} cat={c} ruta={`marca/${c.id}`} />)}
+          </div>
+        </>
+      )}
+
+      {/* Modal propio de imagen ampliada */}
+      {ampliada && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={cerrarAmpliada}>
+          <div className="max-w-4xl max-h-full flex flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <img src={ampliada.src} alt={ampliada.nombre} className="max-h-[80vh] rounded-lg shadow-2xl object-contain" />
+            <div className="flex items-center gap-3">
+              <p className="text-white/80 text-sm">{ampliada.nombre}</p>
+              <button onClick={cerrarAmpliada} className="px-3 py-1 text-sm rounded-lg bg-white/90 text-slate-700">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
