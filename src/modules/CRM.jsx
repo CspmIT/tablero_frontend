@@ -118,6 +118,18 @@ export default function CRM() {
   const factPayload = () => Object.fromEntries(Object.entries(fact).map(([k, v]) => [k, v.trim()]));
   const factCompleta = () => fact.razonSocial.trim() && fact.cuit.trim();
 
+  // Abrir un presupuestador CON lead (21/08, lista liviana): la lista del CRM ya
+  // no trae las 3 columnas JSON de estado — se pide el lead COMPLETO por id acá,
+  // justo antes de abrir. Si el fetch falla, se abre igual con lo que hay (el
+  // presupuestador arranca vacío y el autosave lo reconstruye).
+  const abrirPresup = useCallback(async (ctx) => {
+    if (!ctx.lead?.id) { setPresupCtx(ctx); return; }
+    try {
+      const full = await api.leads.get(ctx.lead.id);
+      setPresupCtx({ ...ctx, lead: { ...ctx.lead, ...full } });
+    } catch { setPresupCtx(ctx); }
+  }, [api]);
+
   const guardarEstado = useCallback(async (campo, valor, extra = {}) => {
     const id = presupCtx?.lead?.id;
     if (!id) return;
@@ -729,10 +741,10 @@ export default function CRM() {
                   }
                   return (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {verReconecta && <button onClick={() => setPresupCtx({ tipo: 'reconecta', lead })} className={cls}>Reconecta</button>}
-                      {verAguaRelev && <button onClick={() => setPresupCtx({ tipo: 'agua', modo: 'relevamiento', lead })} className={cls}>Relevamiento +Agua</button>}
-                      {verAguaPres && <button onClick={() => setPresupCtx({ tipo: 'agua', modo: 'presupuesto', lead })} className={cls}>Presupuesto +Agua</button>}
-                      {verCoop && <button onClick={() => setPresupCtx({ tipo: 'coopcloud', lead })} className={cls}>CoopCloud</button>}
+                      {verReconecta && <button onClick={() => abrirPresup({ tipo: 'reconecta', lead })} className={cls}>Reconecta</button>}
+                      {verAguaRelev && <button onClick={() => abrirPresup({ tipo: 'agua', modo: 'relevamiento', lead })} className={cls}>Relevamiento +Agua</button>}
+                      {verAguaPres && <button onClick={() => abrirPresup({ tipo: 'agua', modo: 'presupuesto', lead })} className={cls}>Presupuesto +Agua</button>}
+                      {verCoop && <button onClick={() => abrirPresup({ tipo: 'coopcloud', lead })} className={cls}>CoopCloud</button>}
                     </div>
                   );
                 })()}

@@ -70,6 +70,9 @@ export const api = {
     // Mover de carpeta (url) o retitular (nombre) — biblioteca de Documentación.
     update: (id, body) => http.patch(`/archivos/${id}`, body),
     remove: (id) => http.del(`/archivos/${id}`),
+    // Subcarpetas de Marketing (ola 2): mapa { rutaZona: [nombres] } en Configuracion.
+    marketingCarpetas: () => http.get('/archivos/marketing-carpetas'),
+    guardarMarketingCarpetas: (carpetas) => http.put('/archivos/marketing-carpetas', { carpetas }),
   },
 
   grilla: {
