@@ -80,6 +80,8 @@ export const api = {
     create: (body) => http.post('/marketing-posts', body),
     update: (id, body) => http.patch(`/marketing-posts/${id}`, body),
     remove: (id) => http.del(`/marketing-posts/${id}`),
+    // Archivos vinculados a ALGUNA publicación (sello «usado» del contenido).
+    archivosUsados: () => http.get('/marketing-posts/archivos-usados'),
   },
 
   grilla: {
@@ -198,6 +200,10 @@ export const api = {
     update: (id, body) => http.patch(`/tickets/${id}`, body),
     mensaje: (id, texto) => http.post(`/tickets/${id}/mensajes`, { texto }),
     del: (id) => http.del(`/tickets/${id}`),
+    // Conector Mesa de ayuda (24/08): estado/config/sincronizar (token solo backend).
+    syncEstado: () => http.get('/tickets/sync-mesa/estado'),
+    syncConfig: (body) => http.put('/tickets/sync-mesa/config', body),
+    syncAhora: () => http.post('/tickets/sync-mesa'),
   },
   etiquetas: {
     sugerencias: () => http.get('/etiquetas/sugerencias'),

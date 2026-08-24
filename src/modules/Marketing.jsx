@@ -153,9 +153,13 @@ export default function Marketing() {
   // Calendario del mes (ola 3): ítems de publicación (excel de Booster → calendario).
   const [posts, setPosts] = useState([]);
   const [diaSel, setDiaSel] = useState(null); // día abierto en el panel (1..31) | null
+  // Sello «usado» (22/08): ids de archivos vinculados a ALGUNA publicación.
+  const [usados, setUsados] = useState(new Set());
   const cargarPosts = async (m) => {
     try { const r = await api.marketingPosts.list(m); setPosts(Array.isArray(r?.posts) ? r.posts : []); }
     catch { setPosts([]); } // backend viejo: el calendario queda vacío, el resto sigue
+    try { const u = await api.marketingPosts.archivosUsados(); setUsados(new Set(u?.archivoIds || [])); }
+    catch { /* sin sello */ }
   };
   useEffect(() => { cargarPosts(mes); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mes]);
   const [archivos, setArchivos] = useState(null); // null = cargando (todas las refs del contexto)
@@ -440,6 +444,9 @@ export default function Marketing() {
           {fmtTam(a.tamano)} · {fmtFecha(a.createdAt)}{conRuta ? ` · ${rutaDe(a)}` : ''}
         </p>
       </div>
+      {usados.has(a.id) && (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 shrink-0" title="Vinculado a una publicación del calendario">✓ usado</span>
+      )}
       {controlesArchivo(a)}
     </div>
   );
@@ -621,7 +628,10 @@ export default function Marketing() {
                 )}
                 <div className="p-2 flex-1 flex flex-col">
                   <p className="text-xs text-slate-700 truncate" title={a.nombre}>{a.nombre}</p>
-                  <p className="text-[10.5px] text-slate-400 mb-1">{fmtTam(a.tamano)} · {fmtFecha(a.createdAt)}</p>
+                  <p className="text-[10.5px] text-slate-400 mb-1">
+                    {fmtTam(a.tamano)} · {fmtFecha(a.createdAt)}
+                    {usados.has(a.id) && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-emerald-50 text-emerald-600" title="Vinculado a una publicación del calendario">✓ usado</span>}
+                  </p>
                   <div className="flex items-center gap-1 mt-auto">{controlesArchivo(a)}</div>
                 </div>
               </div>
@@ -691,10 +701,10 @@ export default function Marketing() {
   const PanelDia = () => {
     const del = posts.filter((p) => p.dia === diaSel);
     const [editando, setEditando] = useState(null); // null | 'nuevo' | id
-    const [f, setF] = useState({ canal: 'feed', formato: '', titulo: '', nota: '' });
+    const [f, setF] = useState({ canal: 'feed', formato: '', titulo: '', nota: '', archivoIds: [] });
     const [borrandoP, setBorrandoP] = useState(null);
-    const abrirNuevo = () => { setF({ canal: 'feed', formato: '', titulo: '', nota: '' }); setEditando('nuevo'); };
-    const abrirEdicion = (p) => { setF({ canal: p.canal, formato: p.formato || '', titulo: p.titulo, nota: p.nota || '' }); setEditando(p.id); };
+    const abrirNuevo = () => { setF({ canal: 'feed', formato: '', titulo: '', nota: '', archivoIds: [] }); setEditando('nuevo'); };
+    const abrirEdicion = (p) => { setF({ canal: p.canal, formato: p.formato || '', titulo: p.titulo, nota: p.nota || '', archivoIds: p.archivoIds || [] }); setEditando(p.id); };
     const guardar = async () => {
       if (!f.titulo.trim()) return;
       try {
@@ -703,6 +713,22 @@ export default function Marketing() {
         setEditando(null);
         cargarPosts(mes);
       } catch (e) { setError(e.message || 'No se pudo guardar el ítem'); }
+    };
+    // Piezas vinculables (22/08): los archivos del canal elegido en este mes —
+    // primero los de la subcarpeta del día (DD.MM), después el resto de la zona.
+    const nombreDia = subDelDia(f.canal, diaSel);
+    const candidatos = enZona(`plan/${mes}/${f.canal}`).sort((a, b) => {
+      const da = nombreDia && rutaDe(a).endsWith(`/${nombreDia}`) ? 0 : 1;
+      const db = nombreDia && rutaDe(b).endsWith(`/${nombreDia}`) ? 0 : 1;
+      return da - db || String(a.nombre).localeCompare(String(b.nombre));
+    });
+    const toggleArchivo = (id) => setF((x) => ({
+      ...x,
+      archivoIds: x.archivoIds.includes(id) ? x.archivoIds.filter((i) => i !== id) : [...x.archivoIds, id],
+    }));
+    const subEtiqueta = (a) => {
+      const partes = rutaDe(a).split('/');
+      return partes.length > 3 ? partes.slice(3).join('/') : '';
     };
     const borrarPost = async (p) => {
       try { await api.marketingPosts.remove(p.id); setBorrandoP(null); cargarPosts(mes); }
@@ -726,6 +752,9 @@ export default function Marketing() {
                   <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${CANAL_DE(p.canal).chip}`}>{CANAL_DE(p.canal).label}</span>
                   {p.formato && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{p.formato}</span>}
                   <span className="text-sm text-slate-800 font-medium flex-1 min-w-0 break-words">{p.titulo}</span>
+                  {(p.archivoIds || []).length > 0 && (
+                    <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600" title="Archivos vinculados a esta publicación">🖇 {p.archivoIds.length}</span>
+                  )}
                   {subDelDia(p.canal, diaSel) && (
                     <button onClick={() => irAPiezas(p.canal, diaSel)} title="Ver las piezas de este día"
                       className="text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100">📎 piezas</button>
@@ -758,6 +787,27 @@ export default function Marketing() {
                 placeholder="Título / contenido" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-medium" />
               <textarea value={f.nota} onChange={(e) => setF((x) => ({ ...x, nota: e.target.value }))} rows={3}
                 placeholder="Nota: copy, pie de foto, comentario…" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+              {/* Piezas del contenido (22/08): tildá los archivos que usa esta publicación. */}
+              <div>
+                <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-1">
+                  Piezas de {CANAL_DE(f.canal).label} · {mesLabel(mes)} {f.archivoIds.length > 0 && <span className="normal-case text-emerald-600">({f.archivoIds.length} vinculada{f.archivoIds.length === 1 ? '' : 's'})</span>}
+                </p>
+                {candidatos.length === 0 ? (
+                  <p className="text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg px-2 py-2">Todavía no hay archivos subidos en {CANAL_DE(f.canal).label} este mes — subilos en «Contenido del mes» y vinculalos después.</p>
+                ) : (
+                  <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto divide-y divide-slate-50">
+                    {candidatos.map((a) => (
+                      <label key={a.id} className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked={f.archivoIds.includes(a.id)} onChange={() => toggleArchivo(a.id)} />
+                        <span>{iconoDe(a.nombre)}</span>
+                        <span className="text-slate-700 truncate flex-1" title={a.nombre}>{a.nombre}</span>
+                        {subEtiqueta(a) && <span className="text-[10px] text-slate-400 shrink-0">📁 {subEtiqueta(a)}</span>}
+                        {usados.has(a.id) && <span className="text-[10px] px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 shrink-0">usado</span>}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setEditando(null)} className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-500">Cancelar</button>
                 <button onClick={guardar} disabled={!f.titulo.trim()} className="px-3 py-1 text-xs rounded-lg bg-coop-azul text-white disabled:opacity-40">Guardar</button>

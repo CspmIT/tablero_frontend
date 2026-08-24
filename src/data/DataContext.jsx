@@ -13,14 +13,17 @@ export function DataProvider({ children }) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
 
+  // Tolerantes a 403 (hardening 24/08): si el backend restringe alguna de estas
+  // listas para un tipo de usuario, la app arranca igual con la lista vacía —
+  // un permiso recortado JAMÁS debe tirar abajo el tablero entero.
   const recargarColaboradores = useCallback(async () => {
-    const res = await api.colaboradores.list();
-    setColaboradores(res.data || []);
+    try { const res = await api.colaboradores.list(); setColaboradores(res.data || []); }
+    catch { setColaboradores([]); }
   }, []);
 
   const recargarTags = useCallback(async () => {
-    const res = await api.tags.list();
-    setTags(res.data || []);
+    try { const res = await api.tags.list(); setTags(res.data || []); }
+    catch { setTags([]); }
   }, []);
 
   useEffect(() => {
