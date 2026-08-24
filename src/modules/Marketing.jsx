@@ -37,6 +37,18 @@ import { LIMITE_UNA_PASADA, subirEnPartes, esGrande, urlDirecta } from '../api/s
 
 const CONTEXTO = 'marketing';
 
+// Canales del calendario (mismos ids que las zonas de Contenido; color por canal).
+const CANALES_CAL = [
+  { id: 'feed', label: 'Feed', chip: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  { id: 'historia', label: 'Historia', chip: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
+  { id: 'linkedin', label: 'LinkedIn', chip: 'bg-sky-100 text-sky-700', dot: 'bg-sky-500' },
+  { id: 'mailing', label: 'Mailing', chip: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+];
+const CANAL_DE = (id) => CANALES_CAL.find((c) => c.id === id) || CANALES_CAL[0];
+// Formatos sugeridos (los del excel de Booster); campo libre igual — lección enum.
+const FORMATOS_SUG = ['Historia', 'Carrusel', 'Reel', 'Placa', 'Mailing', 'Nota'];
+const DIAS_SEMANA = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
 // Categorías de la planificación mensual (espejo de las carpetas del Drive).
 const CATS_PLAN = [
   { id: 'feed', label: 'Feed', emoji: '🖼️' },
@@ -135,8 +147,17 @@ export default function Marketing() {
   const { api, me } = useData();
   const puedeCurar = ['manager', 'gerencial'].includes(me?.tipo);
 
-  const [solapa, setSolapa] = useState('plan'); // plan | marca
+  const [solapa, setSolapa] = useState('plan'); // plan | eventos | marca
   const [mes, setMes] = useState(mesHoy());
+  const [anio, setAnio] = useState(new Date().getFullYear()); // solapa Eventos (anual)
+  // Calendario del mes (ola 3): ítems de publicación (excel de Booster → calendario).
+  const [posts, setPosts] = useState([]);
+  const [diaSel, setDiaSel] = useState(null); // día abierto en el panel (1..31) | null
+  const cargarPosts = async (m) => {
+    try { const r = await api.marketingPosts.list(m); setPosts(Array.isArray(r?.posts) ? r.posts : []); }
+    catch { setPosts([]); } // backend viejo: el calendario queda vacío, el resto sigue
+  };
+  useEffect(() => { cargarPosts(mes); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mes]);
   const [archivos, setArchivos] = useState(null); // null = cargando (todas las refs del contexto)
   const [carpetas, setCarpetas] = useState({});   // { rutaZona: [subnombres] } (Configuracion)
   const [error, setError] = useState('');
@@ -505,10 +526,12 @@ export default function Marketing() {
         className={`bg-white rounded-xl border ${activa ? 'border-coop-azul ring-2 ring-coop-azul/30' : 'border-slate-200'} p-3 flex flex-col min-h-[180px]`}
       >
         <div className="flex items-center justify-between mb-1 gap-1 flex-wrap">
-          <h3 className="text-sm font-semibold text-coop-negro flex items-center gap-1.5">
+          {/* Ola 3 (pedido de Leonardo): tocar la zona también abre la galería. */}
+          <button onClick={() => setVista({ ruta, migas })} title={`Abrir ${cat.label} en vista galería`}
+            className="text-sm font-semibold text-coop-negro flex items-center gap-1.5 hover:text-coop-azul">
             <span>{cat.emoji}</span> {cat.label}
             <span className="text-[11px] font-normal text-slate-400">({total})</span>
-          </h3>
+          </button>
           <div className="flex items-center gap-1">
             <NuevaSub rutaZona={ruta} conDia={conDia} />
             <button onClick={() => abrirPicker(ruta)}
@@ -531,9 +554,19 @@ export default function Marketing() {
     );
   };
 
-  // ---------- Vista galería (ola 2): adentro de una subcarpeta ----------
+  // ---------- Vista galería (ola 2; ola 3: genérica y anidable) ----------
+  // Muestra las SUBCARPETAS de la ruta como tarjetas (se puede seguir entrando —
+  // los eventos tienen carpetas adentro) + los archivos como tiles grandes.
+  // «Volver» sube UN nivel; desde la raíz de la zona, vuelve a la vista de zonas.
+  const profundidadBase = (ruta) => (String(ruta).split('/')[0] === 'plan' ? 3 : 2);
+  const volverUnNivel = () => {
+    const partes = vista.ruta.split('/');
+    if (partes.length <= profundidadBase(vista.ruta)) { setVista(null); return; } // raíz de zona → vista de zonas
+    setVista({ ruta: partes.slice(0, -1).join('/'), migas: vista.migas.slice(0, -1) });
+  };
   const Galeria = () => {
     const items = enRuta(vista.ruta);
+    const subsAca = subsDe(vista.ruta);
     const activa = arrastrando === vista.ruta;
     return (
       <div
@@ -543,7 +576,7 @@ export default function Marketing() {
         className={`bg-white rounded-xl border ${activa ? 'border-coop-azul ring-2 ring-coop-azul/30' : 'border-slate-200'} p-4 min-h-[300px]`}
       >
         <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <button onClick={() => setVista(null)}
+          <button onClick={volverUnNivel}
             className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul flex items-center gap-1 text-sm">
             <ArrowLeft size={14} /> Volver
           </button>
@@ -554,10 +587,23 @@ export default function Marketing() {
             <span className="text-slate-400 text-xs"> · {items.length} archivo{items.length === 1 ? '' : 's'}</span>
           </p>
           <div className="flex-1" />
+          <NuevaSub rutaZona={vista.ruta} conDia={false} />
           <button onClick={() => abrirPicker(vista.ruta)}
             className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul">＋ subir</button>
         </div>
-        {items.length === 0 ? (
+        {subsAca.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3 mb-3">
+            {subsAca.map((s) => (
+              <button key={s} onClick={() => setVista({ ruta: `${vista.ruta}/${s}`, migas: [...vista.migas, s] })}
+                className="border border-slate-200 rounded-lg p-3 flex flex-col items-center gap-1 hover:border-coop-azul/60 hover:bg-blue-50/30">
+                <Folder size={28} className="text-coop-naranja" />
+                <span className="text-xs text-slate-700 truncate w-full text-center" title={s}>{s}</span>
+                <span className="text-[10.5px] text-slate-400">{enZona(`${vista.ruta}/${s}`).length} archivo{enZona(`${vista.ruta}/${s}`).length === 1 ? '' : 's'}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {items.length === 0 && subsAca.length === 0 ? (
           <div className="flex items-center justify-center text-sm text-slate-300 border border-dashed border-slate-200 rounded-lg py-16">
             Arrastrá archivos acá
           </div>
@@ -586,8 +632,149 @@ export default function Marketing() {
     );
   };
 
+  // ---------- Calendario del mes (ola 3): el excel de Booster como calendario ----------
+  // Espacio de trabajo compartido: canal + formato + título + nota por día. Si el
+  // día tiene su subcarpeta DD.MM en la zona del canal, el ítem enlaza a las piezas.
+  const subDelDia = (canal, dia) => {
+    const [, mm] = mes.split('-');
+    const nombre = `${String(dia).padStart(2, '0')}.${mm}`;
+    return subsDe(`plan/${mes}/${canal}`).find((s) => s.toLowerCase() === nombre.toLowerCase()) || null;
+  };
+  const irAPiezas = (canal, dia) => {
+    const sub = subDelDia(canal, dia);
+    if (!sub) return;
+    setDiaSel(null);
+    setVista({ ruta: `plan/${mes}/${canal}/${sub}`, migas: [mesLabel(mes), CANAL_DE(canal).label, sub] });
+  };
+
+  const Calendario = () => {
+    const [y, m] = mes.split('-').map(Number);
+    const primero = new Date(y, m - 1, 1);
+    const nDias = new Date(y, m, 0).getDate();
+    const offset = primero.getDay(); // domingo-primero, como la grilla
+    const celdas = [...Array(offset).fill(null), ...Array.from({ length: nDias }, (_, i) => i + 1)];
+    while (celdas.length % 7) celdas.push(null);
+    const hoyD = new Date();
+    const esHoy = (d) => d && hoyD.getFullYear() === y && hoyD.getMonth() === m - 1 && hoyD.getDate() === d;
+    const delDia = (d) => posts.filter((p) => p.dia === d);
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4">
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {DIAS_SEMANA.map((d) => <div key={d} className="text-center text-[11px] font-medium text-slate-400 uppercase">{d}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {celdas.map((d, i) => (
+            <div key={i}
+              onClick={() => d && setDiaSel(d)}
+              className={`min-h-[74px] rounded-lg border p-1 ${d ? 'cursor-pointer hover:border-coop-azul/60 bg-white' : 'bg-slate-50/50 border-transparent'} ${esHoy(d) ? 'border-coop-naranja ring-1 ring-coop-naranja/40' : d ? 'border-slate-100' : ''}`}>
+              {d && (
+                <>
+                  <p className={`text-[11px] leading-none mb-1 ${esHoy(d) ? 'text-coop-naranja font-bold' : 'text-slate-400'}`}>{d}</p>
+                  <div className="space-y-0.5">
+                    {delDia(d).slice(0, 3).map((p) => (
+                      <p key={p.id} className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate ${CANAL_DE(p.canal).chip}`} title={`${CANAL_DE(p.canal).label}${p.formato ? ` · ${p.formato}` : ''} — ${p.titulo}`}>
+                        {p.titulo}
+                      </p>
+                    ))}
+                    {delDia(d).length > 3 && <p className="text-[10px] text-slate-400 px-1">+{delDia(d).length - 3} más</p>}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Panel del día: ver, agregar, editar y borrar ítems (todo el equipo interno).
+  const PanelDia = () => {
+    const del = posts.filter((p) => p.dia === diaSel);
+    const [editando, setEditando] = useState(null); // null | 'nuevo' | id
+    const [f, setF] = useState({ canal: 'feed', formato: '', titulo: '', nota: '' });
+    const [borrandoP, setBorrandoP] = useState(null);
+    const abrirNuevo = () => { setF({ canal: 'feed', formato: '', titulo: '', nota: '' }); setEditando('nuevo'); };
+    const abrirEdicion = (p) => { setF({ canal: p.canal, formato: p.formato || '', titulo: p.titulo, nota: p.nota || '' }); setEditando(p.id); };
+    const guardar = async () => {
+      if (!f.titulo.trim()) return;
+      try {
+        if (editando === 'nuevo') await api.marketingPosts.create({ mes, dia: diaSel, ...f });
+        else await api.marketingPosts.update(editando, f);
+        setEditando(null);
+        cargarPosts(mes);
+      } catch (e) { setError(e.message || 'No se pudo guardar el ítem'); }
+    };
+    const borrarPost = async (p) => {
+      try { await api.marketingPosts.remove(p.id); setBorrandoP(null); cargarPosts(mes); }
+      catch (e) { setError(e.message || 'No se pudo eliminar'); }
+    };
+    const [yy, mm2] = mes.split('-');
+    return (
+      <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setDiaSel(null)}>
+        <div className="bg-white rounded-xl w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-coop-negro">{String(diaSel).padStart(2, '0')}/{mm2}/{yy} · {del.length} publicación{del.length === 1 ? '' : 'es'}</h3>
+            <button onClick={() => setDiaSel(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+          </div>
+          {del.length === 0 && editando === null && (
+            <p className="text-sm text-slate-300 text-center py-4">Sin publicaciones planificadas este día.</p>
+          )}
+          <div className="space-y-2 mb-3">
+            {del.map((p) => (
+              <div key={p.id} className="border border-slate-100 rounded-lg p-2.5 group">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${CANAL_DE(p.canal).chip}`}>{CANAL_DE(p.canal).label}</span>
+                  {p.formato && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{p.formato}</span>}
+                  <span className="text-sm text-slate-800 font-medium flex-1 min-w-0 break-words">{p.titulo}</span>
+                  {subDelDia(p.canal, diaSel) && (
+                    <button onClick={() => irAPiezas(p.canal, diaSel)} title="Ver las piezas de este día"
+                      className="text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100">📎 piezas</button>
+                  )}
+                  <button onClick={() => abrirEdicion(p)} title="Editar" className="text-slate-300 hover:text-coop-azul opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
+                  {borrandoP === p.id ? (
+                    <span className="flex items-center gap-1 text-xs">
+                      <button onClick={() => borrarPost(p)} className="px-1.5 py-0.5 rounded bg-red-600 text-white">Sí</button>
+                      <button onClick={() => setBorrandoP(null)} className="px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">No</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setBorrandoP(p.id)} title="Eliminar" className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs">🗑</button>
+                  )}
+                </div>
+                {p.nota && <p className="text-xs text-slate-500 whitespace-pre-wrap mt-1.5 border-t border-slate-50 pt-1.5">{p.nota}</p>}
+              </div>
+            ))}
+          </div>
+          {editando !== null ? (
+            <div className="border border-coop-azul/40 rounded-lg p-3 space-y-2 bg-blue-50/30">
+              <div className="flex gap-2">
+                <select value={f.canal} onChange={(e) => setF((x) => ({ ...x, canal: e.target.value }))} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                  {CANALES_CAL.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+                <input list="mkt-formatos" value={f.formato} onChange={(e) => setF((x) => ({ ...x, formato: e.target.value }))}
+                  placeholder="Formato (Reel, Placa…)" className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                <datalist id="mkt-formatos">{FORMATOS_SUG.map((x) => <option key={x} value={x} />)}</datalist>
+              </div>
+              <input value={f.titulo} onChange={(e) => setF((x) => ({ ...x, titulo: e.target.value }))}
+                placeholder="Título / contenido" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-medium" />
+              <textarea value={f.nota} onChange={(e) => setF((x) => ({ ...x, nota: e.target.value }))} rows={3}
+                placeholder="Nota: copy, pie de foto, comentario…" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setEditando(null)} className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-500">Cancelar</button>
+                <button onClick={guardar} disabled={!f.titulo.trim()} className="px-3 py-1 text-xs rounded-lg bg-coop-azul text-white disabled:opacity-40">Guardar</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={abrirNuevo} className="w-full py-2 text-sm rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul">
+              ＋ Agregar publicación
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const cargando = archivos === null;
-  const migasBase = solapa === 'plan' ? [mesLabel(mes)] : ['Marca'];
+  const migasBase = solapa === 'plan' ? [mesLabel(mes)] : solapa === 'eventos' ? [`Eventos ${anio}`] : ['Marca'];
 
   return (
     <div className="p-4">
@@ -600,7 +787,7 @@ export default function Marketing() {
           <Megaphone size={20} className="text-coop-naranja" /> Marketing
         </h2>
         <div className="flex gap-1.5">
-          {[{ id: 'plan', label: 'Planificación' }, { id: 'marca', label: 'Marca' }].map((s) => (
+          {[{ id: 'plan', label: 'Planificación' }, { id: 'eventos', label: 'Eventos' }, { id: 'marca', label: 'Marca' }].map((s) => (
             <button key={s.id} onClick={() => { setSolapa(s.id); setVista(null); }}
               className={`px-3.5 py-1.5 rounded-full text-sm ${solapa === s.id ? 'bg-coop-azul text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-coop-azul hover:text-coop-azul'}`}>
               {s.label}
@@ -643,8 +830,29 @@ export default function Marketing() {
             )}
             <span className="text-xs text-slate-400 ml-2">Tope por archivo: {TOPE_MB} MB — arriba de 90 MB sube en partes (tarda, pero entra).</span>
           </div>
+          {/* Ola 3: el espacio de trabajo del mes — el excel de Booster como calendario.
+              Click en un día: ver/agregar/editar publicaciones (canal, formato, título, nota). */}
+          <Calendario />
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Contenido del mes</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             {CATS_PLAN.map((c) => <Zona key={c.id} cat={c} ruta={`plan/${mes}/${c.id}`} migas={[...migasBase, c.label]} conDia />)}
+          </div>
+        </>
+      ) : solapa === 'eventos' ? (
+        <>
+          {/* Eventos (ola 3): repositorio ANUAL — carpetas libres por evento, cualquier
+              formato, con subcarpetas y galería (misma mecánica que Planificación). */}
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={() => setAnio((a) => a - 1)} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">◀</button>
+            <span className="text-base font-semibold text-coop-negro min-w-[80px] text-center">{anio}</span>
+            <button onClick={() => setAnio((a) => a + 1)} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">▶</button>
+            {anio !== new Date().getFullYear() && (
+              <button onClick={() => setAnio(new Date().getFullYear())} className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-coop-azul hover:text-coop-azul">Hoy</button>
+            )}
+            <span className="text-xs text-slate-400 ml-2">Una carpeta por evento — adentro, subcarpetas y cualquier formato de archivo.</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            <Zona cat={{ id: 'eventos', label: `Eventos ${anio}`, emoji: '🎪' }} ruta={`evento/${anio}`} migas={[`Eventos ${anio}`]} conDia={false} />
           </div>
         </>
       ) : (
@@ -655,6 +863,9 @@ export default function Marketing() {
           </div>
         </>
       )}
+
+      {/* Panel del día del calendario (ola 3) */}
+      {diaSel !== null && <PanelDia />}
 
       {/* Reproductor propio: streaming para los pesados, objectURL para los chicos */}
       {video && (

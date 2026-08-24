@@ -74,6 +74,13 @@ export const api = {
     marketingCarpetas: () => http.get('/archivos/marketing-carpetas'),
     guardarMarketingCarpetas: (carpetas) => http.put('/archivos/marketing-carpetas', { carpetas }),
   },
+  // Calendario de publicaciones de Marketing (ola 3).
+  marketingPosts: {
+    list: (mes) => http.get('/marketing-posts', { mes }),
+    create: (body) => http.post('/marketing-posts', body),
+    update: (id, body) => http.patch(`/marketing-posts/${id}`, body),
+    remove: (id) => http.del(`/marketing-posts/${id}`),
+  },
 
   grilla: {
     list: (query) => http.get('/grilla', query),
