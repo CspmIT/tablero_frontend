@@ -1,9 +1,11 @@
 // Inbox → solapa Tickets (20/08) — mini sistema de tickets espejo de la Mesa
 // de ayuda de la cooperativa (mismos campos y estados que su formulario).
-// Hoy la carga es MANUAL: el equipo digitaliza los reclamos del WhatsApp de
-// guardia (el área Desarrollo aún no existe como opción en la Mesa de ayuda).
-// Cuando Guillermo exponga la API, los tickets de la Mesa entran solos
-// (origen=mesa_ayuda) y esta misma vista los muestra.
+// La carga puede ser MANUAL (el equipo digitaliza los reclamos del WhatsApp de
+// guardia) o AUTOMÁTICA: el conector de la Mesa de ayuda (24/08) trae los
+// tickets del área «Oficina Virtual» cada 5 minutos vía la API de Guillermo
+// (origen=mesa_ayuda, upsert por externalId). La config del conector (URL +
+// token) la cargan los gestores desde el botón ⚙ de esta vista; el token vive
+// SOLO en el backend.
 // Extra nuestro: clasificación OV (tipo × causa, alimenta Métricas OV),
 // categoría de falla a/b/c (mandato M1) y vínculo a un ítem de grilla
 // (antidoble-conteo: manda el ticket, el ítem aporta las horas).
@@ -53,6 +55,33 @@ export default function TicketsInbox() {
   // desordenan la lista). Default: fecha REAL del reclamo (ocurridoAt||createdAt).
   const [orden, setOrden] = useState('fecha'); // fecha | carga
   const [errorGlobal, setErrorGlobal] = useState('');
+  // Conector Mesa de ayuda (24/08): estado + config (gestores) + sincronizar.
+  const [sync, setSync] = useState(null);        // estado del conector | null
+  const [syncCfg, setSyncCfg] = useState(null);  // modal config { url, token, area } | null
+  const [sincronizando, setSincronizando] = useState(false);
+  useEffect(() => {
+    if (esGestor) api.tickets.syncEstado().then(setSync).catch(() => {}); // backend viejo: sin conector
+  }, [api, esGestor]);
+  const sincronizar = async () => {
+    setSincronizando(true);
+    try {
+      const r = await api.tickets.syncAhora();
+      if (r?.error) setErrorGlobal(`Sincronización: ${r.error}`);
+      await cargar();
+      api.tickets.syncEstado().then(setSync).catch(() => {});
+    } catch (e) { setErrorGlobal(e.message || 'No se pudo sincronizar'); }
+    finally { setSincronizando(false); }
+  };
+  const guardarSyncCfg = async () => {
+    try {
+      const r = await api.tickets.syncConfig({
+        url: syncCfg.url,
+        area: syncCfg.area,
+        ...(syncCfg.token.trim() ? { token: syncCfg.token.trim() } : {}), // vacío = conservar el guardado
+      });
+      setSync(r); setSyncCfg(null);
+    } catch (e) { setErrorGlobal(e.message || 'No se pudo guardar la configuración'); }
+  };
 
   const cargar = useCallback(async () => {
     try { const r = await api.tickets.list(); setTickets(r.tickets || []); }
@@ -84,9 +113,14 @@ export default function TicketsInbox() {
 
   const patch = async (t, body) => {
     try {
-      const r = await api.tickets.update(t.id, body);
+      const { mesaAviso, ...r } = await api.tickets.update(t.id, body);
       setTickets((ls) => ls.map((x) => (x.id === t.id ? { ...x, ...r } : x)));
       if (detalle?.id === t.id) setDetalle((d) => ({ ...d, ...r }));
+      // Ciclo completo (24/08): si el estado no llegó a la Mesa de ayuda, avisar
+      // — la próxima sincronización podría volver a traer el estado viejo.
+      if (mesaAviso && !mesaAviso.ok && mesaAviso.motivo !== 'sin_config') {
+        setErrorGlobal(`El estado se guardó acá pero NO llegó a la Mesa de ayuda (${mesaAviso.motivo}) — puede volver a abrirse en la próxima sincronización. Reintentá cambiando el estado de nuevo.`);
+      }
       return true;
     } catch (e) { setErrorGlobal(e.message || 'No se pudo actualizar'); return false; }
   };
@@ -107,6 +141,20 @@ export default function TicketsInbox() {
         })}
         <span className="text-xs text-slate-400">{sinResolver} sin resolver</span>
         <div className="flex-1" />
+        {esGestor && sync && (
+          <span className="flex items-center gap-1">
+            <button onClick={sincronizar} disabled={sincronizando || !sync.configurado}
+              title={sync.configurado
+                ? `Traer ahora los tickets del área ${sync.area} de la Mesa de ayuda${sync.ultimo ? ` · última: ${sync.ultimo.ok ? '✓' : '✗'} ${String(sync.ultimo.fin || '').slice(0, 16).replace('T', ' ')} (+${sync.ultimo.creados}/${sync.ultimo.actualizados})` : ''}`
+                : 'Configurá URL y token de la Mesa de ayuda (engranaje)'}
+              className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul disabled:opacity-40">
+              {sincronizando ? '⟳ Sincronizando…' : `⟳ Mesa de ayuda${sync.ultimo && !sync.ultimo.ok ? ' ⚠' : ''}`}
+            </button>
+            <button onClick={() => setSyncCfg({ url: sync.url || '', token: '', area: sync.area || 'Oficina Virtual' })}
+              title="Configurar el conector (URL + token)"
+              className="px-2 py-1 text-xs rounded-lg border border-slate-200 text-slate-400 hover:border-coop-azul hover:text-coop-azul">⚙</button>
+          </span>
+        )}
         <select value={orden} onChange={(e) => setOrden(e.target.value)} title="Ordenar la lista"
           className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-600">
           <option value="fecha">Por fecha del reclamo</option>
@@ -119,7 +167,7 @@ export default function TicketsInbox() {
       </div>
       <p className="text-xs text-slate-400 mb-3">
         Digitalizá acá los reclamos que llegan por el WhatsApp de guardia o que el cliente interno no cargó en la Mesa de ayuda.
-        Cuando la Mesa de ayuda exponga su API, los tickets del área Desarrollo van a entrar solos.
+        Con el conector configurado (⟳), los tickets del área «Oficina Virtual» de la Mesa de ayuda entran solos cada 5 minutos.
       </p>
       {errorGlobal && (
         <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700 flex items-center justify-between gap-2">
@@ -183,6 +231,43 @@ export default function TicketsInbox() {
           );
         })}
       </div>
+
+      {/* Config del conector Mesa de ayuda (gestores). El token se escribe pero
+          nunca se relee: el campo vacío significa «conservar el guardado». */}
+      {syncCfg && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setSyncCfg(null)}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold mb-1">Conector Mesa de ayuda</h3>
+            <p className="text-xs text-slate-400 mb-3">Los datos que te pase Guillermo. El token queda guardado en el servidor y no vuelve a mostrarse.</p>
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-xs font-medium text-slate-500">URL de la Mesa</label>
+                <input value={syncCfg.url} onChange={(e) => setSyncCfg((c) => ({ ...c, url: e.target.value }))}
+                  placeholder="https://mesadeayuda.coopmorteros.coop" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500">Token {sync?.tieneToken && <span className="text-emerald-600">(hay uno guardado — dejá vacío para conservarlo)</span>}</label>
+                <input type="password" value={syncCfg.token} onChange={(e) => setSyncCfg((c) => ({ ...c, token: e.target.value }))}
+                  placeholder={sync?.tieneToken ? '••••••••' : 'Bearer token de servicio'} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500">Área a traer</label>
+                <input value={syncCfg.area} onChange={(e) => setSyncCfg((c) => ({ ...c, area: e.target.value }))}
+                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+              </div>
+              {sync?.ultimo && (
+                <p className={`text-xs ${sync.ultimo.ok ? 'text-slate-400' : 'text-red-500'}`}>
+                  Última corrida ({sync.ultimo.disparo}): {sync.ultimo.ok ? `✓ ${sync.ultimo.creados} nuevos, ${sync.ultimo.actualizados} actualizados` : `✗ ${sync.ultimo.error}`}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setSyncCfg(null)} className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-500">Cancelar</button>
+              <button onClick={guardarSyncCfg} disabled={!syncCfg.url.trim()} className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white disabled:opacity-40">Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {form && <NuevoTicketModal api={api} form={form} setForm={setForm} onDone={() => { setForm(null); cargar(); }} />}
       {detalle && (
@@ -257,7 +342,7 @@ function NuevoTicketModal({ api, form, setForm, onDone }) {
             </div>
             <div>
               <label className={label}>Área que lo resolverá</label>
-              <input value="Desarrollo" disabled className={`${campo} bg-slate-50 text-slate-400`} />
+              <input value="Oficina Virtual" disabled className={`${campo} bg-slate-50 text-slate-400`} />
             </div>
           </div>
           <div className="grid sm:grid-cols-2 gap-3">
