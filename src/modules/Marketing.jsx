@@ -701,8 +701,20 @@ export default function Marketing() {
   const PanelDia = () => {
     const del = posts.filter((p) => p.dia === diaSel);
     const [editando, setEditando] = useState(null); // null | 'nuevo' | id
+    // ACORDEÓN (25/08, «el monitor no es infinito»): con varias publicaciones,
+    // cada una colapsada en UNA línea y se expande de a una (nota + vista
+    // previa). Con una sola, viene abierta.
+    const [abierto, setAbierto] = useState(() => (del.length === 1 ? del[0].id : null));
     const [f, setF] = useState({ canal: 'feed', formato: '', titulo: '', nota: '', archivoIds: [] });
     const [borrandoP, setBorrandoP] = useState(null);
+    // Vista previa de las piezas vinculadas (24/08, boceto de Leonardo): la
+    // miniatura al lado del contenido; con más de una, flechitas ◀ ▶.
+    const archivosPorId = new Map((archivos || []).map((a) => [a.id, a]));
+    const [idxPieza, setIdxPieza] = useState({}); // { [postId]: índice del carrusel }
+    const piezasDe = (p) => (p.archivoIds || []).map((id) => archivosPorId.get(id)).filter(Boolean);
+    const moverPieza = (p, delta, total) => setIdxPieza((m) => ({
+      ...m, [p.id]: ((m[p.id] || 0) + delta + total) % total,
+    }));
     const abrirNuevo = () => { setF({ canal: 'feed', formato: '', titulo: '', nota: '', archivoIds: [] }); setEditando('nuevo'); };
     const abrirEdicion = (p) => { setF({ canal: p.canal, formato: p.formato || '', titulo: p.titulo, nota: p.nota || '', archivoIds: p.archivoIds || [] }); setEditando(p.id); };
     const guardar = async () => {
@@ -737,7 +749,7 @@ export default function Marketing() {
     const [yy, mm2] = mes.split('-');
     return (
       <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setDiaSel(null)}>
-        <div className="bg-white rounded-xl w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-coop-negro">{String(diaSel).padStart(2, '0')}/{mm2}/{yy} · {del.length} publicación{del.length === 1 ? '' : 'es'}</h3>
             <button onClick={() => setDiaSel(null)} className="text-slate-400 hover:text-slate-600">✕</button>
@@ -746,32 +758,75 @@ export default function Marketing() {
             <p className="text-sm text-slate-300 text-center py-4">Sin publicaciones planificadas este día.</p>
           )}
           <div className="space-y-2 mb-3">
-            {del.map((p) => (
-              <div key={p.id} className="border border-slate-100 rounded-lg p-2.5 group">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${CANAL_DE(p.canal).chip}`}>{CANAL_DE(p.canal).label}</span>
-                  {p.formato && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{p.formato}</span>}
-                  <span className="text-sm text-slate-800 font-medium flex-1 min-w-0 break-words">{p.titulo}</span>
-                  {(p.archivoIds || []).length > 0 && (
-                    <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600" title="Archivos vinculados a esta publicación">🖇 {p.archivoIds.length}</span>
-                  )}
-                  {subDelDia(p.canal, diaSel) && (
-                    <button onClick={() => irAPiezas(p.canal, diaSel)} title="Ver las piezas de este día"
-                      className="text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100">📎 piezas</button>
-                  )}
-                  <button onClick={() => abrirEdicion(p)} title="Editar" className="text-slate-300 hover:text-coop-azul opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
-                  {borrandoP === p.id ? (
-                    <span className="flex items-center gap-1 text-xs">
-                      <button onClick={() => borrarPost(p)} className="px-1.5 py-0.5 rounded bg-red-600 text-white">Sí</button>
-                      <button onClick={() => setBorrandoP(null)} className="px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">No</button>
+            {del.map((p) => {
+              const piezas = piezasDe(p);
+              const idx = Math.min(idxPieza[p.id] || 0, Math.max(0, piezas.length - 1));
+              const pieza = piezas[idx];
+              const expandida = abierto === p.id;
+              return (
+                <div key={p.id} className="border border-slate-100 rounded-lg group">
+                  {/* Cabecera SIEMPRE visible (una línea): click expande/colapsa. */}
+                  <div onClick={() => setAbierto(expandida ? null : p.id)}
+                    className={`flex items-center gap-2 p-2.5 cursor-pointer ${expandida ? '' : 'hover:bg-slate-50 rounded-lg'}`}>
+                    <span className="text-slate-300 text-xs w-3 shrink-0">{expandida ? '⌄' : '›'}</span>
+                    <span className={`text-[10.5px] px-1.5 py-0.5 rounded shrink-0 ${CANAL_DE(p.canal).chip}`}>{CANAL_DE(p.canal).label}</span>
+                    {p.formato && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">{p.formato}</span>}
+                    <span className="text-sm text-slate-800 font-medium flex-1 min-w-0 truncate" title={p.titulo}>{p.titulo}</span>
+                    {!expandida && pieza && esImagen(pieza.nombre) && <span className="shrink-0"><Miniatura archivo={pieza} /></span>}
+                    {piezas.length > 0 && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 shrink-0">🖇 {piezas.length}</span>}
+                    <span onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => abrirEdicion(p)} title="Editar" className="text-slate-300 hover:text-coop-azul opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
+                      {borrandoP === p.id ? (
+                        <span className="flex items-center gap-1 text-xs">
+                          <button onClick={() => borrarPost(p)} className="px-1.5 py-0.5 rounded bg-red-600 text-white">Sí</button>
+                          <button onClick={() => setBorrandoP(null)} className="px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">No</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setBorrandoP(p.id)} title="Eliminar" className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs">🗑</button>
+                      )}
                     </span>
-                  ) : (
-                    <button onClick={() => setBorrandoP(p.id)} title="Eliminar" className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs">🗑</button>
+                  </div>
+                  {/* Cuerpo expandido: nota completa + vista previa con carrusel. */}
+                  {expandida && (
+                    <div className="flex gap-3 px-2.5 pb-2.5">
+                      <div className="min-w-0 flex-1">
+                        {p.nota
+                          ? <p className="text-xs text-slate-500 whitespace-pre-wrap border-t border-slate-50 pt-1.5">{p.nota}</p>
+                          : <p className="text-xs text-slate-300 border-t border-slate-50 pt-1.5">Sin nota.</p>}
+                        {subDelDia(p.canal, diaSel) && (
+                          <button onClick={() => irAPiezas(p.canal, diaSel)} title="Ver las piezas de este día"
+                            className="mt-1.5 text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100">📎 piezas del día</button>
+                        )}
+                      </div>
+                      {pieza && (
+                        <div className="w-36 shrink-0 flex flex-col items-center gap-1">
+                          {esImagen(pieza.nombre) ? (
+                            <button onClick={() => ampliar(pieza)} title={pieza.nombre} className="w-full">
+                              <Miniatura archivo={pieza} grande />
+                            </button>
+                          ) : esVideo(pieza.nombre) ? (
+                            <button onClick={() => reproducir(pieza)} title={`Reproducir ${pieza.nombre}`}
+                              className="w-full h-36 rounded-lg bg-slate-900/90 flex items-center justify-center text-3xl text-white/80 hover:text-white">▶</button>
+                          ) : (
+                            <button onClick={() => descargar(pieza)} title={`Descargar ${pieza.nombre}`}
+                              className="w-full h-36 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-3xl">{iconoDe(pieza.nombre)}</button>
+                          )}
+                          {piezas.length > 1 ? (
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <button onClick={() => moverPieza(p, -1, piezas.length)} className="px-1.5 rounded border border-slate-200 hover:border-coop-azul hover:text-coop-azul">◀</button>
+                              <span>{idx + 1}/{piezas.length}</span>
+                              <button onClick={() => moverPieza(p, 1, piezas.length)} className="px-1.5 rounded border border-slate-200 hover:border-coop-azul hover:text-coop-azul">▶</button>
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-slate-400 truncate w-full text-center" title={pieza.nombre}>{pieza.nombre}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-                {p.nota && <p className="text-xs text-slate-500 whitespace-pre-wrap mt-1.5 border-t border-slate-50 pt-1.5">{p.nota}</p>}
-              </div>
-            ))}
+              );
+            })}
           </div>
           {editando !== null ? (
             <div className="border border-coop-azul/40 rounded-lg p-3 space-y-2 bg-blue-50/30">
