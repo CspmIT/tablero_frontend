@@ -153,13 +153,18 @@ export default function Marketing() {
   // Calendario del mes (ola 3): ítems de publicación (excel de Booster → calendario).
   const [posts, setPosts] = useState([]);
   const [diaSel, setDiaSel] = useState(null); // día abierto en el panel (1..31) | null
-  // Sello «usado» (22/08): ids de archivos vinculados a ALGUNA publicación.
+  // Sello «usado» (22/08): ids de archivos vinculados a ALGUNA publicación/campaña.
   const [usados, setUsados] = useState(new Set());
+  // Campañas publicitarias (26/08): pocas por año — se traen TODAS y el frontend
+  // decide qué mostrar (el período puede cruzar meses: 20/08 → 10/09).
+  const [campanias, setCampanias] = useState([]);
   const cargarPosts = async (m) => {
     try { const r = await api.marketingPosts.list(m); setPosts(Array.isArray(r?.posts) ? r.posts : []); }
     catch { setPosts([]); } // backend viejo: el calendario queda vacío, el resto sigue
     try { const u = await api.marketingPosts.archivosUsados(); setUsados(new Set(u?.archivoIds || [])); }
     catch { /* sin sello */ }
+    try { const c = await api.marketingCampanias.list(); setCampanias(Array.isArray(c?.campanias) ? c.campanias : []); }
+    catch { setCampanias([]); }
   };
   useEffect(() => { cargarPosts(mes); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mes]);
   const [archivos, setArchivos] = useState(null); // null = cargando (todas las refs del contexto)
@@ -642,6 +647,133 @@ export default function Marketing() {
     );
   };
 
+  // ---------- Bandeja de IDEAS (26/08): la etapa previa del documento de Booster ----------
+  // Ideas = publicaciones SIN día (dia null). Se cargan acá con los mismos campos,
+  // Booster propone y el tilde ✓ las aprueba; «📅 Programar» les asigna día (puede
+  // ser de otro mes) y pasan al calendario siendo EL MISMO registro.
+  const ideas = posts.filter((p) => p.dia == null);
+  const [ideaForm, setIdeaForm] = useState(null);   // null | { id?, canal, formato, titulo, nota }
+  const [programando, setProgramando] = useState(null); // id de la idea con el picker de fecha abierto
+  const [borrandoIdea, setBorrandoIdea] = useState(null);
+  const guardarIdea = async () => {
+    if (!ideaForm.titulo.trim()) return;
+    try {
+      if (ideaForm.id) await api.marketingPosts.update(ideaForm.id, { canal: ideaForm.canal, formato: ideaForm.formato, titulo: ideaForm.titulo, nota: ideaForm.nota });
+      else await api.marketingPosts.create({ mes, dia: null, ...ideaForm });
+      setIdeaForm(null);
+      cargarPosts(mes);
+    } catch (e) { setError(e.message || 'No se pudo guardar la idea'); }
+  };
+  const toggleAprobada = async (p) => {
+    try { await api.marketingPosts.update(p.id, { aprobada: !p.aprobada }); cargarPosts(mes); }
+    catch (e) { setError(e.message || 'No se pudo cambiar la aprobación'); }
+  };
+  const programarIdea = async (p, fecha) => {
+    if (!fecha) return;
+    const [y, m, d] = fecha.split('-');
+    try {
+      await api.marketingPosts.update(p.id, { mes: `${y}-${m}`, dia: Number(d) });
+      setProgramando(null);
+      if (`${y}-${m}` !== mes) setMes(`${y}-${m}`); // programada en otro mes: seguirla
+      else cargarPosts(mes);
+    } catch (e) { setError(e.message || 'No se pudo programar'); }
+  };
+  const borrarIdea = async (p) => {
+    try { await api.marketingPosts.remove(p.id); setBorrandoIdea(null); cargarPosts(mes); }
+    catch (e) { setError(e.message || 'No se pudo eliminar'); }
+  };
+
+  // ---------- Campañas publicitarias (26/08) ----------
+  // Nace PROPUESTA sin fechas; al aprobar se define el período y aparece la
+  // LÍNEA delgada atravesando los días del calendario (repite contenido todos
+  // los días del rango, a diferencia de una publicación puntual).
+  const CAMP_COLORES = ['bg-rose-400', 'bg-teal-500', 'bg-indigo-400', 'bg-orange-400', 'bg-cyan-500', 'bg-fuchsia-400'];
+  const colorCamp = (c) => CAMP_COLORES[c.id % CAMP_COLORES.length];
+  const isoDia = (v) => (v ? String(v).slice(0, 10) : null);
+  const fmtRango = (c) => (c.desde ? `${isoDia(c.desde).slice(8, 10)}/${isoDia(c.desde).slice(5, 7)} → ${isoDia(c.hasta).slice(8, 10)}/${isoDia(c.hasta).slice(5, 7)}` : 'sin período');
+  // Campañas del mes visible: las que intersectan el mes + las propuestas sin fechas.
+  const primerDiaMes = `${mes}-01`;
+  const ultimoDiaMes = (() => { const [y, m] = mes.split('-').map(Number); return `${mes}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`; })();
+  const campaniasDelMes = campanias.filter((c) => !c.desde || (isoDia(c.desde) <= ultimoDiaMes && isoDia(c.hasta) >= primerDiaMes));
+  const campaniasEnDia = (d) => {
+    const fecha = `${mes}-${String(d).padStart(2, '0')}`;
+    return campanias.filter((c) => c.desde && isoDia(c.desde) <= fecha && isoDia(c.hasta) >= fecha);
+  };
+  const [campForm, setCampForm] = useState(null); // null | { id?, nombre, producto, presupuesto, desarrollo, desde, hasta }
+  const [borrandoCamp, setBorrandoCamp] = useState(null);
+  const abrirCampania = (c) => setCampForm({
+    id: c.id, nombre: c.nombre, producto: c.producto || '', presupuesto: c.presupuesto || '',
+    desarrollo: c.desarrollo || '', desde: isoDia(c.desde) || '', hasta: isoDia(c.hasta) || '',
+  });
+  const guardarCampania = async () => {
+    if (!campForm.nombre.trim()) return;
+    const body = {
+      nombre: campForm.nombre, producto: campForm.producto, presupuesto: campForm.presupuesto,
+      desarrollo: campForm.desarrollo, desde: campForm.desde || null, hasta: campForm.hasta || null,
+    };
+    if ((body.desde && !body.hasta) || (!body.desde && body.hasta)) { setError('El período necesita desde y hasta (o dejá los dos vacíos).'); return; }
+    try {
+      if (campForm.id) await api.marketingCampanias.update(campForm.id, body);
+      else await api.marketingCampanias.create(body);
+      setCampForm(null); setError('');
+      cargarPosts(mes);
+    } catch (e) { setError(e.message || 'No se pudo guardar la campaña'); }
+  };
+  // Aprobar define los días (dato de Leonardo): si no tiene período, se abre la
+  // campaña para cargarlo en el mismo gesto.
+  const toggleAprobadaCamp = async (c) => {
+    try {
+      await api.marketingCampanias.update(c.id, { aprobada: !c.aprobada });
+      if (!c.aprobada && !c.desde) abrirCampania({ ...c, aprobada: true });
+      cargarPosts(mes);
+    } catch (e) { setError(e.message || 'No se pudo cambiar la aprobación'); }
+  };
+  const borrarCampania = async (c) => {
+    try { await api.marketingCampanias.remove(c.id); setBorrandoCamp(null); cargarPosts(mes); }
+    catch (e) { setError(e.message || 'No se pudo eliminar la campaña'); }
+  };
+
+  // Export de la planificación del mes (26/08, decisión de Leonardo: incluirlo ya):
+  // documento Word con el formato del documento real de Booster (ítems por canal
+  // con título, formato, día, aprobación y copy). HTML compatible con Word — se
+  // abre y edita en Word/LibreOffice sin dependencias nuevas.
+  const exportarPlanificacion = () => {
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const orden = ['linkedin', 'mailing', 'feed', 'historia'];
+    const rotulo = { linkedin: 'LINKEDIN', mailing: 'MAILING', feed: 'POSTEOS / FEED', historia: 'HISTORIAS' };
+    const [, mm] = mes.split('-');
+    let cuerpo = '';
+    for (const c of orden) {
+      const del = posts.filter((p) => p.canal === c);
+      if (!del.length) continue;
+      cuerpo += `<h2 style="color:#0E5174">${rotulo[c]}</h2>`;
+      del.forEach((p, i) => {
+        const cuando = p.dia ? `${String(p.dia).padStart(2, '0')}/${mm}` : 'Sin fecha (idea)';
+        cuerpo += `<h3>${rotulo[c].split(' ')[0]} ${i + 1}: ${esc(p.titulo)}</h3>` +
+          `<p style="color:#666;font-size:10pt">${esc(p.formato || '—')} · ${cuando} · ${p.aprobada ? '✔ Aprobada' : 'Pendiente de aprobación'}</p>` +
+          (p.nota ? `<p>${esc(p.nota).replace(/\n/g, '<br>')}</p>` : '');
+      });
+    }
+    // Campañas del mes (26/08): con su período, presupuesto y desarrollo.
+    if (campaniasDelMes.length) {
+      cuerpo += '<h2 style="color:#0E5174">CAMPAÑAS PUBLICITARIAS</h2>';
+      for (const c of campaniasDelMes) {
+        cuerpo += `<h3>${esc(c.nombre)}${c.producto ? ` — ${esc(c.producto)}` : ''}</h3>` +
+          `<p style="color:#666;font-size:10pt">${fmtRango(c)} · ${c.aprobada ? '✔ Aprobada' : 'Propuesta'}${c.presupuesto ? ` · ${esc(c.presupuesto)}` : ''}</p>` +
+          (c.desarrollo ? `<p>${esc(c.desarrollo).replace(/\n/g, '<br>')}</p>` : '');
+      }
+    }
+    const html = `<html xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Planificación</title></head>` +
+      `<body style="font-family:Calibri,sans-serif"><h1 style="color:#0E5174">PLANIFICACIÓN ${mesLabel(mes).toUpperCase()} — COOPTECH</h1>${cuerpo || '<p>Sin publicaciones ni ideas este mes.</p>'}</body></html>`;
+    const blob = new Blob(['﻿', html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `PLANIFICACION_${mesLabel(mes).replace(' ', '_').toUpperCase()}_COOPTECH.doc`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
   // ---------- Calendario del mes (ola 3): el excel de Booster como calendario ----------
   // Espacio de trabajo compartido: canal + formato + título + nota por día. Si el
   // día tiene su subcarpeta DD.MM en la zona del canal, el ítem enlaza a las piezas.
@@ -676,18 +808,32 @@ export default function Marketing() {
           {celdas.map((d, i) => (
             <div key={i}
               onClick={() => d && setDiaSel(d)}
-              className={`min-h-[74px] rounded-lg border p-1 ${d ? 'cursor-pointer hover:border-coop-azul/60 bg-white' : 'bg-slate-50/50 border-transparent'} ${esHoy(d) ? 'border-coop-naranja ring-1 ring-coop-naranja/40' : d ? 'border-slate-100' : ''}`}>
+              className={`min-h-[74px] rounded-lg border p-1 flex flex-col ${d ? 'cursor-pointer hover:border-coop-azul/60 bg-white' : 'bg-slate-50/50 border-transparent'} ${esHoy(d) ? 'border-coop-naranja ring-1 ring-coop-naranja/40' : d ? 'border-slate-100' : ''}`}>
               {d && (
                 <>
                   <p className={`text-[11px] leading-none mb-1 ${esHoy(d) ? 'text-coop-naranja font-bold' : 'text-slate-400'}`}>{d}</p>
-                  <div className="space-y-0.5">
+                  <div className="space-y-0.5 flex-1">
                     {delDia(d).slice(0, 3).map((p) => (
-                      <p key={p.id} className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate ${CANAL_DE(p.canal).chip}`} title={`${CANAL_DE(p.canal).label}${p.formato ? ` · ${p.formato}` : ''} — ${p.titulo}`}>
+                      <p key={p.id}
+                        className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate ${CANAL_DE(p.canal).chip} ${p.aprobada ? '' : 'opacity-60 border border-dashed border-slate-400'}`}
+                        title={`${CANAL_DE(p.canal).label}${p.formato ? ` · ${p.formato}` : ''} — ${p.titulo}${p.aprobada ? '' : ' (pendiente de aprobación)'}`}>
                         {p.titulo}
                       </p>
                     ))}
                     {delDia(d).length > 3 && <p className="text-[10px] text-slate-400 px-1">+{delDia(d).length - 3} más</p>}
                   </div>
+                  {/* Campañas activas este día (26/08): línea delgada por campaña,
+                      atravesando todos los días del período. Click abre la campaña. */}
+                  {campaniasEnDia(d).length > 0 && (
+                    <div className="space-y-0.5 mt-0.5">
+                      {campaniasEnDia(d).slice(0, 3).map((c) => (
+                        <div key={c.id}
+                          onClick={(e) => { e.stopPropagation(); abrirCampania(c); }}
+                          title={`📣 ${c.nombre}${c.producto ? ` (${c.producto})` : ''} · ${fmtRango(c)} — la campaña corre TODOS los días del período`}
+                          className={`h-1.5 rounded-sm cursor-pointer ${colorCamp(c)} ${c.aprobada ? '' : 'opacity-50'} hover:h-2 transition-all`} />
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -769,6 +915,9 @@ export default function Marketing() {
                   <div onClick={() => setAbierto(expandida ? null : p.id)}
                     className={`flex items-center gap-2 p-2.5 cursor-pointer ${expandida ? '' : 'hover:bg-slate-50 rounded-lg'}`}>
                     <span className="text-slate-300 text-xs w-3 shrink-0">{expandida ? '⌄' : '›'}</span>
+                    <button onClick={(e) => { e.stopPropagation(); toggleAprobada(p); }}
+                      title={p.aprobada ? 'Aprobada — click para quitar' : 'Pendiente — click para aprobar'}
+                      className={`w-5 h-5 rounded border shrink-0 text-[11px] leading-none ${p.aprobada ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300 text-transparent hover:border-emerald-400'}`}>✓</button>
                     <span className={`text-[10.5px] px-1.5 py-0.5 rounded shrink-0 ${CANAL_DE(p.canal).chip}`}>{CANAL_DE(p.canal).label}</span>
                     {p.formato && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">{p.formato}</span>}
                     <span className="text-sm text-slate-800 font-medium flex-1 min-w-0 truncate" title={p.titulo}>{p.titulo}</span>
@@ -933,8 +1082,142 @@ export default function Marketing() {
             {mes !== mesHoy() && (
               <button onClick={() => setMes(mesHoy())} className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-coop-azul hover:text-coop-azul">Hoy</button>
             )}
+            <button onClick={exportarPlanificacion} title="Descargar la planificación del mes como documento Word (ideas incluidas)"
+              className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">⬇ Word</button>
             <span className="text-xs text-slate-400 ml-2">Tope por archivo: {TOPE_MB} MB — arriba de 90 MB sube en partes (tarda, pero entra).</span>
           </div>
+
+          {/* Bandeja de IDEAS (26/08): la etapa previa — sin fecha. Booster propone,
+              el tilde ✓ aprueba, «📅» programa y la idea pasa al calendario. */}
+          <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-coop-negro">💡 Ideas <span className="text-[11px] font-normal text-slate-400">({ideas.length} sin fecha)</span></h3>
+              {!ideaForm && (
+                <button onClick={() => setIdeaForm({ canal: 'feed', formato: '', titulo: '', nota: '' })}
+                  className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul">＋ idea</button>
+              )}
+            </div>
+            {ideas.length === 0 && !ideaForm && (
+              <p className="text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg px-2 py-2">
+                Acá se cargan las ideas del mes (el documento de planificación de Booster) antes de tener fecha. Al programarlas pasan al calendario.
+              </p>
+            )}
+            <div className="divide-y divide-slate-50">
+              {ideas.map((p) => (
+                <div key={p.id} className="flex items-center gap-2 py-1.5 group">
+                  <button onClick={() => toggleAprobada(p)} title={p.aprobada ? 'Aprobada — click para quitar' : 'Pendiente — click para aprobar'}
+                    className={`w-5 h-5 rounded border shrink-0 text-xs leading-none ${p.aprobada ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300 text-transparent hover:border-emerald-400'}`}>✓</button>
+                  <span className={`text-[10.5px] px-1.5 py-0.5 rounded shrink-0 ${CANAL_DE(p.canal).chip}`}>{CANAL_DE(p.canal).label}</span>
+                  {p.formato && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">{p.formato}</span>}
+                  <span className="text-sm text-slate-700 flex-1 min-w-0 truncate" title={p.nota ? `${p.titulo}\n\n${p.nota}` : p.titulo}>{p.titulo}</span>
+                  {programando === p.id ? (
+                    <input type="date" autoFocus onChange={(e) => programarIdea(p, e.target.value)} onBlur={() => setProgramando(null)}
+                      className="border border-slate-300 rounded-lg px-1.5 py-0.5 text-xs shrink-0" />
+                  ) : (
+                    <button onClick={() => setProgramando(p.id)} title="Programar: asignarle día y pasarla al calendario"
+                      className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul shrink-0">📅 Programar</button>
+                  )}
+                  <button onClick={() => setIdeaForm({ id: p.id, canal: p.canal, formato: p.formato || '', titulo: p.titulo, nota: p.nota || '' })}
+                    title="Editar" className="text-slate-300 hover:text-coop-azul opacity-0 group-hover:opacity-100 shrink-0"><Pencil size={13} /></button>
+                  {borrandoIdea === p.id ? (
+                    <span className="flex items-center gap-1 text-xs shrink-0">
+                      <button onClick={() => borrarIdea(p)} className="px-1.5 py-0.5 rounded bg-red-600 text-white">Sí</button>
+                      <button onClick={() => setBorrandoIdea(null)} className="px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">No</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setBorrandoIdea(p.id)} title="Eliminar la idea"
+                      className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs shrink-0">🗑</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {ideaForm && (
+              <div className="border border-coop-azul/40 rounded-lg p-3 mt-2 space-y-2 bg-blue-50/30">
+                <div className="flex gap-2">
+                  <select value={ideaForm.canal} onChange={(e) => setIdeaForm((x) => ({ ...x, canal: e.target.value }))} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                    {CANALES_CAL.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  <input list="mkt-formatos" value={ideaForm.formato} onChange={(e) => setIdeaForm((x) => ({ ...x, formato: e.target.value }))}
+                    placeholder="Formato (Reel, Placa…)" className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+                <input value={ideaForm.titulo} onChange={(e) => setIdeaForm((x) => ({ ...x, titulo: e.target.value }))}
+                  placeholder="Título / concepto de la idea" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-medium" />
+                <textarea value={ideaForm.nota} onChange={(e) => setIdeaForm((x) => ({ ...x, nota: e.target.value }))} rows={4}
+                  placeholder="Desarrollo: concepto, visual, texto en imagen, copy…" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setIdeaForm(null)} className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-500">Cancelar</button>
+                  <button onClick={guardarIdea} disabled={!ideaForm.titulo.trim()} className="px-3 py-1 text-xs rounded-lg bg-coop-azul text-white disabled:opacity-40">Guardar idea</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Campañas publicitarias (26/08): propuesta → aprobada (✓ define el
+              período) → línea de color atravesando los días del calendario. */}
+          <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-coop-negro">📣 Campañas <span className="text-[11px] font-normal text-slate-400">({campaniasDelMes.length} este mes)</span></h3>
+              {!campForm && (
+                <button onClick={() => setCampForm({ nombre: '', producto: '', presupuesto: '', desarrollo: '', desde: '', hasta: '' })}
+                  className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul">＋ campaña</button>
+              )}
+            </div>
+            {campaniasDelMes.length === 0 && !campForm && (
+              <p className="text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg px-2 py-2">
+                Las campañas (Meta Ads) se cargan como propuesta con su estrategia y presupuesto; al aprobarlas se define el período y aparecen como línea de color atravesando los días del calendario.
+              </p>
+            )}
+            <div className="divide-y divide-slate-50">
+              {campaniasDelMes.map((c) => (
+                <div key={c.id} className="flex items-center gap-2 py-1.5 group">
+                  <button onClick={() => toggleAprobadaCamp(c)} title={c.aprobada ? 'Aprobada — click para quitar' : 'Aprobar (te pide el período si no lo tiene)'}
+                    className={`w-5 h-5 rounded border shrink-0 text-xs leading-none ${c.aprobada ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300 text-transparent hover:border-emerald-400'}`}>✓</button>
+                  <span className={`w-3 h-3 rounded-sm shrink-0 ${colorCamp(c)}`} title="Color de la línea en el calendario" />
+                  <span className="text-sm text-slate-700 font-medium min-w-0 truncate" title={c.nombre}>{c.nombre}</span>
+                  {c.producto && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">{c.producto}</span>}
+                  <span className={`text-[11px] shrink-0 ${c.desde ? 'text-slate-500' : 'text-amber-600'}`}>{fmtRango(c)}</span>
+                  {c.presupuesto && <span className="text-[11px] text-slate-400 truncate max-w-[180px] shrink-0" title={c.presupuesto}>💰 {c.presupuesto}</span>}
+                  <span className="flex-1" />
+                  <button onClick={() => abrirCampania(c)} title="Abrir / editar" className="text-slate-300 hover:text-coop-azul opacity-0 group-hover:opacity-100 shrink-0"><Pencil size={13} /></button>
+                  {borrandoCamp === c.id ? (
+                    <span className="flex items-center gap-1 text-xs shrink-0">
+                      <button onClick={() => borrarCampania(c)} className="px-1.5 py-0.5 rounded bg-red-600 text-white">Sí</button>
+                      <button onClick={() => setBorrandoCamp(null)} className="px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">No</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setBorrandoCamp(c.id)} title="Eliminar la campaña"
+                      className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs shrink-0">🗑</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {campForm && (
+              <div className="border border-coop-azul/40 rounded-lg p-3 mt-2 space-y-2 bg-blue-50/30">
+                <div className="flex gap-2 flex-wrap">
+                  <input value={campForm.nombre} onChange={(e) => setCampForm((x) => ({ ...x, nombre: e.target.value }))}
+                    placeholder="Nombre de la campaña" className="flex-1 min-w-[180px] border border-slate-300 rounded-lg px-2 py-1.5 text-sm font-medium" />
+                  <input value={campForm.producto} onChange={(e) => setCampForm((x) => ({ ...x, producto: e.target.value }))}
+                    placeholder="Producto (Reconecta, +AGUA…)" className="w-44 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <label className="text-xs text-slate-500">Período</label>
+                  <input type="date" value={campForm.desde} onChange={(e) => setCampForm((x) => ({ ...x, desde: e.target.value }))} className="border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+                  <span className="text-slate-400 text-xs">→</span>
+                  <input type="date" value={campForm.hasta} onChange={(e) => setCampForm((x) => ({ ...x, hasta: e.target.value }))} className="border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+                  <input value={campForm.presupuesto} onChange={(e) => setCampForm((x) => ({ ...x, presupuesto: e.target.value }))}
+                    placeholder="Presupuesto ($/día × días)" className="flex-1 min-w-[180px] border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                </div>
+                <textarea value={campForm.desarrollo} onChange={(e) => setCampForm((x) => ({ ...x, desarrollo: e.target.value }))} rows={6}
+                  placeholder={'Desarrollo: objetivo Meta, segmentación (provincias, edades, cargos, intereses, exclusiones), formulario…'}
+                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setCampForm(null)} className="px-3 py-1 text-xs rounded-lg border border-slate-300 text-slate-500">Cancelar</button>
+                  <button onClick={guardarCampania} disabled={!campForm.nombre.trim()} className="px-3 py-1 text-xs rounded-lg bg-coop-azul text-white disabled:opacity-40">Guardar campaña</button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Ola 3: el espacio de trabajo del mes — el excel de Booster como calendario.
               Click en un día: ver/agregar/editar publicaciones (canal, formato, título, nota). */}
           <Calendario />
