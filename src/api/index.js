@@ -80,8 +80,15 @@ export const api = {
     create: (body) => http.post('/marketing-posts', body),
     update: (id, body) => http.patch(`/marketing-posts/${id}`, body),
     remove: (id) => http.del(`/marketing-posts/${id}`),
-    // Archivos vinculados a ALGUNA publicación (sello «usado» del contenido).
+    // Archivos vinculados a ALGUNA publicación o campaña (sello «usado»).
     archivosUsados: () => http.get('/marketing-posts/archivos-usados'),
+  },
+  // Campañas publicitarias (26/08): período como línea en el calendario.
+  marketingCampanias: {
+    list: () => http.get('/marketing-posts/campanias'),
+    create: (body) => http.post('/marketing-posts/campanias', body),
+    update: (id, body) => http.patch(`/marketing-posts/campanias/${id}`, body),
+    remove: (id) => http.del(`/marketing-posts/campanias/${id}`),
   },
 
   grilla: {
