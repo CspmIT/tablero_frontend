@@ -208,7 +208,7 @@ function SeccionRotacion({ api }) {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-slate-400 mt-2">Barra = colaboradores activos en el mes (según períodos de vigencia). <span className="text-emerald-600">+altas</span> / <span className="text-rose-500">−bajas</span> del mes. Colaboradores sin períodos cargados cuentan como activos en todo el rango.</p>
+              <p className="text-xs text-slate-400 mt-2">Barra = colaboradores activos en el mes (según períodos de vigencia). <span className="text-emerald-600">+altas</span> / <span className="text-rose-500">−bajas</span> del mes. Cuenta solo el equipo del área (manager/colaborador). Sin períodos cargados: cuenta si está activo hoy; un inactivo sin períodos no cuenta (cargale el período con su fecha de baja para que aparezca en el mes real).</p>
             </div>
           )}
         </div>

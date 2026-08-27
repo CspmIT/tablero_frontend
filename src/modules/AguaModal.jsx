@@ -140,7 +140,7 @@ export default function AguaModal({ open, lead, modo, estadoInicial, onAutoSave,
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-3" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-3" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl overflow-hidden flex flex-col" style={{ width: '95vw', height: '92vh', maxWidth: 1400 }}>
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200">
           <div className="text-sm font-medium text-coop-negro">+Agua · {modo === 'presupuesto' ? 'Presupuesto' : 'Relevamiento'} {lead?.organizacion && <span className="text-slate-400">· {lead.organizacion}</span>}</div>

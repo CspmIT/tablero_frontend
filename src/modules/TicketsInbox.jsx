@@ -235,7 +235,7 @@ export default function TicketsInbox() {
       {/* Config del conector Mesa de ayuda (gestores). El token se escribe pero
           nunca se relee: el campo vacío significa «conservar el guardado». */}
       {syncCfg && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setSyncCfg(null)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setSyncCfg(null))}>
           <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-1">Conector Mesa de ayuda</h3>
             <p className="text-xs text-slate-400 mb-3">Los datos que te pase Guillermo. El token queda guardado en el servidor y no vuelve a mostrarse.</p>
@@ -308,7 +308,7 @@ function NuevoTicketModal({ api, form, setForm, onDone }) {
   const campo = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm';
   const label = 'block text-xs font-medium text-slate-500 uppercase tracking-wide mb-1';
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setForm(null)}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setForm(null))}>
       <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold mb-1">Nuevo ticket</h3>
         <p className="text-xs text-slate-400 mb-4">Mismos campos que la Mesa de ayuda de la cooperativa + la clasificación nuestra.</p>
@@ -490,7 +490,7 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
   const label = 'text-xs font-medium text-slate-500 uppercase tracking-wide';
   const sel = 'border border-slate-300 rounded-lg px-2 py-1.5 text-sm';
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-1">
           <h3 className="font-semibold flex items-center gap-2 min-w-0">

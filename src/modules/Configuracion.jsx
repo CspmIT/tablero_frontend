@@ -163,6 +163,7 @@ function NotifPrefs() {
   const [mias, setMias] = useState({});
   const [estadoDisp, setEstadoDisp] = useState(pushEstado());
   const [guardando, setGuardando] = useState(false);
+  const [errPush, setErrPush] = useState('');
 
   useEffect(() => {
     api.push.preferencias().then((r) => { setTipos(r.tipos || []); setMias(r.mias || {}); }).catch(() => {});
@@ -171,8 +172,8 @@ function NotifPrefs() {
   const alternar = async (id) => {
     const nuevas = { ...mias, [id]: !mias[id] };
     setMias(nuevas); setGuardando(true);
-    try { const r = await api.push.guardarPreferencias(nuevas); setMias(r.mias || nuevas); }
-    catch { setMias(mias); alert('No se pudo guardar la preferencia'); }
+    try { const r = await api.push.guardarPreferencias(nuevas); setMias(r.mias || nuevas); setErrPush(''); }
+    catch { setMias(mias); setErrPush('No se pudo guardar la preferencia — reintentá.'); }
     finally { setGuardando(false); }
   };
 
@@ -183,11 +184,23 @@ function NotifPrefs() {
         {estadoDisp === 'granted' && <p className="text-sm text-emerald-600">✓ Notificaciones activadas en este dispositivo.</p>}
         {estadoDisp === 'denied' && <p className="text-sm text-red-500">Bloqueadas por el navegador: habilitalas desde la configuración del sitio (candado en la barra de dirección).</p>}
         {estadoDisp === 'no_soportado' && <p className="text-sm text-slate-500">Este entorno no soporta notificaciones push. Si estás en la <b>app de escritorio</b>, usá el Tablero desde Chrome/Edge (o instalalo como PWA desde el navegador) para recibirlas; en el celular, la app instalada es la mejor opción.</p>}
+        {/* iPhone/iPad en Safari sin instalar (26/08): el push SÍ funciona desde
+            iOS 16.4, pero solo con el Tablero agregado a la pantalla de inicio. */}
+        {estadoDisp === 'ios_instalar' && (
+          <div className="text-sm text-slate-600 space-y-1">
+            <p>En iPhone/iPad las notificaciones funcionan cuando el Tablero está <b>agregado a la pantalla de inicio</b>:</p>
+            <p className="text-slate-500">1. Tocá <b>Compartir</b> (el cuadradito con flecha ↑) en Safari.<br />
+              2. Elegí <b>«Agregar a pantalla de inicio»</b>.<br />
+              3. Abrí el Tablero <b>desde el ícono nuevo</b> y volvé a esta pantalla: vas a ver el botón para activarlas.</p>
+            <p className="text-xs text-slate-400">Necesita iOS 16.4 o más nuevo.</p>
+          </div>
+        )}
         {estadoDisp === 'default' && (
-          <button onClick={() => activarNotificaciones(api).then(() => setEstadoDisp('granted')).catch((e) => { setEstadoDisp(pushEstado()); alert(e.message); })}
+          <button onClick={() => activarNotificaciones(api).then(() => { setEstadoDisp('granted'); setErrPush(''); }).catch((e) => { setEstadoDisp(pushEstado()); setErrPush(e.message || 'No se pudo activar'); })}
             className="text-sm px-3 py-1.5 rounded-lg bg-coop-azul text-white hover:opacity-90">🔔 Activar en este dispositivo</button>
         )}
-        <p className="text-xs text-slate-400 mt-2">El permiso es por dispositivo (activalo en el celular y en la compu por separado). En Android conviene la app instalada.</p>
+        {errPush && <p className="text-sm text-red-500 mt-2">{errPush}</p>}
+        <p className="text-xs text-slate-400 mt-2">El permiso es por dispositivo (activalo en el celular y en la compu por separado). En Android conviene la app instalada; en iPhone, el Tablero agregado a la pantalla de inicio.</p>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4">

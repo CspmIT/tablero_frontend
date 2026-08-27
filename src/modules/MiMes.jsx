@@ -419,7 +419,7 @@ function DiaDetalleModal({ ctx, colaborador, onClose }) {
   const items = (entry?.items || []).filter((it) => it && String(it.text || '').trim());
   const fmt = dia.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl w-full max-w-md p-5 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold capitalize">{fmt}</h3>
         {colaborador && <p className="text-sm text-slate-500 mb-3">{colaborador.nombre}</p>}
