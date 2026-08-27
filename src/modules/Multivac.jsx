@@ -1880,7 +1880,7 @@ export default function Multivac() {
       {/* Confirmación propia del flasheo: reemplaza al confirm() nativo para
           que el usuario de campo NO vea el encabezado "tauri://localhost dice…". */}
       {fwConfirm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]" onClick={() => responderConfirm(false)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]" onMouseDown={(e) => e.target === e.currentTarget && (responderConfirm(false))}>
           <div className="bg-white rounded-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-2">{fwConfirm.titulo}</h3>
             {(fwConfirm.lineas || []).map((l, i) => (
@@ -1900,7 +1900,7 @@ export default function Multivac() {
 
       {/* ABM de releases de firmware (ola C) */}
       {fwAbmOpen && fwForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => !fwSubiendo && setFwAbmOpen(false)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (!fwSubiendo && setFwAbmOpen(false))}>
           <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-1">Subir release de firmware</h3>
             <p className="text-xs text-slate-400 mb-3">Los .bin POR PARTICIÓN que exporta Lorenzo (no el merged: pisaría configuración y mediciones). Offsets típicos precargados — ajustalos según el manifiesto de la versión.</p>
@@ -2011,7 +2011,7 @@ export default function Multivac() {
 
       {/* ABM de botones (compartidos): nombre humanizado + comando + producto. */}
       {abmOpen && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setAbmOpen(false)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setAbmOpen(false))}>
           <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-1">Botones de comandos</h3>
             <p className="text-xs text-slate-400 mb-3">Compartidos por TODO el equipo (se guardan en el servidor). General = comunes a los 3 productos (nombre del equipo, red); lo específico de cada aplicación va bajo su producto.</p>

@@ -59,7 +59,7 @@ export default function CardModal({ open, card, proyectos, initialColumn, onClos
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-5">
         <h3 className="text-lg font-semibold text-coop-negro mb-4">{isNew ? 'Nueva tarjeta' : 'Editar tarjeta'}</h3>
 

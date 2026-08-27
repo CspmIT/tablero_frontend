@@ -9,6 +9,7 @@ import AguaModal from './AguaModal.jsx';
 import CoopCloudModal from './CoopCloudModal.jsx';
 import ImportarLeads from './ImportarLeads.jsx';
 import CRMMetricas from './CRMMetricas.jsx';
+import ContactosView from './ContactosView.jsx'; // Agenda de contactos externos (26/08)
 
 const ETAPAS = [
   { id: 'contacto', label: 'Contacto' },
@@ -385,7 +386,7 @@ export default function CRM() {
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div>
           <div className="inline-flex items-center gap-1 bg-slate-100 rounded-xl p-1">
-            {[['embudo', 'Embudo'], ['cuentas', 'Cuentas'], ['novedades', 'Novedades']].map(([id, lbl]) => (
+            {[['embudo', 'Embudo'], ['cuentas', 'Cuentas'], ['novedades', 'Novedades'], ['contactos', 'Contactos']].map(([id, lbl]) => (
               <button key={id} onClick={() => setVista(id)}
                 className={`text-sm sm:text-base font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors ${
                   vista === id ? 'bg-coop-azul text-white' : 'text-slate-500 hover:bg-white'
@@ -420,7 +421,7 @@ export default function CRM() {
             </button>
             {menuAcciones && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setMenuAcciones(false)} />
+                <div className="fixed inset-0 z-40" onMouseDown={(e) => e.target === e.currentTarget && (setMenuAcciones(false))} />
                 <div className="absolute right-0 top-10 z-50 w-56 bg-white rounded-xl shadow-lg border border-slate-200 py-1 text-sm">
                   {me?.tipo === 'manager' && (
                     <button onClick={() => { setMenuAcciones(false); setGraphOpen(true); }}
@@ -504,6 +505,8 @@ export default function CRM() {
           <p className="text-[11px] text-slate-400 mt-2">Las cuentas agrupan todas las oportunidades (activas, ganadas, perdidas y declinadas) por organización. Caso Colonia Caroya: una cuenta, dos leads — Reconecta ganado y Call Center en curso.</p>
         </div>
       )}
+      {vista === 'contactos' && <ContactosView />}
+
       {vista === 'novedades' && (
         <div className="max-w-3xl">
           {novedades.length === 0 ? (
@@ -593,7 +596,7 @@ export default function CRM() {
       )}
 
       {productosOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setProductosOpen(false); }}>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setProductosOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
             <h3 className="font-semibold mb-1">Listado de productos</h3>
             <p className="text-xs text-slate-500 mb-3">Los productos elegibles en los leads. Se gestionan acá — sin pedir desarrollo.</p>
@@ -629,7 +632,7 @@ export default function CRM() {
       </div>
 
       {form && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setForm(null)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setForm(null))}>
           <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">{form.id ? 'Editar lead' : 'Nuevo lead'}</h3>
@@ -884,7 +887,7 @@ export default function CRM() {
       )}
 
       {vcCtx && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setVcCtx(null)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setVcCtx(null))}>
           <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
             {vcCtx.paso === 'form' ? (
               <>
@@ -973,7 +976,7 @@ export default function CRM() {
       )}
 
       {ganarCtx && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setGanarCtx(null)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setGanarCtx(null))}>
           <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-1">Ganar lead</h3>
             <p className="text-sm text-slate-500 mb-4">{ganarCtx.lead.organizacion} · se creará el proyecto en el Kanban</p>
@@ -1115,7 +1118,7 @@ function GraphConfigModal({ api, estado, onClose }) {
   const dv = estado?.diasParaVencer;
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold mb-1">Integración Outlook / Teams</h3>
         <div className="text-sm text-slate-500 mb-3">

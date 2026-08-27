@@ -7,7 +7,7 @@
 // (calculado en el backend) — SIEMPRE etiquetado como estimación.
 // Nada entra al tablero sin clasificar: el KPI "Sin clasificar" evita que
 // el tablero mienta por omisión.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../data/DataContext.jsx';
 
 // Paleta institucional validada (diseño §9) — orden FIJO por causa.
@@ -29,6 +29,7 @@ const PERIODOS = [
   { v: 3, t: 'Últimos 3 meses' },
   { v: 6, t: 'Últimos 6 meses' },
   { v: 12, t: 'Últimos 12 meses' },
+  { v: 0, t: 'Personalizado…' }, // 26/08: rango libre desde/hasta
 ];
 
 const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
@@ -46,7 +47,10 @@ const lunesDe = (fecha) => {
 
 export default function MetricasOV() {
   const { api } = useData();
-  const [vista, setVista] = useState('tablero'); // tablero | bandeja | detalle
+  const [vista, setVista] = useState('tablero'); // tablero | reporte | bandeja | detalle
+  // 26/08 (Leonardo, orden visual): solo Tablero y Reporte como solapas; la
+  // Bandeja y el Detalle son herramientas de mantenimiento → viven en el ⚙.
+  const [menuAjustes, setMenuAjustes] = useState(false);
   const [meses, setMeses] = useState(3);         // default: últimos 3 meses (pedido de Operaciones)
   const [tickets, setTickets] = useState([]);
   const [reglas, setReglas] = useState([]);
@@ -63,20 +67,25 @@ export default function MetricasOV() {
   const [aplicandoTodas, setAplicandoTodas] = useState(false);
 
   const hoy = new Date();
+  // Rango personalizado (26/08): meses === 0 usa desde/hasta libres.
+  const [customDesde, setCustomDesde] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return isoDia(d); });
+  const [customHasta, setCustomHasta] = useState(isoDia(new Date()));
   const desde = useMemo(() => {
+    if (meses === 0) return customDesde;
     const d = new Date(hoy); d.setMonth(d.getMonth() - meses);
     return isoDia(d);
-  }, [meses]); // eslint-disable-line react-hooks/exhaustive-deps
-  const hasta = isoDia(hoy);
+  }, [meses, customDesde]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hasta = meses === 0 ? customHasta : isoDia(hoy);
 
   const cargar = () => {
+    if (!desde || !hasta || hasta < desde) return; // rango a medio escribir: no pegarle al backend
     setCargando(true);
     api.analisisOv.tickets(desde, hasta)
       .then((r) => setTickets(Array.isArray(r?.tickets) ? r.tickets : []))
       .catch(() => setTickets([]))
       .finally(() => setCargando(false));
   };
-  useEffect(() => { cargar(); }, [desde]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { cargar(); }, [desde, hasta]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     api.analisisOv.reglas().then((r) => setReglas(Array.isArray(r?.reglas) ? r.reglas : [])).catch(() => {});
   }, [api]);
@@ -235,17 +244,41 @@ export default function MetricasOV() {
     <div className="p-4">
       <div className="flex items-end justify-between flex-wrap gap-2 mb-1">
         <h2 className="text-lg font-semibold text-slate-800">Métricas Oficina Virtual <span className="text-sm font-normal text-slate-400">· tickets clasificados por tipo × causa</span></h2>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 items-center">
           {[
             { id: 'tablero', label: 'Tablero ejecutivo' },
-            { id: 'bandeja', label: `Bandeja de clasificación${pendientes.length ? ` (${pendientes.length})` : ''}` },
-            { id: 'detalle', label: 'Detalle' },
+            { id: 'reporte', label: 'Reporte de incidentes' },
           ].map((s) => (
-            <button key={s.id} onClick={() => setVista(s.id)}
+            <button key={s.id} onClick={() => { setVista(s.id); setMenuAjustes(false); }}
               className={`px-3 py-1.5 text-sm rounded-full border whitespace-nowrap ${vista === s.id ? 'bg-coop-azul text-white border-coop-azul font-medium' : 'bg-white text-slate-600 border-slate-200 hover:border-coop-azul'}`}>
               {s.label}
             </button>
           ))}
+          {/* Cuando estás en una herramienta del ⚙, se ve dónde estás parado. */}
+          {(vista === 'bandeja' || vista === 'detalle') && (
+            <span className="px-3 py-1.5 text-sm rounded-full bg-coop-azul text-white font-medium whitespace-nowrap">
+              {vista === 'bandeja' ? 'Bandeja de clasificación' : 'Detalle'}
+            </span>
+          )}
+          <div className="relative">
+            <button onClick={() => setMenuAjustes((m) => !m)} title="Herramientas de clasificación y control"
+              className={`px-2.5 py-1.5 text-sm rounded-full border ${menuAjustes || vista === 'bandeja' || vista === 'detalle' ? 'border-coop-azul text-coop-azul' : 'bg-white text-slate-500 border-slate-200 hover:border-coop-azul'}`}>
+              ⚙{pendientes.length ? <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">{pendientes.length}</span> : null}
+            </button>
+            {menuAjustes && (
+              <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-60">
+                {[
+                  { id: 'bandeja', label: `Bandeja de clasificación${pendientes.length ? ` (${pendientes.length})` : ''}` },
+                  { id: 'detalle', label: 'Detalle (control cruzado)' },
+                ].map((s) => (
+                  <button key={s.id} onClick={() => { setVista(s.id); setMenuAjustes(false); }}
+                    className={`block w-full text-left px-3 py-2 text-sm hover:bg-slate-50 ${vista === s.id ? 'text-coop-azul font-medium' : 'text-slate-600'}`}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <p className="text-sm text-slate-500 mb-3">
@@ -257,6 +290,15 @@ export default function MetricasOV() {
         <select value={meses} onChange={(e) => setMeses(Number(e.target.value))} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
           {PERIODOS.map((p) => <option key={p.v} value={p.v}>{p.t}</option>)}
         </select>
+        {meses === 0 && (
+          <span className="flex items-center gap-1.5">
+            <input type="date" value={customDesde} max={customHasta} onChange={(e) => setCustomDesde(e.target.value)}
+              className="border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+            <span className="text-slate-400 text-xs">→</span>
+            <input type="date" value={customHasta} min={customDesde} onChange={(e) => setCustomHasta(e.target.value)}
+              className="border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+          </span>
+        )}
         <select value={fTipo} onChange={(e) => setFTipo(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
           <option value="">Tipo: todos</option>
           {TIPOS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
@@ -288,8 +330,12 @@ export default function MetricasOV() {
           <div className="grid lg:grid-cols-2 gap-3">
             <Tarjeta titulo="Evolución semanal por causa" nota="cantidad de tickets por semana (lunes a domingo)">
               <div className="flex items-end gap-1 h-40">
+                {/* h-full en la columna (26/08, fix del gráfico «se ve feo»): sin alto
+                    definido, los height:% de los segmentos se resolvían contra NADA y
+                    todas las barras colapsaban al min-h de 2px. Con h-full, la semana
+                    de mayor total llena el canvas y el resto escala proporcional. */}
                 {semanas.map((s) => (
-                  <div key={s.semana} className="flex-1 flex flex-col justify-end gap-px" title={`Semana del ${fmtFecha(s.semana)}: ${s.total} tickets`}>
+                  <div key={s.semana} className="flex-1 h-full flex flex-col justify-end gap-px" title={`Semana del ${fmtFecha(s.semana)}: ${s.total} tickets`}>
                     {CAUSAS.map((c) => (s[c.id] ? (
                       <div key={c.id} style={{ height: `${(s[c.id] / maxSemana) * 100}%`, background: c.color }} className="rounded-sm min-h-[2px]" />
                     ) : null))}
@@ -532,6 +578,162 @@ export default function MetricasOV() {
           </div>
         </div>
       )}
+
+      {vista === 'reporte' && <ReporteSemanalOV api={api} />}
+    </div>
+  );
+}
+
+// ─────────────────── Reporte semanal a Gerencia General (26/08) ───────────────────
+// Mandato M1 · Oficina Virtual — Estabilización. Se genera desde los TICKETS
+// clasificados como incidente (Inbox), con el formato de la plantilla real de
+// Sofía/Alexis. La vista previa ES el documento: un iframe con el HTML final
+// (mismo srcDoc que se imprime), y «Imprimir / PDF» dispara el print del
+// iframe con @page A4 — el navegador lo guarda como PDF tal cual se ve.
+const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const dmy = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
+const sumarDias = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+function ReporteSemanalOV({ api }) {
+  const [tickets, setTickets] = useState([]);
+  const iframeRef = useRef(null);
+  // Emisión: viernes. Default = el viernes de esta semana (o el próximo).
+  const [emision, setEmision] = useState(() => {
+    const d = new Date();
+    const delta = (5 - d.getDay() + 7) % 7; // 5 = viernes
+    d.setDate(d.getDate() + delta);
+    return isoDia(d);
+  });
+  const [nro, setNro] = useState(`OV-${new Date().getFullYear()}-`);
+  const [duenio, setDuenio] = useState('Sofía Vannucchi – Alexis Prado');
+  const [prov, setProv] = useState('IT & Development');
+
+  useEffect(() => {
+    api.tickets.list().then((r) => setTickets(r.tickets || [])).catch(() => setTickets([]));
+  }, [api]);
+
+  // Período del mandato: viernes anterior → jueves (el día previo a la emisión).
+  const hastaJ = sumarDias(emision, -1);
+  const desdeV = sumarDias(emision, -7);
+  const fechaDe = (t) => String(t.ocurridoAt || t.createdAt || '').slice(0, 10);
+  const incidentes = tickets.filter((t) => t.ovTipo === 'incidente' && fechaDe(t) <= hastaJ);
+  const enSemana = incidentes.filter((t) => fechaDe(t) >= desdeV);
+  const semanaPrev = incidentes.filter((t) => fechaDe(t) >= sumarDias(desdeV, -7) && fechaDe(t) <= sumarDias(hastaJ, -7));
+  const en90 = incidentes.filter((t) => fechaDe(t) >= sumarDias(hastaJ, -89));
+  // Días corridos sin incidente (condición de salida: 30). Todo incidente reinicia a 0.
+  const ultima = incidentes.map(fechaDe).sort().pop() || null;
+  const diasSin = ultima
+    ? Math.min(30, Math.max(0, Math.round((new Date(`${hastaJ}T12:00Z`) - new Date(`${ultima}T12:00Z`)) / 86400000)))
+    : 30;
+
+  const CATS = [
+    { id: 'a', label: '(a) Falla de desarrollo propio' },
+    { id: 'b', label: '(b) Falla de integración con ERP' },
+    { id: 'c', label: '(c) Falla botón de pago (tercero)' },
+  ];
+  const deCat = (lista, c) => lista.filter((t) => t.categoriaFalla === c);
+  // Semáforo del criterio: verde = sin incidentes en la semana; amarillo =
+  // incidentes todos resueltos al cierre; rojo = alguno pendiente al cierre.
+  const semaforo = (c) => {
+    const sem = deCat(enSemana, c);
+    if (!sem.length) return { color: '#2E9E5B', txt: 'Verde' };
+    return sem.every((t) => t.resueltoAt) ? { color: '#E0A800', txt: 'Amarillo' } : { color: '#D6453F', txt: 'Rojo' };
+  };
+  const tendencia = (c) => {
+    const a = deCat(enSemana, c).length, b = deCat(semanaPrev, c).length;
+    return a > b ? '↑' : a < b ? '↓' : '=';
+  };
+  const tipoDe = (t) => (t.origen === 'whatsapp' ? 'Recl. asociado' : t.origen === 'mesa_ayuda' ? 'Recl. interno' : 'Recl. interno');
+  const tResol = (t) => {
+    if (!t.resueltoAt) return 'Pend.';
+    const h = Math.round((new Date(t.resueltoAt) - new Date(t.ocurridoAt || t.createdAt)) / 3600000);
+    return h >= 0 ? `${h} h` : '—';
+  };
+  const sinCategoria = enSemana.filter((t) => !t.categoriaFalla).length;
+
+  const NAVY = '#1F3864';
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Reporte semanal OV</title><style>
+    *{box-sizing:border-box} body{font-family:Calibri,'Segoe UI',sans-serif;color:#222;margin:0;background:#fff;padding:24px}
+    h1{font-size:19px;color:${NAVY};margin:0 0 2px} .sub{color:#8a8a00;font-weight:bold;font-size:12px;margin-bottom:14px}
+    .sec{background:${NAVY};color:#fff;font-weight:bold;font-size:12px;padding:4px 8px;margin:14px 0 6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    table{width:100%;border-collapse:collapse;font-size:11px} th,td{border:1px solid #9aa3b5;padding:4px 6px;text-align:left;vertical-align:top}
+    th{background:${NAVY};color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    td.lbl{background:#eef1f7;font-weight:bold;width:22%;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .contador{display:flex;justify-content:space-between;align-items:center;border:2px solid ${NAVY};margin-top:10px}
+    .contador .txt{padding:8px 10px;font-size:11px} .contador .dia{padding:8px 16px;font-size:22px;font-weight:bold;color:${NAVY};white-space:nowrap}
+    .defbox{background:#FEF7DC;border:1px solid #E8D48B;padding:8px 10px;font-size:10.5px;margin-top:10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:3px;vertical-align:middle;border:1px solid #999}
+    .criterio{font-size:9.5px;color:#555;margin-top:4px} .nota{font-size:10px;color:#777;margin-top:6px}
+    .pie{margin-top:18px;font-size:9px;color:#999;text-align:right}
+    @page{size:A4;margin:14mm 12mm} @media print{body{padding:0}}
+  </style></head><body>
+  <h1>REPORTE SEMANAL A GERENCIA GENERAL</h1>
+  <div class="sub">Mandato M1 · Oficina Virtual — Estabilización</div>
+
+  <div class="sec">1. DATOS DEL REPORTE</div>
+  <table>
+    <tr><td class="lbl">N° de reporte</td><td>${escHtml(nro)}</td><td class="lbl">Fecha de emisión</td><td>Viernes ${dmy(emision)}</td></tr>
+    <tr><td class="lbl">Período cubierto</td><td>Viernes ${dmy(desdeV)} a jueves ${dmy(hastaJ)}</td><td class="lbl">Servicio</td><td>Oficina Virtual</td></tr>
+    <tr><td class="lbl">Dueño del servicio</td><td>${escHtml(duenio)}</td><td class="lbl">Proveedor interno</td><td>${escHtml(prov)}</td></tr>
+  </table>
+  <div class="contador">
+    <div class="txt"><b>DÍAS CORRIDOS SIN INCIDENTE</b><br>Condición de salida del mandato: 30 días corridos sin incidente. Todo incidente reinicia el contador a cero.</div>
+    <div class="dia">Día ${diasSin} <span style="font-size:12px;font-weight:normal">de 30</span></div>
+  </div>
+  <div class="defbox"><b>Definición de incidente</b><br>Se computa como incidente cualquiera de los siguientes eventos: (1) indisponibilidad total o parcial de la Oficina Virtual; (2) reclamo de asociado vinculado al servicio, verificado por Atención al Cliente; (3) reclamo interno a IT efectuado por un colaborador de la cooperativa. Cada evento se registra una única vez y se clasifica en una de las tres categorías del mandato.</div>
+
+  <div class="sec">2. ESTADO POR CATEGORÍA DE FALLA</div>
+  <table>
+    <tr><th>Categoría</th><th>Estado</th><th>Incidentes semana</th><th>Acumulado 90 días</th><th>Tendencia</th></tr>
+    ${CATS.map((c) => {
+      const s = semaforo(c.id);
+      return `<tr><td>${c.label}</td><td><span class="dot" style="background:${s.color}"></span>${s.txt}</td><td>${deCat(enSemana, c.id).length}</td><td>${deCat(en90, c.id).length}</td><td>${tendencia(c.id)}</td></tr>`;
+    }).join('')}
+  </table>
+  <div class="criterio"><b>Criterio del semáforo:</b> Verde = sin incidentes en la semana · Amarillo = incidentes de la semana resueltos al cierre del período · Rojo = incidente pendiente de resolución al cierre del período.</div>
+  ${sinCategoria ? `<div class="nota">⚠ ${sinCategoria} incidente(s) de la semana sin categoría a/b/c asignada — clasificalos en Inbox → Tickets para que sumen a la tabla.</div>` : ''}
+
+  <div class="sec">3. INCIDENTES DEL PERÍODO</div>
+  ${enSemana.length ? `<table>
+    <tr><th>Fecha</th><th>Descripción del incidente</th><th>Categoría</th><th>Tipo</th><th>T. resolución</th><th>Causa raíz identif.</th></tr>
+    ${enSemana.map((t) => `<tr><td>${dmy(fechaDe(t))}</td><td><b>${escHtml(t.titulo)}</b>${t.descripcion ? `<br>${escHtml(String(t.descripcion).slice(0, 220))}${String(t.descripcion).length > 220 ? '…' : ''}` : ''}</td><td style="text-align:center">${t.categoriaFalla || '—'}</td><td>${tipoDe(t)}</td><td>${tResol(t)}</td><td>${t.ovCausa ? 'Sí' : 'No'}</td></tr>`).join('')}
+  </table>` : '<p style="font-size:11px"><b>☐ Sin incidentes registrados en el período.</b></p>'}
+
+  <div class="pie">Generado desde el Tablero Cooptech · Inbox de tickets · ${dmy(isoDia(new Date()))}</div>
+  </body></html>`;
+
+  const imprimir = () => {
+    const w = iframeRef.current?.contentWindow;
+    if (w) { w.focus(); w.print(); }
+  };
+
+  return (
+    <div>
+      <div className="bg-white rounded-xl border border-slate-200 p-3 mb-3 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-xs text-slate-500">Fecha de emisión (viernes)</label>
+          <input type="date" value={emision} onChange={(e) => setEmision(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500">N° de reporte</label>
+          <input value={nro} onChange={(e) => setNro(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-32" />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500">Dueño del servicio</label>
+          <input value={duenio} onChange={(e) => setDuenio(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-64" />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500">Proveedor interno</label>
+          <input value={prov} onChange={(e) => setProv(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-44" />
+        </div>
+        <button onClick={imprimir} className="ml-auto px-4 py-2 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90">🖨 Imprimir / PDF</button>
+      </div>
+      <p className="text-xs text-slate-400 mb-2">
+        La vista previa ES el documento: «Imprimir / PDF» abre el diálogo del sistema — elegí <b>«Guardar como PDF»</b> y sale tal cual se ve (A4).
+        Los incidentes salen de Inbox → Tickets (clasificados como incidente, período viernes a jueves).
+      </p>
+      <iframe ref={iframeRef} srcDoc={html} title="Reporte semanal OV"
+        className="w-full bg-white border border-slate-200 rounded-xl" style={{ height: 1050 }} />
     </div>
   );
 }

@@ -189,7 +189,7 @@ function ConfigClaveModal({ estado, api, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold mb-1">Clave de API del asistente</h3>
         <p className="text-sm text-slate-500 mb-3">

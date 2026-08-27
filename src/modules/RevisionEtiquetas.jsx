@@ -110,7 +110,7 @@ export default function RevisionEtiquetas() {
         {!etiquetas.length && <p className="text-sm text-slate-400">Sin etiquetas registradas todavía.</p>}
       </div>
       {detalle && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setDetalle(null)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setDetalle(null))}>
           <div className="bg-white rounded-xl w-full max-w-lg p-5 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-1">Tareas con "{detalle.tag}"</h3>
             <p className="text-xs text-slate-400 mb-3">{anio === 'todos' ? 'Todos los años' : `Año ${anio}`} · agrupa variantes de escritura</p>
