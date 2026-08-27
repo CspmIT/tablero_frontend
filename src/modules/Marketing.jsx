@@ -894,7 +894,7 @@ export default function Marketing() {
     };
     const [yy, mm2] = mes.split('-');
     return (
-      <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setDiaSel(null)}>
+      <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => e.target === e.currentTarget && (setDiaSel(null))}>
         <div className="bg-white rounded-xl w-full max-w-2xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-coop-negro">{String(diaSel).padStart(2, '0')}/{mm2}/{yy} · {del.length} publicación{del.length === 1 ? '' : 'es'}</h3>
@@ -1257,7 +1257,7 @@ export default function Marketing() {
 
       {/* Reproductor propio: streaming para los pesados, objectURL para los chicos */}
       {video && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={cerrarVideo}>
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onMouseDown={(e) => e.target === e.currentTarget && cerrarVideo()}>
           <div className="w-full max-w-4xl flex flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
             {video.src ? (
               // eslint-disable-next-line jsx-a11y/media-has-caption
@@ -1275,7 +1275,7 @@ export default function Marketing() {
 
       {/* Modal propio de imagen ampliada */}
       {ampliada && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={cerrarAmpliada}>
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onMouseDown={(e) => e.target === e.currentTarget && cerrarAmpliada()}>
           <div className="max-w-4xl max-h-full flex flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
             <img src={ampliada.src} alt={ampliada.nombre} className="max-h-[80vh] rounded-lg shadow-2xl object-contain" />
             <div className="flex items-center gap-3">

@@ -16,6 +16,11 @@ const SALAS = [
 
 export default function ReunionModal({ reunion, fechaInicial, onDone, onClose }) {
   const { api, me, colaboradores } = useData();
+  // Agenda de contactos (26/08): externos con mail para invitar sin tipear.
+  const [contactos, setContactos] = useState([]);
+  useEffect(() => {
+    api.contactos?.list().then((r) => setContactos((r.contactos || []).filter((c) => c.email))).catch(() => {});
+  }, [api]);
   const editando = !!reunion;
   const enSalas = reunion?.lugar && SALAS.includes(reunion.lugar);
   const [f, setF] = useState(() => ({
@@ -102,7 +107,7 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
   const activos = (colaboradores || []).filter((c) => c.activo !== false);
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold mb-1">{editando ? 'Reprogramar reunión' : 'Nueva reunión'}</h3>
         {editando && (
@@ -196,6 +201,20 @@ export default function ReunionModal({ reunion, fechaInicial, onDone, onClose })
               onBlur={() => agregarEmail(f.emailInput)}
               placeholder="mail@cliente.com (Enter para agregar; hasta 10)"
               className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+            {/* Agenda (26/08): elegir de Contactos en vez de tipear el mail. */}
+            {contactos.length > 0 && (
+              <select value="" onChange={(e) => { if (e.target.value) agregarEmail(e.target.value); }}
+                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-500 mt-1.5 bg-slate-50">
+                <option value="">＋ Agregar desde Contactos…</option>
+                {contactos
+                  .filter((c) => !f.emailsExternos.includes(c.email))
+                  .map((c) => (
+                    <option key={c.id} value={c.email}>
+                      {c.nombre}{c.organizacion ? ` (${c.organizacion})` : ''} — {c.email}{c.origen === 'crm' ? ' · CRM' : ''}
+                    </option>
+                  ))}
+              </select>
+            )}
             <p className="text-[11px] text-slate-400 mt-1">Para equipos del cliente con varios mails: reciben la invitación de Outlook/Teams como cualquier participante.</p>
           </div>
 

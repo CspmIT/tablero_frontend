@@ -105,7 +105,7 @@ export default function ObjetivoDetalleModal({ open, objetivo, pct, api, readOnl
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl w-full max-w-4xl max-h-[88vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 p-4 border-b border-slate-200 sticky top-0 bg-white z-10">
           <div className="min-w-0">
@@ -186,7 +186,7 @@ export default function ObjetivoDetalleModal({ open, objetivo, pct, api, readOnl
 
       {ampliada && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60]"
-          onClick={(e) => { e.stopPropagation(); setAmpliada(null); }}>
+          onMouseDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) setAmpliada(null); }}>
           <button type="button" onClick={(e) => { e.stopPropagation(); setAmpliada(null); }}
             className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white hover:bg-white/20"
             title="Cerrar"><X size={22} /></button>

@@ -139,7 +139,7 @@ export default function Deseos({ embebido = false }) { // embebido: dentro del I
       </div>
 
       {form && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setForm(null)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setForm(null))}>
           <div className="bg-white rounded-xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-semibold mb-3">{form.id ? 'Editar deseo' : 'Nuevo deseo'}</h3>
             <div className="space-y-3">
@@ -195,7 +195,7 @@ function GestionModal({ api, gestion, setGestion, proyectos, onDone }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setGestion(null)}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setGestion(null))}>
       <div className="bg-white rounded-xl w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold mb-1">Gestionar deseo</h3>
         <p className="text-sm text-slate-500 mb-1">{d.solicitante} · solicitado el {dstr(d.createdAt)}{d.fechaNecesidad ? ` · lo necesita para ${dstr(d.fechaNecesidad)}` : ''}</p>

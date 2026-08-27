@@ -83,6 +83,13 @@ export const api = {
     // Archivos vinculados a ALGUNA publicación o campaña (sello «usado»).
     archivosUsados: () => http.get('/marketing-posts/archivos-usados'),
   },
+  // Agenda de contactos externos (26/08): manuales + derivados del CRM en vivo.
+  contactos: {
+    list: () => http.get('/contactos'),
+    create: (body) => http.post('/contactos', body),
+    update: (id, body) => http.patch(`/contactos/${id}`, body),
+    remove: (id) => http.del(`/contactos/${id}`),
+  },
   // Campañas publicitarias (26/08): período como línea en el calendario.
   marketingCampanias: {
     list: () => http.get('/marketing-posts/campanias'),

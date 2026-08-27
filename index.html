@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/cooptech-favicon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- iOS (26/08): el ícono de pantalla de inicio sale de acá (iOS ignora los del
+         manifest) y el nombre corto del ícono, de apple-mobile-web-app-title.
+         Con el Tablero agregado a inicio, Safari habilita Web Push (iOS 16.4+). -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Tablero" />
     <meta name="theme-color" content="#0f3f5e" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tablero de Mando Cooptech</title>

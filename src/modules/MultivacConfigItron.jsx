@@ -530,7 +530,7 @@ export default function MultivacConfigItron({ habilitado, conectado, enviarLinea
 
       {/* Vista previa de comandos antes de grabar */}
       {confirmar && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]" onClick={() => confirmar.resolve(false)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]" onMouseDown={(e) => e.target === e.currentTarget && (confirmar.resolve(false))}>
           <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={(e2) => e2.stopPropagation()}>
             <h3 className="font-semibold mb-1">💾 Grabar {confirmar.comandos.length} cambio{confirmar.comandos.length === 1 ? '' : 's'}</h3>
             <p className="text-xs text-slate-400 mb-2">Estos comandos se envían a la placa y al final se ejecuta <b>restart</b> (los cambios aplican con el reinicio):</p>

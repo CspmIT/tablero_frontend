@@ -10,6 +10,17 @@ function b64aUint8(base64) {
 
 import { isTauri } from './isTauri.js';
 
+// iOS (26/08): Safari soporta Web Push estándar desde iOS 16.4, PERO solo
+// cuando el sitio corre INSTALADO en la pantalla de inicio (PWA standalone).
+// En Safari "suelto", PushManager directamente no existe — ese caso no es
+// "no soportado": es "instalá primero", y la UI tiene que guiarlo.
+export const esIos = () =>
+  /iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad moderno se disfraza de Mac
+
+export const esPwaInstalada = () =>
+  window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true;
+
 export function pushSoportado() {
   // El webview de Tauri expone las APIs pero NO implementa Web Push real
   // (no hay servicio de push detrás): mejor no ofrecer lo que no se cumple.
@@ -18,7 +29,12 @@ export function pushSoportado() {
 }
 
 export function pushEstado() {
-  if (!pushSoportado()) return 'no_soportado';
+  if (!pushSoportado()) {
+    // iPhone/iPad en Safari sin instalar: el camino existe — hay que agregarlo
+    // a la pantalla de inicio y abrir desde el ícono.
+    if (esIos() && !esPwaInstalada()) return 'ios_instalar';
+    return 'no_soportado';
+  }
   return Notification.permission; // 'default' | 'granted' | 'denied'
 }
 

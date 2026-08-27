@@ -79,7 +79,7 @@ function NavItems({ modulos, infoGrupo, configuracion, activo, onSelect, expandi
 
           {infoAbierto && !enMovil && (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setInfoAbierto(false)} />
+              <div className="fixed inset-0 z-40" onMouseDown={(e) => e.target === e.currentTarget && (setInfoAbierto(false))} />
               <div className="fixed z-50 w-52 bg-white rounded-xl shadow-lg border border-slate-200 py-1"
                 style={{ top: flyPos.top, left: flyPos.left }}>
                 {infoGrupo.map((m) => {
@@ -172,7 +172,7 @@ export default function Layout({ modulos, infoGrupo = [], configuracion = null, 
           </button>
           {userAbierto && (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setUserAbierto(false)} />
+              <div className="fixed inset-0 z-40" onMouseDown={(e) => e.target === e.currentTarget && (setUserAbierto(false))} />
               <div className="absolute right-0 top-11 z-50 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 text-slate-700">
                 <div className="px-4 py-2 border-b border-slate-100">
                   <p className="text-sm font-medium truncate">{me?.nombre || 'Usuario'}</p>
