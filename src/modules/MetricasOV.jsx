@@ -11,11 +11,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../data/DataContext.jsx';
 
 // Paleta institucional validada (diseño §9) — orden FIJO por causa.
+// 27/08 (pedido de GERENCIA vía Leonardo): renombradas y reordenadas — los ids
+// NO cambian (son los guardados en la base); «No vinculado a OV» SIEMPRE 4to.
 const CAUSAS = [
-  { id: 'ov_interna', label: 'Operación interna OV', color: '#3F5BD6' },
-  { id: 'interna_otra', label: 'Otra causa interna', color: '#DA5224' },
-  { id: 'procoop', label: 'Procoop y dependencias', color: '#0E9C86' },
-  { id: 'terceros', label: 'Software de terceros', color: '#A94FA6' },
+  { id: 'ov_interna', label: 'Falla desarrollo propio de OV', color: '#3F5BD6' },
+  { id: 'procoop', label: 'Falla con integración ERP y dependencias', color: '#0E9C86' },
+  { id: 'terceros', label: 'Falla botones de pago', color: '#A94FA6' },
+  { id: 'interna_otra', label: 'No vinculado a OV - Otros softwares', color: '#DA5224' },
 ];
 const CAUSA = Object.fromEntries(CAUSAS.map((c) => [c.id, c]));
 const TIPOS = [
@@ -56,7 +58,10 @@ export default function MetricasOV() {
   const [reglas, setReglas] = useState([]);
   const [cargando, setCargando] = useState(false);
   const [fTipo, setFTipo] = useState('');
-  const [fCausa, setFCausa] = useState('');
+  // 27/08: causas TILDABLES y combinables (antes select de a una). Vacío = todas.
+  const [fCausas, setFCausas] = useState([]);
+  const [menuCausas, setMenuCausas] = useState(false);
+  const toggleCausa = (id) => setFCausas((xs) => (xs.includes(id) ? xs.filter((x) => x !== id) : [...xs, id]));
   const [fResp, setFResp] = useState('');
   const [guardando, setGuardando] = useState(null); // itemId en vuelo
   const [seleccion, setSeleccion] = useState({});   // itemId -> { tipo, causa } (bandeja)
@@ -97,7 +102,7 @@ export default function MetricasOV() {
 
   // Filtros del tablero/detalle (solo sobre clasificados).
   const visibles = clasificados.filter((t) => (
-    (!fTipo || t.ovTipo === fTipo) && (!fCausa || t.ovCausa === fCausa) && (!fResp || t.colaborador === fResp)
+    (!fTipo || t.ovTipo === fTipo) && (!fCausas.length || fCausas.includes(t.ovCausa)) && (!fResp || t.colaborador === fResp)
   ));
   const responsables = [...new Set(activos.map((t) => t.colaborador))].sort();
 
@@ -143,6 +148,99 @@ export default function MetricasOV() {
     return [...mapa.values()].sort((a, b) => b.total - a.total);
   }, [visibles]);
   const maxResp = Math.max(1, ...porResp.map((r) => r.total));
+
+  // ---------- Export PDF del Tablero ejecutivo (27/08, pedido de Leonardo) ----------
+  // Mismo patrón que el Reporte de incidentes: un iframe oculto con el HTML del
+  // informe (datos del período incluidos) y window.print → «Guardar como PDF».
+  // Los gráficos van como SVG inline: el fill se imprime SIEMPRE (los background
+  // CSS dependen de que el navegador imprima fondos).
+  const tableroIframeRef = useRef(null);
+  const escT = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const dmyT = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
+  const NAVY_T = '#1F3864';
+  const cuadrito = (color) => `<svg width="9" height="9" style="vertical-align:middle;margin-right:3px"><rect width="9" height="9" rx="2" fill="${color}"/></svg>`;
+  const barraSvg = (frac, color) => `<svg width="130" height="9" style="vertical-align:middle"><rect width="130" height="9" rx="4" fill="#eef1f7"/><rect width="${Math.max(2, Math.round(frac * 130))}" height="9" rx="4" fill="${color}"/></svg>`;
+  const periodoLabel = meses === 0 ? 'Personalizado' : (PERIODOS.find((p) => p.v === meses)?.t || '');
+  const filtrosTxt = [
+    fTipo ? `Tipo: ${TIPO[fTipo]?.label}` : null,
+    fCausas.length ? `Causas: ${fCausas.map((id) => CAUSA[id]?.label).join(' + ')}` : null,
+    fResp ? `Responsable: ${fResp}` : null,
+  ].filter(Boolean).join(' · ') || 'Sin filtros (todo el período)';
+  const htmlTablero = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Métricas OV - ${dmyT(desde)} a ${dmyT(hasta)}</title><style>
+    *{box-sizing:border-box} body{font-family:Calibri,'Segoe UI',sans-serif;color:#222;margin:0;background:#fff;padding:24px}
+    h1{font-size:19px;color:${NAVY_T};margin:0 0 2px} .sub{color:#8a8a00;font-weight:bold;font-size:12px;margin-bottom:14px}
+    .sec{background:${NAVY_T};color:#fff;font-weight:bold;font-size:12px;padding:4px 8px;margin:14px 0 6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    table{width:100%;border-collapse:collapse;font-size:11px} th,td{border:1px solid #9aa3b5;padding:4px 6px;text-align:left;vertical-align:middle}
+    th{background:${NAVY_T};color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    td.lbl{background:#eef1f7;font-weight:bold;width:24%;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    td.num{text-align:center} .nota{font-size:10px;color:#777;margin-top:6px} .pie{margin-top:18px;font-size:9px;color:#999;text-align:right}
+    @page{size:A4;margin:14mm 12mm} @media print{body{padding:0}}
+  </style></head><body>
+  <h1>MÉTRICAS OFICINA VIRTUAL — INFORME</h1>
+  <div class="sub">Tickets clasificados por tipo × causa · Tablero de Mando Cooptech</div>
+
+  <div class="sec">1. DATOS DEL REPORTE</div>
+  <table>
+    <tr><td class="lbl">Período analizado</td><td>${dmyT(desde)} a ${dmyT(hasta)} (${escT(periodoLabel)})</td><td class="lbl">Emitido</td><td>${dmyT(isoDia(new Date()))}</td></tr>
+    <tr><td class="lbl">Filtros aplicados</td><td>${escT(filtrosTxt)}</td><td class="lbl">Servicio</td><td>Oficina Virtual</td></tr>
+    <tr><td class="lbl">Tickets clasificados</td><td>${visibles.length}</td><td class="lbl">Sin clasificar (fuera del informe)</td><td>${pendientes.length}</td></tr>
+  </table>
+
+  <div class="sec">2. INDICADORES DEL PERÍODO</div>
+  <table>
+    <tr><th>Tickets</th><th>Incidentes</th><th>Solicitudes</th><th>Horas estimadas</th><th>Personas</th><th>Causa dominante</th></tr>
+    <tr>
+      <td class="num">${visibles.length}</td>
+      <td class="num">${totIncidentes}${visibles.length ? ` (${Math.round((totIncidentes / visibles.length) * 100)}%)` : ''}</td>
+      <td class="num">${visibles.length - totIncidentes}</td>
+      <td class="num">${fmtH(totHoras)}</td>
+      <td class="num">${personas.length}</td>
+      <td>${causaDominante?.n ? `${cuadrito(causaDominante.color)}${escT(causaDominante.label)} (${causaDominante.n})` : '—'}</td>
+    </tr>
+  </table>
+  <div class="nota">Las horas combinan las cargadas en la grilla con un prorrateo de la jornada — es una estimación, no un parte de horas.</div>
+
+  <div class="sec">3. ORIGEN DE LOS TICKETS POR CAUSA</div>
+  <table>
+    <tr><th>Causa</th><th>Tickets</th><th>% del total</th><th>Incid. / Solic.</th><th>Horas</th><th>Proporción</th></tr>
+    ${porCausa.map((c) => `<tr>
+      <td>${cuadrito(c.color)}${escT(c.label)}</td>
+      <td class="num">${c.n}</td>
+      <td class="num">${visibles.length ? Math.round((c.n / visibles.length) * 100) : 0}%</td>
+      <td class="num">${c.incidentes} / ${c.solicitudes}</td>
+      <td class="num">${fmtH(c.horas)}</td>
+      <td>${barraSvg(visibles.length ? c.n / visibles.length : 0, c.color)}</td>
+    </tr>`).join('')}
+  </table>
+
+  <div class="sec">4. EVOLUCIÓN SEMANAL POR CAUSA</div>
+  ${semanas.length ? `<table>
+    <tr><th>Semana del</th>${CAUSAS.map((c) => `<th>${cuadrito(c.color)}${escT(c.label.split(' ').slice(0, 2).join(' '))}…</th>`).join('')}<th>Total</th><th>Volumen</th></tr>
+    ${semanas.map((s) => `<tr>
+      <td>${dmyT(s.semana)}</td>
+      ${CAUSAS.map((c) => `<td class="num">${s[c.id] || ''}</td>`).join('')}
+      <td class="num"><b>${s.total}</b></td>
+      <td>${barraSvg(s.total / maxSemana, NAVY_T)}</td>
+    </tr>`).join('')}
+  </table>` : '<p style="font-size:11px">Sin tickets clasificados en el período.</p>'}
+
+  <div class="sec">5. POR RESPONSABLE</div>
+  ${porResp.length ? `<table>
+    <tr><th>Responsable</th>${CAUSAS.map((c) => `<th>${cuadrito(c.color)}</th>`).join('')}<th>Total</th><th>Proporción</th></tr>
+    ${porResp.map((r) => `<tr>
+      <td>${escT(r.nombre)}</td>
+      ${CAUSAS.map((c) => `<td class="num">${r[c.id] || ''}</td>`).join('')}
+      <td class="num"><b>${r.total}</b></td>
+      <td>${barraSvg(r.total / maxResp, NAVY_T)}</td>
+    </tr>`).join('')}
+  </table>` : '<p style="font-size:11px">Sin datos.</p>'}
+
+  <div class="pie">Generado desde el Tablero Cooptech · Métricas Oficina Virtual · ${dmyT(isoDia(new Date()))}</div>
+  </body></html>`;
+  const imprimirTablero = () => {
+    const w = tableroIframeRef.current?.contentWindow;
+    if (w) { w.focus(); w.print(); }
+  };
 
   // Asuntos que más se repiten (texto normalizado).
   const topAsuntos = useMemo(() => {
@@ -303,18 +401,47 @@ export default function MetricasOV() {
           <option value="">Tipo: todos</option>
           {TIPOS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
-        <select value={fCausa} onChange={(e) => setFCausa(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
-          <option value="">Causa: todas</option>
-          {CAUSAS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-        </select>
+        {/* Causas tildables y combinables (27/08). Vacío = todas. */}
+        <div className="relative">
+          <button onClick={() => setMenuCausas((m) => !m)}
+            className={`border rounded-lg px-2 py-1.5 text-sm ${fCausas.length ? 'border-coop-azul text-coop-azul bg-coop-azul/5' : 'border-slate-300 text-slate-600 bg-white'}`}>
+            Causas: {fCausas.length ? `${fCausas.length} de ${CAUSAS.length}` : 'todas'} ▾
+          </button>
+          {menuCausas && (
+            <>
+              <div className="fixed inset-0 z-10" onMouseDown={(e) => e.target === e.currentTarget && setMenuCausas(false)} />
+              <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-80">
+                {CAUSAS.map((c) => (
+                  <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-slate-50">
+                    <input type="checkbox" checked={fCausas.includes(c.id)} onChange={() => toggleCausa(c.id)} />
+                    <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: c.color }} />
+                    <span className="text-slate-700">{c.label}</span>
+                  </label>
+                ))}
+                {fCausas.length > 0 && (
+                  <button onClick={() => setFCausas([])} className="block w-full text-left px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-50 border-t border-slate-100">Limpiar (todas)</button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
         <select value={fResp} onChange={(e) => setFResp(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
           <option value="">Responsable: todos</option>
           {responsables.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         {cargando && <span className="text-xs text-slate-400">⏳ Cargando…</span>}
+        {vista === 'tablero' && (
+          <button onClick={imprimirTablero} title="Exportar este informe como PDF (elegí «Guardar como PDF» en el diálogo)"
+            className="ml-auto px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90">🖨 Imprimir / PDF</button>
+        )}
       </div>
 
       {/* ============ TABLERO EJECUTIVO ============ */}
+      {/* Iframe oculto con el informe imprimible del tablero (27/08). */}
+      {vista === 'tablero' && (
+        <iframe ref={tableroIframeRef} srcDoc={htmlTablero} title={`Métricas OV - ${desde} a ${hasta}`}
+          style={{ position: 'fixed', right: -10000, top: 0, width: 800, height: 600, border: 'none' }} aria-hidden="true" />
+      )}
       {vista === 'tablero' && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2 mb-3">
@@ -652,7 +779,9 @@ function ReporteSemanalOV({ api }) {
   const sinCategoria = enSemana.filter((t) => !t.categoriaFalla).length;
 
   const NAVY = '#1F3864';
-  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Reporte semanal OV</title><style>
+  // El <title> del iframe es el NOMBRE DE ARCHIVO que propone el navegador al
+  // «Guardar como PDF» (27/08, pedido de Leonardo: «Reporte semanal - N°»).
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Reporte semanal - ${escHtml(nro.trim() || 'OV')}</title><style>
     *{box-sizing:border-box} body{font-family:Calibri,'Segoe UI',sans-serif;color:#222;margin:0;background:#fff;padding:24px}
     h1{font-size:19px;color:${NAVY};margin:0 0 2px} .sub{color:#8a8a00;font-weight:bold;font-size:12px;margin-bottom:14px}
     .sec{background:${NAVY};color:#fff;font-weight:bold;font-size:12px;padding:4px 8px;margin:14px 0 6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -662,7 +791,7 @@ function ReporteSemanalOV({ api }) {
     .contador{display:flex;justify-content:space-between;align-items:center;border:2px solid ${NAVY};margin-top:10px}
     .contador .txt{padding:8px 10px;font-size:11px} .contador .dia{padding:8px 16px;font-size:22px;font-weight:bold;color:${NAVY};white-space:nowrap}
     .defbox{background:#FEF7DC;border:1px solid #E8D48B;padding:8px 10px;font-size:10.5px;margin-top:10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:3px;vertical-align:middle;border:1px solid #999}
+    .dot{vertical-align:middle;margin-right:3px}
     .criterio{font-size:9.5px;color:#555;margin-top:4px} .nota{font-size:10px;color:#777;margin-top:6px}
     .pie{margin-top:18px;font-size:9px;color:#999;text-align:right}
     @page{size:A4;margin:14mm 12mm} @media print{body{padding:0}}
@@ -687,7 +816,10 @@ function ReporteSemanalOV({ api }) {
     <tr><th>Categoría</th><th>Estado</th><th>Incidentes semana</th><th>Acumulado 90 días</th><th>Tendencia</th></tr>
     ${CATS.map((c) => {
       const s = semaforo(c.id);
-      return `<tr><td>${c.label}</td><td><span class="dot" style="background:${s.color}"></span>${s.txt}</td><td>${deCat(enSemana, c.id).length}</td><td>${deCat(en90, c.id).length}</td><td>${tendencia(c.id)}</td></tr>`;
+      // Semáforo como SVG inline (27/08, fix «el PDF pierde el color del estado»):
+      // un background CSS depende de que el navegador imprima fondos; el fill de
+      // un SVG se imprime SIEMPRE, con o sin «gráficos de fondo» tildado.
+      return `<tr><td>${c.label}</td><td><svg class="dot" width="11" height="11"><circle cx="5.5" cy="5.5" r="5" fill="${s.color}" stroke="#777" stroke-width="0.5"/></svg>${s.txt}</td><td>${deCat(enSemana, c.id).length}</td><td>${deCat(en90, c.id).length}</td><td>${tendencia(c.id)}</td></tr>`;
     }).join('')}
   </table>
   <div class="criterio"><b>Criterio del semáforo:</b> Verde = sin incidentes en la semana · Amarillo = incidentes de la semana resueltos al cierre del período · Rojo = incidente pendiente de resolución al cierre del período.</div>

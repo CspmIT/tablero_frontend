@@ -30,7 +30,8 @@ const ORIGEN = {
   mesa_ayuda: { label: 'Mesa de ayuda', cls: 'bg-blue-50 text-blue-600' },
 };
 const OV_TIPO_LABEL = { incidente: 'Incidente', solicitud: 'Solicitud' };
-const OV_CAUSA_LABEL = { ov_interna: 'Falla OV (interna)', interna_otra: 'Otra causa interna', procoop: 'Procoop', terceros: 'Terceros' };
+// 27/08 (gerencia): nombres nuevos; «No vinculado a OV» siempre último. Ids intactos.
+const OV_CAUSA_LABEL = { ov_interna: 'Falla desarrollo propio de OV', procoop: 'Falla integración ERP y dependencias', terceros: 'Falla botones de pago', interna_otra: 'No vinculado a OV - Otros softwares' };
 const CAT_LABEL = { a: 'a · Desarrollo propio', b: 'b · Integración ERP', c: 'c · Botón de pago' };
 
 const dstr = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '');
