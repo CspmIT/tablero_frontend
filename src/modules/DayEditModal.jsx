@@ -16,11 +16,12 @@ const inputCls = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm';
 // ítem (ovTipo/ovCausa/...), sin migración; el spread de cleanItems los
 // preserva y el PUT de grilla hace merge por id.
 const OV_TIPOS = [['incidente', 'Incidente'], ['solicitud', 'Solicitud']];
+// 27/08 (gerencia): nombres nuevos; «No vinculado a OV» siempre último. Ids intactos.
 const OV_CAUSAS = [
-  ['ov_interna', 'Operación interna OV'],
-  ['interna_otra', 'Otra causa interna'],
-  ['procoop', 'Procoop y dependencias'],
-  ['terceros', 'Software de terceros'],
+  ['ov_interna', 'Falla desarrollo propio de OV'],
+  ['procoop', 'Falla integración ERP y dependencias'],
+  ['terceros', 'Falla botones de pago'],
+  ['interna_otra', 'No vinculado a OV - Otros softwares'],
 ];
 const esItemOV = (it) => (Array.isArray(it?.tags) ? it.tags : []).some(
   (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() === 'oficina virtual',
