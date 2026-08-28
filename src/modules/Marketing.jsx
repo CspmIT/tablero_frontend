@@ -1075,7 +1075,9 @@ export default function Marketing() {
         <Galeria />
       ) : solapa === 'plan' ? (
         <>
-          <div className="flex items-center gap-2 mb-3">
+          {/* 28/08 (celu): flex-wrap + hint a línea propia — en pantalla angosta
+              el texto quedaba estrujado en una columna al costado del mes. */}
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             <button onClick={() => setMes((m) => mesSumar(m, -1))} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">◀</button>
             <span className="text-base font-semibold text-coop-negro min-w-[150px] text-center">{mesLabel(mes)}</span>
             <button onClick={() => setMes((m) => mesSumar(m, 1))} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">▶</button>
@@ -1084,7 +1086,7 @@ export default function Marketing() {
             )}
             <button onClick={exportarPlanificacion} title="Descargar la planificación del mes como documento Word (ideas incluidas)"
               className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">⬇ Word</button>
-            <span className="text-xs text-slate-400 ml-2">Tope por archivo: {TOPE_MB} MB — arriba de 90 MB sube en partes (tarda, pero entra).</span>
+            <span className="text-xs text-slate-400 w-full sm:w-auto sm:ml-2">Superior a 90 MB sube en partes. Tope por archivo: {TOPE_MB} MB</span>
           </div>
 
           {/* Bandeja de IDEAS (26/08): la etapa previa — sin fecha. Booster propone,
@@ -1230,14 +1232,14 @@ export default function Marketing() {
         <>
           {/* Eventos (ola 3): repositorio ANUAL — carpetas libres por evento, cualquier
               formato, con subcarpetas y galería (misma mecánica que Planificación). */}
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             <button onClick={() => setAnio((a) => a - 1)} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">◀</button>
             <span className="text-base font-semibold text-coop-negro min-w-[80px] text-center">{anio}</span>
             <button onClick={() => setAnio((a) => a + 1)} className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">▶</button>
             {anio !== new Date().getFullYear() && (
               <button onClick={() => setAnio(new Date().getFullYear())} className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-500 hover:border-coop-azul hover:text-coop-azul">Hoy</button>
             )}
-            <span className="text-xs text-slate-400 ml-2">Una carpeta por evento — adentro, subcarpetas y cualquier formato de archivo.</span>
+            <span className="text-xs text-slate-400 w-full sm:w-auto sm:ml-2">Admite cualquier formato de archivo</span>
           </div>
           <div className="grid grid-cols-1 gap-3">
             <Zona cat={{ id: 'eventos', label: `Eventos ${anio}`, emoji: '🎪' }} ruta={`evento/${anio}`} migas={[`Eventos ${anio}`]} conDia={false} />
@@ -1245,7 +1247,7 @@ export default function Marketing() {
         </>
       ) : (
         <>
-          <p className="text-xs text-slate-400 mb-3">Material permanente de marca — no depende del mes. Tope por archivo: {TOPE_MB} MB (arriba de 90 MB sube en partes).</p>
+          <p className="text-xs text-slate-400 mb-3">Material permanente de marca.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             {CATS_MARCA.map((c) => <Zona key={c.id} cat={c} ruta={`marca/${c.id}`} migas={[...migasBase, c.label]} conDia={false} />)}
           </div>

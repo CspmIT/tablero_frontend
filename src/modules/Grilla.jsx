@@ -16,7 +16,11 @@ import {
 const ROLE_LABEL = { manager: 'Manager', gerencial: 'Gerencial', collaborator: 'Colaborador', externo: 'Externo', tercerizado: 'Tercerizado' };
 
 export default function Grilla({ vista = 'grilla', setVista }) {
-  const { api, colaboradores } = useData();
+  const { api, colaboradores, me } = useData();
+  // 28/08 (caso Mirko, RRHH): los externos con la solapa Grilla otorgada la ven
+  // de SOLO LECTURA — necesitan los horarios de ingreso, no cargar actividades.
+  const soloLectura = me?.tipo === 'externo';
+  const [pushMsg, setPushMsg] = useState(null); // resultado de activar notificaciones (banner inline)
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const [entries, setEntries] = useState({});
   const [wips, setWips] = useState({});
@@ -129,12 +133,19 @@ export default function Grilla({ vista = 'grilla', setVista }) {
 
   return (
     <div>
-      {pushEstado() === 'default' && (
+      {/* 28/08: alert() nativo sobreviviente de la barrida del 27/08 → banner inline. */}
+      {pushEstado() === 'default' && !pushMsg && (
         <button
-          onClick={() => activarNotificaciones(api).then(() => alert('Notificaciones activadas: vas a recibir invitaciones y cambios de reuniones aunque la app esté cerrada.')).catch((e) => alert(e.message))}
+          onClick={() => activarNotificaciones(api).then(() => setPushMsg({ ok: true, txt: 'Notificaciones activadas: vas a recibir invitaciones y cambios de reuniones aunque la app esté cerrada.' })).catch((e) => setPushMsg({ ok: false, txt: e.message }))}
           className="w-full text-left text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 mb-3 hover:border-coop-azul/40">
           🔔 Activá las notificaciones para enterarte de invitaciones y cambios de reuniones aunque la app esté cerrada (recomendado en el celular con la app instalada).
         </button>
+      )}
+      {pushMsg && (
+        <div className={`text-xs rounded-xl px-3 py-2 mb-3 border flex items-center justify-between gap-2 ${pushMsg.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          <span>{pushMsg.txt}</span>
+          <button onClick={() => setPushMsg(null)} className="opacity-60 hover:opacity-100">✕</button>
+        </div>
       )}
       {invitaciones.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
@@ -160,10 +171,12 @@ export default function Grilla({ vista = 'grilla', setVista }) {
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <SwitchVista vista={vista} setVista={setVista} />
         <div className="flex items-center gap-2 text-sm">
-          <button onClick={sincronizarOutlook} disabled={syncing} title="Importa a tu grilla las reuniones de tu Outlook de esta semana (las genere quien las genere)"
-            className="px-2 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:border-coop-azul/40 disabled:opacity-50">
-            {syncing ? 'Sincronizando…' : '⇅ Outlook'}
-          </button>
+          {!soloLectura && (
+            <button onClick={sincronizarOutlook} disabled={syncing} title="Importa a tu grilla las reuniones de tu Outlook de esta semana (las genere quien las genere)"
+              className="px-2 py-1 rounded border border-slate-200 text-xs text-slate-600 hover:border-coop-azul/40 disabled:opacity-50">
+              {syncing ? 'Sincronizando…' : '⇅ Outlook'}
+            </button>
+          )}
           <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
           <span className="text-slate-600">{fmtDDMM(weekStart)} – {fmtDDMM(weekEnd)} · {weekStart.getFullYear()}</span>
           <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="px-2 py-1 rounded hover:bg-slate-100">›</button>
@@ -216,7 +229,8 @@ export default function Grilla({ vista = 'grilla', setVista }) {
                       const sinTags = entry && isWorkingDay(entry.status) && its.length > 0
                         && its.filter((it) => !(Array.isArray(it.tags) && it.tags.length)).length;
                       return (
-                        <td key={i} onClick={() => setDayCtx({ collab: c, date: d })} className={`relative px-2 py-2 align-top cursor-pointer hover:bg-slate-50 ${feriadoName ? 'bg-slate-100' : ''}`}>
+                        <td key={i} onClick={soloLectura ? undefined : () => setDayCtx({ collab: c, date: d })}
+                          className={`relative px-2 py-2 align-top ${soloLectura ? '' : 'cursor-pointer hover:bg-slate-50'} ${feriadoName ? 'bg-slate-100' : ''}`}>
                           {sinTags ? (
                             <span
                               title={`${sinTags} actividad${sinTags > 1 ? 'es' : ''} sin etiqueta (no suma a horas por proyecto)`}
@@ -249,24 +263,25 @@ export default function Grilla({ vista = 'grilla', setVista }) {
                               // escrito en la base hasta que el día se guarde).
                               <div className="space-y-0.5 opacity-60">
                                 <StatusBadge status={tipicaDe(c.id, d).estado} entryTime={tipicaDe(c.id, d).entryTime} />
-                                <div className="text-[10px] text-slate-400 italic">típico · + cargar</div>
+                                <div className="text-[10px] text-slate-400 italic">{soloLectura ? 'típico' : 'típico · + cargar'}</div>
                               </div>
                             ) : (
-                              <span className="text-slate-300 text-xs">+ cargar</span>
+                              <span className="text-slate-300 text-xs">{soloLectura ? '—' : '+ cargar'}</span>
                             )}
                           </div>
                         </td>
                       );
                     })}
                     <td className="px-3 py-2">
-                      <button onClick={() => setWipCtx({ collab: c })} className="block w-full text-left text-xs">
+                      <button onClick={soloLectura ? undefined : () => setWipCtx({ collab: c })}
+                        className={`block w-full text-left text-xs ${soloLectura ? 'cursor-default' : ''}`}>
                         <div className="flex gap-1.5">
                           <span className="text-[10px] italic text-slate-400 w-7 shrink-0 mt-px">Def.</span>
-                          {wipText ? <span className="text-slate-700 min-w-0">{wipText}</span> : <span className="text-slate-300">+ definir foco</span>}
+                          {wipText ? <span className="text-slate-700 min-w-0">{wipText}</span> : <span className="text-slate-300">{soloLectura ? '—' : '+ definir foco'}</span>}
                         </div>
                         <div className="flex gap-1.5 mt-1 pt-1 border-t border-slate-100">
                           <span className="text-[10px] italic text-slate-400 w-7 shrink-0 mt-px">Real</span>
-                          {resumenes[c.id] ? <span className="text-coop-azul min-w-0">{resumenes[c.id]}</span> : <span className="text-slate-300">+ resumen (costos)</span>}
+                          {resumenes[c.id] ? <span className="text-coop-azul min-w-0">{resumenes[c.id]}</span> : <span className="text-slate-300">{soloLectura ? '—' : '+ resumen (costos)'}</span>}
                         </div>
                         {stats.wipPctAvg !== null && (
                           <div className="text-coop-azul font-mono mt-1">{Math.round(dedicacionSemanalPct(stats) * 100)}% · {fmtWipHours(stats)}</div>
