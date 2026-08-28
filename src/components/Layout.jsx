@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Menu, X, BarChart3, ChevronDown, LogOut, MonitorDown } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { VERSION } from '../version.js';
@@ -135,6 +135,21 @@ export default function Layout({ modulos, infoGrupo = [], configuracion = null, 
   const modulosVisibles = modulos.filter(puedeVer);
   const infoVisibles = infoGrupo.filter(puedeVer);
   const configVisible = configuracion && puedeVer(configuracion) ? configuracion : null;
+
+  // VISTA INICIAL SEGÚN PERMISOS (28/08, pedido de Leonardo): la app arranca en
+  // 'grilla', pero un usuario con esa solapa oculta (p.ej. Booster) aterrizaba
+  // en una pantalla que no ve en su menú — confunde. Al cargar el perfil, si la
+  // vista activa es una solapa que este usuario NO ve, saltamos a la primera
+  // visible de su menú (mismo orden que el sidebar). Solo corrige solapas de
+  // nav conocidas: Configuración y sus ajustes internos no se tocan.
+  useEffect(() => {
+    if (!me) return;
+    const item = [...modulos, ...infoGrupo].find((m) => m.id === activo);
+    if (!item || puedeVer(item)) return;
+    const primera = modulosVisibles[0] || infoVisibles[0];
+    onSelect(primera ? primera.id : (configuracion?.id || 'configuracion'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, activo]);
 
   const seleccionar = (id) => {
     setDrawerAbierto(false);
