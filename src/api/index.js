@@ -90,6 +90,16 @@ export const api = {
     update: (id, body) => http.patch(`/contactos/${id}`, body),
     remove: (id) => http.del(`/contactos/${id}`),
   },
+  // Laboratorio (28/08): servidores InfluxDB/MQTT + cola de borrados.
+  laboratorio: {
+    servidores: () => http.get('/laboratorio/servidores'),
+    crearServidor: (body) => http.post('/laboratorio/servidores', body),
+    editarServidor: (id, body) => http.patch(`/laboratorio/servidores/${id}`, body),
+    borrarServidor: (id) => http.del(`/laboratorio/servidores/${id}`),
+    borrados: () => http.get('/laboratorio/borrados'),
+    crearBorrado: (body) => http.post('/laboratorio/borrados', body),
+    cancelarBorrado: (id) => http.del(`/laboratorio/borrados/${id}`),
+  },
   // Campañas publicitarias (26/08): período como línea en el calendario.
   marketingCampanias: {
     list: () => http.get('/marketing-posts/campanias'),
