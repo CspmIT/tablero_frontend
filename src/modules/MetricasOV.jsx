@@ -235,6 +235,21 @@ export default function MetricasOV() {
     </tr>`).join('')}
   </table>` : '<p style="font-size:11px">Sin datos.</p>'}
 
+  <div class="sec">6. DETALLE POR TAREA</div>
+  ${visibles.length ? `<table>
+    <tr><th>Fecha</th><th>Responsable</th><th>Tarea / Ticket</th><th>Tipo</th><th>Causa</th><th>Horas</th><th>Origen</th></tr>
+    ${[...visibles].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))).map((t) => `<tr>
+      <td style="white-space:nowrap">${dmyT(String(t.fecha || '').slice(0, 10))}</td>
+      <td style="white-space:nowrap">${escT(t.colaborador)}</td>
+      <td>${escT(String(t.text || '').slice(0, 160))}${String(t.text || '').length > 160 ? '…' : ''}</td>
+      <td style="white-space:nowrap">${escT(TIPO[t.ovTipo]?.label || t.ovTipo || '—')}</td>
+      <td>${t.ovCausa ? `${cuadrito(CAUSA[t.ovCausa]?.color || '#999')}${escT(CAUSA[t.ovCausa]?.label || t.ovCausa)}` : '—'}</td>
+      <td class="num" style="white-space:nowrap">${fmtH(t.horas || 0)}</td>
+      <td style="white-space:nowrap">${t.origen === 'grilla' || !t.origen ? 'Grilla' : t.origen === 'ticket_whatsapp' ? 'Ticket · WhatsApp' : t.origen === 'ticket_mesa' ? 'Ticket · Mesa' : 'Ticket'}</td>
+    </tr>`).join('')}
+  </table>
+  <div class="nota">${visibles.length} tarea${visibles.length === 1 ? '' : 's'} en el período, ordenadas de la más reciente a la más antigua. Las horas son estimación (grilla + prorrateo).</div>` : '<p style="font-size:11px">Sin tareas clasificadas en el período.</p>'}
+
   <div class="pie">Generado desde el Tablero Cooptech · Métricas Oficina Virtual · ${dmyT(isoDia(new Date()))}</div>
   </body></html>`;
   const imprimirTablero = () => {
