@@ -23,6 +23,7 @@ import Asistente from './modules/Asistente.jsx';
 import Analisis from './modules/Analisis.jsx';
 import Inbox from './modules/Inbox.jsx'; // 20/08: Mis deseos → Inbox (solapas Tickets + Mis deseos)
 import Marketing from './modules/Marketing.jsx'; // 20/08: planificación + repositorio de marca
+import Laboratorio from './modules/Laboratorio.jsx'; // 28/08: IoT (Influx/MQTT) migrado desde la OV
 import Configuracion from './modules/Configuracion.jsx';
 import { MODULOS, INFO, CONFIGURACION } from './nav.js';
 import Campo from './modules/Campo.jsx';
@@ -45,11 +46,13 @@ function Contenido({ activo }) {
   if (activo === 'grilla') {
     if (subVista === 'mimes') return <MiMes vista={subVista} setVista={setSubVista} />;
     if (subVista === 'midia') return <MiDia vista={subVista} setVista={setSubVista} />;
+    // 28/08: Guardias dejó el menú lateral — es una pestaña más de la Grilla.
+    if (subVista === 'guardias') return <Guardias vista={subVista} setVista={setSubVista} />;
     return subVista === 'misemana'
       ? <MiSemana vista={subVista} setVista={setSubVista} />
       : <Grilla vista={subVista} setVista={setSubVista} />;
   }
-  if (activo === 'guardias') return <Guardias />;
+  if (activo === 'guardias') return <Guardias />; // compat: por si algún permiso viejo aterriza acá
   if (activo === 'francos') return <Francos />;
   if (activo === 'feriados') return <FechasEspeciales />;
   if (activo === 'kanban') return <Kanban />;
@@ -63,6 +66,7 @@ function Contenido({ activo }) {
   if (activo === 'analisis') return <Analisis />;
   if (activo === 'deseos') return <Inbox />;
   if (activo === 'marketing') return <Marketing />;
+  if (activo === 'laboratorio') return <Laboratorio />;
   if (activo === 'visitas') return <Campo />;
   if (activo === 'configuracion') return <Configuracion />;
   if (activo === 'importar') return <Importar />;

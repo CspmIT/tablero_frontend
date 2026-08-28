@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useData } from '../data/DataContext.jsx';
+import SwitchVista from '../components/SwitchVista.jsx';
 import { getMonday, fmtISO, isActiveCollab } from './grillaUtils.js';
 import {
   mergeWeeks, findGuardiaByMonday, ganadosForAssignment, ferMidWeek,
   bridgeDaysAtStart, bridgeDaysToNext, cellState, nextState, setCell,
 } from './guardiasUtils.js';
 
-export default function Guardias() {
+// 28/08: Guardias dejó el menú lateral y es una pestaña del selector de la
+// Grilla (vista/setVista llegan desde App). Sin props sigue andando sola
+// (compat con permisos viejos que aterricen en activo === 'guardias').
+export default function Guardias({ vista, setVista }) {
   const { api, colaboradores } = useData();
   const [anio, setAnio] = useState(() => new Date().getFullYear());
   const [weeks, setWeeks] = useState([]);
@@ -67,8 +71,12 @@ export default function Guardias() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h2 className="text-xl font-semibold text-coop-negro">Guardias <span className="text-sm font-normal text-slate-400">rotación {anio}</span></h2>
+        {setVista
+          ? <SwitchVista vista={vista} setVista={setVista} />
+          : <h2 className="text-xl font-semibold text-coop-negro">Guardias <span className="text-sm font-normal text-slate-400">rotación {anio}</span></h2>}
         <div className="flex items-center gap-2 text-sm">
+          {/* Con el selector a la izquierda ya no está el «rotación {anio}» del título nuestro. */}
+          {setVista && <span className="text-slate-400">rotación</span>}
           <button onClick={() => setAnio(anio - 1)} className="px-2 py-1 rounded hover:bg-slate-100">‹</button>
           <span className="text-slate-600">{anio}</span>
           <button onClick={() => setAnio(anio + 1)} className="px-2 py-1 rounded hover:bg-slate-100">›</button>

@@ -2,12 +2,18 @@
 // `roles`: si está, sólo esos tipos ven el ítem por defecto; si falta, todos.
 // El panel de Configuración puede otorgar (extra) u ocultar (ocultas) solapas
 // por usuario, por encima de estos defaults.
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Inbox, Settings, Wrench, Megaphone } from 'lucide-react';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Inbox, Settings, Wrench, Megaphone, FlaskConical } from 'lucide-react';
+
+// 28/08 (Leonardo: «que el menú no se vuelva inmanejable»): Guardias DEJA el
+// menú lateral y pasa a ser una pestaña del selector de la Grilla (entre
+// Grilla y Mi semana — es parte del día a día del área). El id NO cambia:
+// sigue en SOLAPAS_GESTIONABLES para que el panel de permisos pueda seguir
+// otorgando/ocultando Guardias por persona como siempre.
+export const GUARDIAS_TAB = { id: 'guardias', label: 'Guardias', icon: Shield, listo: true };
 
 export const MODULOS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge, listo: true, roles: ['manager', 'gerencial'] },
   { id: 'grilla', label: 'Grilla', icon: CalendarDays, listo: true },
-  { id: 'guardias', label: 'Guardias', icon: Shield, listo: true },
   { id: 'crm', label: 'CRM', icon: Handshake, listo: true },
   { id: 'kanban', label: 'Kanban', icon: SquareKanban, listo: true },
   { id: 'objetivos', label: 'Objetivos', icon: Target, listo: true },
@@ -20,6 +26,9 @@ export const MODULOS = [
   // se les otorga por el panel de permisos (extra por id).
   { id: 'marketing', label: 'Marketing', icon: Megaphone, listo: true, roles: ['manager', 'gerencial', 'collaborator'] },
   { id: 'visitas', label: 'Campo', icon: Wrench, listo: true, roles: ['manager', 'gerencial', 'collaborator', 'tercerizado'] },
+  // Laboratorio (28/08): funciones IoT migradas desde la Oficina Virtual
+  // (servidores InfluxDB/MQTT + borrado de datos). Equipo interno.
+  { id: 'laboratorio', label: 'Laboratorio', icon: FlaskConical, listo: true, roles: ['manager', 'gerencial', 'collaborator'] },
 ];
 
 // Agrupados bajo "Análisis" (ex "Información adicional", renombrado 07/08).
@@ -52,7 +61,9 @@ export const AJUSTES = [
 
 // Todas las solapas gestionables desde el panel de permisos (id + label + roles
 // default). Configuración no se gestiona: siempre solo manager.
-export const SOLAPAS_GESTIONABLES = [...MODULOS, ...INFO];
+// GUARDIAS_TAB va incluida: aunque ya no es ítem del menú, su visibilidad
+// como pestaña de la Grilla se sigue gestionando por el mismo id de siempre.
+export const SOLAPAS_GESTIONABLES = [...MODULOS, GUARDIAS_TAB, ...INFO];
 
 // Visibilidad efectiva: rol default + extra − ocultas (overrides del panel).
 export function puedeVerSolapa(item, me) {
