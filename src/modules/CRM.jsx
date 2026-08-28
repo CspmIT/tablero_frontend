@@ -505,7 +505,11 @@ export default function CRM() {
           <p className="text-[11px] text-slate-400 mt-2">Las cuentas agrupan todas las oportunidades (activas, ganadas, perdidas y declinadas) por organización. Caso Colonia Caroya: una cuenta, dos leads — Reconecta ganado y Call Center en curso.</p>
         </div>
       )}
-      {vista === 'contactos' && <ContactosView />}
+      {/* 27/08: editar un contacto CRM guarda en el lead — este callback deja el
+          Embudo (y el modal «Editar lead») al día sin recargar la página. */}
+      {vista === 'contactos' && (
+        <ContactosView onLeadActualizado={(upd) => upd?.id && setLeads((ls) => ls.map((x) => (x.id === upd.id ? { ...x, ...upd } : x)))} />
+      )}
 
       {vista === 'novedades' && (
         <div className="max-w-3xl">
