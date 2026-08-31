@@ -6,6 +6,19 @@ import { useData } from '../data/DataContext.jsx';
 // por colaborador y mes.
 // El dato sale de la grilla (horasExtra: ingreso/salida/duración); acá solo se
 // agrupa y presenta. Regla de la casa: lo que no figura en el tablero no se considera.
+// 31/08 (pedido de Leonardo antes de subir): la vista usaba una parte de la
+// pantalla y las secciones nacían plegadas — ahora TODO desplegado por default,
+// a ancho completo, y en este orden: Horas extra → Rotación de personal →
+// Ociosidad anual → Explorador de etiquetas.
+
+// Encabezado de sección (reemplaza a los acordeones): título + aclaración.
+function TituloSeccion({ children, nota }) {
+  return (
+    <h2 className="flex items-center gap-2 text-slate-800 font-semibold">
+      {children} {nota && <span className="text-sm font-normal text-slate-400">{nota}</span>}
+    </h2>
+  );
+}
 
 const mesActual = () => new Date().toISOString().slice(0, 7);
 
@@ -35,14 +48,13 @@ export default function Analisis() {
   const filas = datos?.colaboradores || [];
 
   return (
-    <div className="max-w-3xl">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-            <BarChart3 size={20} className="text-coop-naranja" /> Reportes
-          </h1>
-          <p className="text-sm text-slate-500">Horas extra por colaborador, según lo registrado en la grilla.</p>
-        </div>
+    <div>
+      <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2 mb-5">
+        <BarChart3 size={20} className="text-coop-naranja" /> Reportes
+      </h1>
+
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <TituloSeccion nota="(según lo registrado en la grilla)">Horas extra</TituloSeccion>
         <label className="text-sm text-slate-600 flex items-center gap-2">
           Mes
           <input type="month" value={mes} onChange={(e) => setMes(e.target.value)}
@@ -92,9 +104,9 @@ export default function Analisis() {
         )
       )}
 
+      <SeccionRotacion api={api} />
       <SeccionOciosidad api={api} />
       <SeccionExplorador api={api} />
-      <SeccionRotacion api={api} />
 
     </div>
   );
@@ -105,18 +117,14 @@ function SeccionOciosidad({ api }) {
   const { colaboradores } = useData();
   const [anio, setAnio] = useState(new Date().getFullYear());
   const [datos, setDatos] = useState(null);
-  const [abierta, setAbierta] = useState(false);
   useEffect(() => {
-    if (!abierta) return;
     api.analisis.ociosidad(anio).then(setDatos).catch(() => setDatos(null));
-  }, [api, anio, abierta]);
+  }, [api, anio]);
   const filas = datos?.colaboradores || [];
   return (
     <div className="mt-8">
-      <button onClick={() => setAbierta(a => !a)} className="flex items-center gap-2 text-slate-800 font-semibold">
-        {abierta ? <ChevronDown size={16} /> : <ChevronRight size={16} />} Ociosidad anual <span className="text-sm font-normal text-slate-400">(jornada de 8 hs)</span>
-      </button>
-      {abierta && (
+      <TituloSeccion nota="(jornada de 8 hs)">Ociosidad anual</TituloSeccion>
+      {(
         <div className="mt-3">
           <div className="flex items-center gap-2 mb-2 text-sm">
             <button onClick={() => setAnio(anio - 1)} className="px-2 py-0.5 rounded hover:bg-slate-100">‹</button>
@@ -170,11 +178,10 @@ function SeccionRotacion({ api }) {
   const [desde, setDesde] = useState(hace12);
   const [hasta, setHasta] = useState(hoyMes);
   const [datos, setDatos] = useState(null);
-  const [abierta, setAbierta] = useState(false);
   useEffect(() => {
-    if (!abierta || !desde || !hasta || desde > hasta) return;
+    if (!desde || !hasta || desde > hasta) return;
     api.analisis.rotacion(desde, hasta).then(setDatos).catch(() => setDatos(null));
-  }, [api, abierta, desde, hasta]);
+  }, [api, desde, hasta]);
 
   const meses = datos?.meses || [];
   const maxAct = Math.max(1, ...meses.map(m => m.activos));
@@ -182,10 +189,8 @@ function SeccionRotacion({ api }) {
 
   return (
     <div className="mt-8">
-      <button onClick={() => setAbierta(a => !a)} className="flex items-center gap-2 text-slate-800 font-semibold">
-        {abierta ? <ChevronDown size={16} /> : <ChevronRight size={16} />} Rotación de personal <span className="text-sm font-normal text-slate-400">(activos, altas y bajas por mes)</span>
-      </button>
-      {abierta && (
+      <TituloSeccion nota="(activos, altas y bajas por mes)">Rotación de personal</TituloSeccion>
+      {(
         <div className="mt-3">
           <div className="flex items-center gap-2 mb-3 text-sm flex-wrap">
             <label className="text-slate-500">Desde</label>
@@ -195,9 +200,10 @@ function SeccionRotacion({ api }) {
           </div>
           {meses.length > 0 && (
             <div className="bg-white rounded-xl border border-slate-200 p-4 overflow-x-auto">
+              {/* 31/08: las columnas se estiran para aprovechar el ancho completo. */}
               <div className="flex items-end gap-2 min-w-fit" style={{ height: 150 }}>
                 {meses.map((m) => (
-                  <div key={m.mes} className="flex flex-col items-center gap-1 w-11 shrink-0" title={`${lblMes(m.mes)}: ${m.activos} activos · ${m.altas} altas · ${m.bajas} bajas`}>
+                  <div key={m.mes} className="flex flex-col items-center gap-1 flex-1 min-w-[44px]" title={`${lblMes(m.mes)}: ${m.activos} activos · ${m.altas} altas · ${m.bajas} bajas`}>
                     <span className="text-[10px] font-mono text-slate-600">{m.activos}</span>
                     <div className="w-7 bg-coop-azul/80 rounded-t" style={{ height: `${Math.max(6, (m.activos / maxAct) * 100)}px` }} />
                     <div className="h-4 flex gap-0.5 text-[9px] font-mono">
@@ -208,7 +214,12 @@ function SeccionRotacion({ api }) {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-slate-400 mt-2">Barra = colaboradores activos en el mes (según períodos de vigencia). <span className="text-emerald-600">+altas</span> / <span className="text-rose-500">−bajas</span> del mes. Cuenta solo el equipo del área (manager/colaborador). Sin períodos cargados: cuenta si está activo hoy; un inactivo sin períodos no cuenta (cargale el período con su fecha de baja para que aparezca en el mes real).</p>
+              <p className="text-xs text-slate-400 mt-2">Barra = colaboradores activos en el mes. <span className="text-emerald-600">+altas</span> / <span className="text-rose-500">−bajas</span> del mes. Cuenta solo el equipo del área (manager/colaborador). Manda el período de vigencia si está cargado; si no, la ficha del Equipo (fecha de ingreso → fecha de salida) — así los ex-colaboradores cuentan en los meses en que estuvieron.</p>
+              {(datos?.sinDatos || []).length > 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                  ⚠ Fuera del cálculo por no tener fecha de baja cargada: <b>{datos.sinDatos.join(', ')}</b>. Cargales la fecha de salida (o un período) en Equipo y van a contar en sus meses.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -226,13 +237,11 @@ function SeccionExplorador({ api }) {
   const [sel, setSel] = useState({ tags: [], anios: [], colabs: [] });
   const [resultado, setResultado] = useState(null);
   const [cargando, setCargando] = useState(false);
-  const [abierta, setAbierta] = useState(false);
 
   useEffect(() => {
-    if (!abierta) return;
     api.etiquetas.uso().then(r => setCatalogo((r?.etiquetas || r?.tags || []).map(t => t.tag || t.nombre).filter(Boolean))).catch(() => {});
     api.analisis.rangoAnios().then(r => setAnios(r?.anios || [])).catch(() => {});
-  }, [api, abierta]);
+  }, [api]);
 
   useEffect(() => {
     const hay = sel.tags.length || sel.anios.length || sel.colabs.length;
@@ -255,10 +264,8 @@ function SeccionExplorador({ api }) {
 
   return (
     <div className="mt-8">
-      <button onClick={() => setAbierta(a => !a)} className="flex items-center gap-2 text-slate-800 font-semibold">
-        {abierta ? <ChevronDown size={16} /> : <ChevronRight size={16} />} Explorador de etiquetas <span className="text-sm font-normal text-slate-400">(combinaciones: suma solo lo que tiene TODO lo elegido)</span>
-      </button>
-      {abierta && (
+      <TituloSeccion nota="(combinaciones: suma solo lo que tiene TODO lo elegido)">Explorador de etiquetas</TituloSeccion>
+      {(
         <div className="mt-3 space-y-3">
           <div>
             <p className="text-xs text-slate-500 mb-1.5">Etiquetas</p>
