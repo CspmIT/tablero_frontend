@@ -155,3 +155,13 @@ export function buildWipsMap(rows) {
   }
   return map;
 }
+
+// Orden cronológico del día (31/08, pedido de Leonardo): los ítems con hora de
+// inicio (reuniones del tablero y espejos de Outlook, campo `hora` "HH:MM") se
+// ordenan por esa hora; los que no la tienen (tareas comunes, o reuniones
+// viejas hasta que el sync les backfillee la hora) conservan su orden manual y
+// van primero. Sort ESTABLE (garantizado por spec): los empates no se mueven.
+export function ordenarItemsPorHora(items) {
+  if (!Array.isArray(items)) return [];
+  return [...items].sort((a, b) => String(a?.hora || '').localeCompare(String(b?.hora || '')));
+}

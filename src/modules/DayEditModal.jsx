@@ -4,6 +4,7 @@ import { useData } from '../data/DataContext.jsx';
 import ReunionModal from './ReunionModal.jsx';
 import {
   STATUS_TYPES, ENTRY_TIMES, isWorkingDay, hoursBetween, fmtDDMM, fmtISO,
+  ordenarItemsPorHora,
 } from './grillaUtils.js';
 
 const FULL_DAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -137,8 +138,10 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
       setStatus(entry.status || 'present');
       setEntryTime(entry.entry_time || '08:00');
       setViajeLabel(entry.viaje_label || '');
+      // 31/08: las reuniones (ítems con hora) se muestran en orden cronológico;
+      // las tareas sin hora conservan su orden manual (sort estable).
       const its = entry.items && entry.items.length
-        ? entry.items.map((it) => (typeof it === 'string'
+        ? ordenarItemsPorHora(entry.items).map((it) => (typeof it === 'string'
             ? { text: it, wip: false, tags: [], horas: null }
             : { ...it, text: it?.text || '', wip: !!it?.wip, tags: Array.isArray(it?.tags) ? [...it.tags] : [], horas: (Number(it?.horas) > 0 ? Number(it.horas) : null) }))
         : [{ text: '', wip: false, tags: [], horas: null }];
@@ -230,9 +233,10 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
       horas_extra: hsExtraOn ? { ingreso: hsIng, salida: hsSal, horas: hoursBetween(hsIng, hsSal) } : null,
     });
   };
-  const handleDelete = () => {
-    if (window.confirm('¿Borrar lo cargado para este día?')) onSave(null);
-  };
+  // 31/08: window.confirm() nativo sobreviviente → doble paso inline
+  // (regla del registro: jamás confirm()/alert() nativos).
+  const [confirmandoBorrar, setConfirmandoBorrar] = useState(false);
+  useEffect(() => { setConfirmandoBorrar(false); }, [open]);
 
   const statusKeys = Object.keys(STATUS_TYPES).filter(
     (key) => key !== 'franco_cumple' || showCumpleOption || status === 'franco_cumple'
@@ -428,9 +432,15 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
 
         <div className="flex justify-between items-center mt-5">
           <div>
-            {entry && (
-              <button onClick={handleDelete} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">Borrar día</button>
-            )}
+            {entry && (confirmandoBorrar ? (
+              <span className="inline-flex items-center gap-1.5 text-sm">
+                <span className="text-red-600">¿Borrar el día?</span>
+                <button onClick={() => onSave(null)} className="px-2.5 py-1.5 rounded-lg bg-red-600 text-white">Sí</button>
+                <button onClick={() => setConfirmandoBorrar(false)} className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-500">No</button>
+              </span>
+            ) : (
+              <button onClick={() => setConfirmandoBorrar(true)} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">Borrar día</button>
+            ))}
           </div>
           <div className="flex gap-2">
             <button onClick={() => setReunionOpen(true)}
