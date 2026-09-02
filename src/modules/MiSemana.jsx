@@ -6,6 +6,7 @@ import SwitchVista from '../components/SwitchVista.jsx';
 import {
   getMonday, addDays, fmtISO, fmtDDMM, getWeekKey, DAYS_ES,
   computeWeeklyWipStats, fmtWipHours, dedicacionSemanalPct, buildEntriesMap, buildWipsMap, isWorkingDay,
+  ordenarItemsPorHora,
 } from './grillaUtils.js';
 
 export default function MiSemana({ vista = 'misemana', setVista }) {
@@ -219,7 +220,7 @@ export default function MiSemana({ vista = 'misemana', setVista }) {
         <div className="space-y-2">
           {dates.map((d, i) => {
             const entry = entries[`${yo.id}:${fmtISO(d)}`];
-            const its = (entry?.items || []).filter((it) => it && it.text && it.text.trim());
+            const its = ordenarItemsPorHora((entry?.items || []).filter((it) => it && it.text && it.text.trim()));
             const feriadoName = feriadosMap[fmtISO(d)];
             const sinTags = entry && isWorkingDay(entry.status) && its.length > 0
               && its.filter((it) => !(Array.isArray(it.tags) && it.tags.length)).length;
