@@ -131,6 +131,10 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
   const [hsExtraOn, setHsExtraOn] = useState(false);
   const [hsIng, setHsIng] = useState('18:00');
   const [hsSal, setHsSal] = useState('20:00');
+  // 31/08: window.confirm() nativo sobreviviente → doble paso inline
+  // (regla del registro: jamás confirm()/alert() nativos).
+  const [confirmandoBorrar, setConfirmandoBorrar] = useState(false);
+  useEffect(() => { setConfirmandoBorrar(false); }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -233,10 +237,6 @@ export default function DayEditModal({ open, onClose, collaborator, date, entry,
       horas_extra: hsExtraOn ? { ingreso: hsIng, salida: hsSal, horas: hoursBetween(hsIng, hsSal) } : null,
     });
   };
-  // 31/08: window.confirm() nativo sobreviviente → doble paso inline
-  // (regla del registro: jamás confirm()/alert() nativos).
-  const [confirmandoBorrar, setConfirmandoBorrar] = useState(false);
-  useEffect(() => { setConfirmandoBorrar(false); }, [open]);
 
   const statusKeys = Object.keys(STATUS_TYPES).filter(
     (key) => key !== 'franco_cumple' || showCumpleOption || status === 'franco_cumple'
