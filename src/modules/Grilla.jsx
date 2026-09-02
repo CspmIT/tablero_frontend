@@ -11,6 +11,7 @@ import {
   getMonday, addDays, fmtISO, fmtDDMM, getISOWeek, getWeekKey, DAYS_ES,
   isWorkingDay, computeDailyWipPct, computeWeeklyWipStats, fmtWipHours, dedicacionSemanalPct,
   collabsActiveInRange, buildEntriesMap, buildWipsMap,
+  ordenarItemsPorHora,
 } from './grillaUtils.js';
 
 const ROLE_LABEL = { manager: 'Manager', gerencial: 'Gerencial', collaborator: 'Colaborador', externo: 'Externo', tercerizado: 'Tercerizado' };
@@ -20,7 +21,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   // 28/08 (caso Mirko, RRHH): los externos con la solapa Grilla otorgada la ven
   // de SOLO LECTURA — necesitan los horarios de ingreso, no cargar actividades.
   const soloLectura = me?.tipo === 'externo';
-  const [pushMsg, setPushMsg] = useState(null); // resultado de activar notificaciones (banner inline)
+  const [aviso, setPushMsg] = useState(null); // resultado de activar notificaciones (banner inline)
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const [entries, setEntries] = useState({});
   const [wips, setWips] = useState({});
@@ -56,18 +57,18 @@ export default function Grilla({ vista = 'grilla', setVista }) {
       if (r.agregadas) partes.push(`${r.agregadas} nueva${r.agregadas > 1 ? 's' : ''}`);
       if (r.actualizadas) partes.push(`${r.actualizadas} actualizada${r.actualizadas > 1 ? 's' : ''}`);
       if (r.eliminadas) partes.push(`${r.eliminadas} quitada${r.eliminadas > 1 ? 's' : ''}`);
-      alert(partes.length ? `Outlook sincronizado: ${partes.join(', ')}.` : 'Outlook sincronizado: tu semana ya estaba al día.');
+      setAviso({ ok: true, txt: partes.length ? `Outlook sincronizado: ${partes.join(', ')}.` : 'Outlook sincronizado: tu semana ya estaba al día.' });
       recargar();
-    } catch (e) { alert(e.message || 'No se pudo sincronizar con Outlook'); }
+    } catch (e) { setAviso({ ok: false, txt: e.message || 'No se pudo sincronizar con Outlook' }); }
     finally { setSyncing(false); }
   };
 
   const responderInvitacion = async (id, respuesta) => {
     try {
       const r = await api.reuniones.responder(id, respuesta);
-      if (r.graphError) alert(r.graphError);
+      if (r.graphError) setAviso({ ok: false, txt: r.graphError });
       cargarInvitaciones(); recargar();
-    } catch (e) { alert(e.message || 'No se pudo responder'); }
+    } catch (e) { setAviso({ ok: false, txt: e.message || 'No se pudo responder' }); }
   };
 
   const weekEnd = addDays(weekStart, 6);
@@ -114,7 +115,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   const guardarResumen = async (colaboradorId, summary) => {
     try {
       await api.grilla.setResumenSemana({ colaboradorId, lunes: fmtISO(weekStart), summary });
-    } catch (e) { alert(e.message || 'No se pudo guardar el resumen'); }
+    } catch (e) { setAviso({ ok: false, txt: e.message || 'No se pudo guardar el resumen' }); }
   };
   const guardarWip = async (texto) => {
     const { collab } = wipCtx;
@@ -134,16 +135,16 @@ export default function Grilla({ vista = 'grilla', setVista }) {
   return (
     <div>
       {/* 28/08: alert() nativo sobreviviente de la barrida del 27/08 → banner inline. */}
-      {pushEstado() === 'default' && !pushMsg && (
+      {pushEstado() === 'default' && !aviso && (
         <button
           onClick={() => activarNotificaciones(api).then(() => setPushMsg({ ok: true, txt: 'Notificaciones activadas: vas a recibir invitaciones y cambios de reuniones aunque la app esté cerrada.' })).catch((e) => setPushMsg({ ok: false, txt: e.message }))}
           className="w-full text-left text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 mb-3 hover:border-coop-azul/40">
           🔔 Activá las notificaciones para enterarte de invitaciones y cambios de reuniones aunque la app esté cerrada (recomendado en el celular con la app instalada).
         </button>
       )}
-      {pushMsg && (
-        <div className={`text-xs rounded-xl px-3 py-2 mb-3 border flex items-center justify-between gap-2 ${pushMsg.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-          <span>{pushMsg.txt}</span>
+      {aviso && (
+        <div className={`text-xs rounded-xl px-3 py-2 mb-3 border flex items-center justify-between gap-2 ${aviso.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          <span>{aviso.txt}</span>
           <button onClick={() => setPushMsg(null)} className="opacity-60 hover:opacity-100">✕</button>
         </div>
       )}
@@ -222,7 +223,7 @@ export default function Grilla({ vista = 'grilla', setVista }) {
                     </td>
                     {dates.map((d, i) => {
                       const entry = entries[`${c.id}:${fmtISO(d)}`];
-                      const its = (entry?.items || []).filter((it) => it && it.text && it.text.trim());
+                      const its = ordenarItemsPorHora((entry?.items || []).filter((it) => it && it.text && it.text.trim()));
                       const feriadoName = feriadosMap[fmtISO(d)];
                       // Sin etiqueta = no contabiliza en horas por proyecto: marcar
                       // los días trabajados con actividades a las que les falta tag.

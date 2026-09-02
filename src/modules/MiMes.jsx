@@ -4,7 +4,7 @@ import ReunionModal from './ReunionModal.jsx';
 import DayEditModal from './DayEditModal.jsx';
 import StatusBadge from './StatusBadge.jsx';
 import SwitchVista from '../components/SwitchVista.jsx';
-import { fmtISO, buildEntriesMap, isActiveCollab, isWorkingDay, STATUS_TYPES } from './grillaUtils.js';
+import { fmtISO, buildEntriesMap, isActiveCollab, isWorkingDay, STATUS_TYPES, ordenarItemsPorHora } from './grillaUtils.js';
 
 // Vista "Mi mes" (pedido Carola, 07/07): calendario mensual de SOLO LECTURA por
 // colaborador. Panorama completo de estados e ítems del mes; la edición sigue
@@ -206,7 +206,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
               const feriado = feriadosMap[selDia];
               const [ay, am, ad] = selDia.split('-').map(Number);
               const diaSel = new Date(ay, am - 1, ad);
-              const items = (entry?.items || []).filter((it) => it && String(it.text || '').trim());
+              const items = ordenarItemsPorHora((entry?.items || []).filter((it) => it && String(it.text || '').trim()));
               const nombreDia = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][diaSel.getDay()];
               return (
                 <>
@@ -270,7 +270,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
                     const delMes = dia.getMonth() === mesNum - 1;
                     const entry = colabId ? entries[`${colabId}:${iso}`] : null;
                     const feriado = feriadosMap[iso];
-                    const items = (entry?.items || []).filter((it) => it && String(it.text || '').trim());
+                    const items = ordenarItemsPorHora((entry?.items || []).filter((it) => it && String(it.text || '').trim()));
                     const sinTags = entry && isWorkingDay(entry.status) && items.length > 0
                       && items.filter((it) => !(Array.isArray(it.tags) && it.tags.length)).length;
                     const VISIBLES = 2;
@@ -416,7 +416,7 @@ export default function MiMes({ vista = 'mimes', setVista }) {
 // completas con etiquetas y marca WIP, y horas extra. La edición sigue en la grilla.
 function DiaDetalleModal({ ctx, colaborador, onClose }) {
   const { fecha, dia, entry, feriado } = ctx;
-  const items = (entry?.items || []).filter((it) => it && String(it.text || '').trim());
+  const items = ordenarItemsPorHora((entry?.items || []).filter((it) => it && String(it.text || '').trim()));
   const fmt = dia.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
