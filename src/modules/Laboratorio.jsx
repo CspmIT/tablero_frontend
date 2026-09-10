@@ -6,9 +6,10 @@
 // vuelve en la misma fila; las pendientes/errores se reintentan desde el historial.
 // Diseño congelado: claude/Laboratorio_y_Guardias_diseno_28_08.md
 // Decisiones 28/08: interno (manager+gerencial+collaborator); MQTT = mismo ABM
-// sin buckets; contraseñas visibles con 👁; borrados con historial.
+// sin buckets; contraseñas MQTT visibles con 👁; borrados con historial.
 // Para servidores Influx, "usuario" es la organización y "contraseña" el token
-// de API (mismos campos, otra etiqueta en pantalla).
+// de API (mismos campos, otra etiqueta en pantalla). El token NO llega al front
+// (10/09): la API manda `tieneToken` y acá solo se muestra si está cargado.
 import { useEffect, useMemo, useState } from 'react';
 import { FlaskConical, Plus, Pencil, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
@@ -177,6 +178,12 @@ function TablaServidores({ titulo, tipo, servidores, onNuevo, onEditar, onBorrar
                 <td className="px-3 py-2 text-slate-600 break-all">{s.url}</td>
                 <td className="px-3 py-2 text-slate-600">{s.usuario || '—'}</td>
                 <td className="px-3 py-2 text-slate-600">
+                  {/* Influx: el token nunca llega al front (10/09); solo si está cargado. */}
+                  {tipo === 'influx' ? (
+                    s.tieneToken
+                      ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Cargado</span>
+                      : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Falta</span>
+                  ) : (
                   <span className="inline-flex items-center gap-1.5">
                     <span className={reveladas.has(s.id) ? '' : 'tracking-widest'}>
                       {s.contrasena ? (reveladas.has(s.id) ? s.contrasena : '••••••••') : '—'}
@@ -188,6 +195,7 @@ function TablaServidores({ titulo, tipo, servidores, onNuevo, onEditar, onBorrar
                       </button>
                     )}
                   </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-slate-600">{s.puerto ?? '—'}</td>
                 {tipo === 'influx' && (
@@ -270,12 +278,20 @@ function ServidorModal({ tipo, servidor, onClose, onGuardado }) {
           </label>
           <label className="text-xs text-slate-500">{tipo === 'influx' ? 'Token de API' : 'Contraseña'}
             <span className="flex items-center gap-1.5">
-              <input value={f.contrasena} onChange={set('contrasena')} type={verClave ? 'text' : 'password'} className={campo} />
-              <button onClick={() => setVerClave((v) => !v)} className="text-slate-400 hover:text-coop-azul" title={verClave ? 'Ocultar' : 'Mostrar'}>
-                {verClave ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
+              <input value={f.contrasena} onChange={set('contrasena')} type={verClave && tipo !== 'influx' ? 'text' : 'password'}
+                autoComplete="new-password" className={campo} />
+              {tipo !== 'influx' && (
+                <button onClick={() => setVerClave((v) => !v)} className="text-slate-400 hover:text-coop-azul" title={verClave ? 'Ocultar' : 'Mostrar'}>
+                  {verClave ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              )}
             </span>
-            {servidor && <span className="text-[11px] text-slate-400">Dejar vacío conserva la actual.</span>}
+            {tipo === 'influx' && (
+              <span className="text-[11px] text-slate-400">
+                {servidor ? `${servidor.tieneToken ? 'Hay un token cargado. ' : ''}Dejar vacío conserva el actual; no se vuelve a mostrar.` : 'Se guarda y no se vuelve a mostrar.'}
+              </span>
+            )}
+            {tipo !== 'influx' && servidor && <span className="text-[11px] text-slate-400">Dejar vacío conserva la actual.</span>}
           </label>
           <label className="text-xs text-slate-500">Puerto
             <input value={f.puerto} onChange={set('puerto')} type="number" min="1" className={campo} />
