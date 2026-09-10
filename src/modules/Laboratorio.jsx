@@ -1,28 +1,44 @@
 // Laboratorio (28/08, pedido de Leonardo): funciones IoT migradas desde la
 // Oficina Virtual — administración de servidores InfluxDB / MQTT y borrado de
-// datos en InfluxDB. ESTA OLA: solo la parte visual + guardado de datos; la
-// ejecución real de la delete query la conecta el equipo (proceso que lee las
-// solicitudes 'pendiente' de LabBorrado y reporta por PATCH).
+// datos en InfluxDB. 28/08: parte visual + guardado (cola). 10/09: el borrado
+// se EJECUTA al confirmar contra el servidor Influx del bucket elegido
+// (consulta → borrado → reconsulta, como la pantalla vieja) y el resultado
+// vuelve en la misma fila; las pendientes/errores se reintentan desde el historial.
 // Diseño congelado: claude/Laboratorio_y_Guardias_diseno_28_08.md
 // Decisiones 28/08: interno (manager+gerencial+collaborator); MQTT = mismo ABM
-// sin buckets; contraseñas visibles con 👁; borrados como cola con historial.
+// sin buckets; contraseñas visibles con 👁; borrados con historial.
+// Para servidores Influx, "usuario" es la organización y "contraseña" el token
+// de API (mismos campos, otra etiqueta en pantalla).
 import { useEffect, useMemo, useState } from 'react';
 import { FlaskConical, Plus, Pencil, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 
 const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+// Hora de Argentina fija (UTC-3, sin horario de verano), como hacía la pantalla
+// vieja de la OV (+180 min): no depende de la zona del navegador ni del servidor.
+const OFFSET_AR = '-03:00';
+const TZ_AR = 'America/Argentina/Cordoba';
+// 'YYYY-MM-DDTHH:mm[:ss]' (input datetime-local) → ISO UTC; '' si está vacío o mal.
+const isoDesdeArgentina = (local) => {
+  if (!local) return '';
+  const d = new Date(`${local.length === 16 ? `${local}:00` : local}${OFFSET_AR}`);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+};
 const fmtFH = (v) => {
   if (!v) return '—';
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return '—';
-  const p = (n) => String(n).padStart(2, '0');
-  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const p = Object.fromEntries(new Intl.DateTimeFormat('es-AR', {
+    timeZone: TZ_AR, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}${p.second !== '00' ? `:${p.second}` : ''}`;
 };
-const ESTADO_CHIP = {
-  pendiente: 'bg-amber-100 text-amber-700',
-  ejecutado: 'bg-emerald-100 text-emerald-700',
-  error: 'bg-red-100 text-red-700',
-  cancelado: 'bg-slate-100 text-slate-500',
+const ESTADO = {
+  pendiente: { label: 'Pendiente', cls: 'bg-amber-100 text-amber-700' },
+  ejecutado: { label: 'Borrado', cls: 'bg-emerald-100 text-emerald-700' },
+  sin_datos: { label: 'Sin datos', cls: 'bg-slate-100 text-slate-600' },
+  error: { label: 'Error', cls: 'bg-red-100 text-red-700' },
+  cancelado: { label: 'Cancelado', cls: 'bg-slate-100 text-slate-500' },
 };
 
 const SOLAPAS = [
@@ -142,8 +158,8 @@ function TablaServidores({ titulo, tipo, servidores, onNuevo, onEditar, onBorrar
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200">
               <th className="px-3 py-2 font-semibold">Nombre</th>
               <th className="px-3 py-2 font-semibold">URL</th>
-              <th className="px-3 py-2 font-semibold">Usuario</th>
-              <th className="px-3 py-2 font-semibold">Contraseña</th>
+              <th className="px-3 py-2 font-semibold">{tipo === 'influx' ? 'Organización' : 'Usuario'}</th>
+              <th className="px-3 py-2 font-semibold">{tipo === 'influx' ? 'Token' : 'Contraseña'}</th>
               <th className="px-3 py-2 font-semibold">Puerto</th>
               {tipo === 'influx' && <th className="px-3 py-2 font-semibold">Buckets</th>}
               <th className="px-3 py-2" />
@@ -246,12 +262,13 @@ function ServidorModal({ tipo, servidor, onClose, onGuardado }) {
             <input value={f.nombre} onChange={set('nombre')} className={campo} />
           </label>
           <label className="text-xs text-slate-500 sm:col-span-2">URL / host *
-            <input value={f.url} onChange={set('url')} placeholder="200.63.120.50 ó https://…" className={campo} />
+            <input value={f.url} onChange={set('url')} placeholder={tipo === 'influx' ? 'http://200.63.120.50:18086' : '200.63.120.50 ó https://…'} className={campo} />
           </label>
-          <label className="text-xs text-slate-500">Usuario
-            <input value={f.usuario} onChange={set('usuario')} className={campo} />
+          <label className="text-xs text-slate-500">{tipo === 'influx' ? 'Organización' : 'Usuario'}
+            <input value={f.usuario} onChange={set('usuario')} placeholder={tipo === 'influx' ? 'CoopMorteros' : ''} className={campo} />
+            {tipo === 'influx' && <span className="text-[11px] text-slate-400">Si queda vacía se usa CoopMorteros.</span>}
           </label>
-          <label className="text-xs text-slate-500">Contraseña
+          <label className="text-xs text-slate-500">{tipo === 'influx' ? 'Token de API' : 'Contraseña'}
             <span className="flex items-center gap-1.5">
               <input value={f.contrasena} onChange={set('contrasena')} type={verClave ? 'text' : 'password'} className={campo} />
               <button onClick={() => setVerClave((v) => !v)} className="text-slate-400 hover:text-coop-azul" title={verClave ? 'Ocultar' : 'Mostrar'}>
@@ -281,38 +298,60 @@ function ServidorModal({ tipo, servidor, onClose, onGuardado }) {
   );
 }
 
-// ---- Borrado de datos en InfluxDB (cola con historial) ----------------------
+// ---- Borrado de datos en InfluxDB (se ejecuta al confirmar; historial) -------
+// 10/09: la solicitud se ejecuta en el momento contra el servidor Influx del
+// bucket elegido (consulta → borrado → reconsulta) y vuelve con su resultado.
+// Las 'pendiente' viejas y los 'error' se reintentan con «Ejecutar».
 const FORM_BORRADO = { desde: '', hasta: '', servidorMqttId: '', bucketRef: '', topico: '' };
+const BANNER = {
+  ejecutado: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+  sin_datos: 'bg-amber-50 border-amber-200 text-amber-800',
+  error: 'bg-red-50 border-red-200 text-red-700',
+};
 
 function BorradoInflux({ mqtt, influx, borrados, onError, recargar }) {
   const { api } = useData();
   const [f, setF] = useState({ ...FORM_BORRADO });
   const [confirmando, setConfirmando] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [resultado, setResultado] = useState(null); // última fila ejecutada (aviso arriba del historial)
+  const [ejecutando, setEjecutando] = useState(null); // id en reintento
   const set = (k) => (e) => { setConfirmando(false); setF((x) => ({ ...x, [k]: e.target.value })); };
 
   // bucketRef = "<servidorInfluxId>|<bucket>" (el bucket pertenece a un influx).
   const opcionesBucket = influx.flatMap((s) => (Array.isArray(s.buckets) ? s.buckets : []).map((b) => ({ ref: `${s.id}|${b}`, bucket: b, servidor: s })));
-  const completo = f.desde && f.hasta && f.servidorMqttId && f.bucketRef && f.topico.trim();
-  const rangoValido = completo && new Date(f.hasta) > new Date(f.desde);
+  const desdeIso = isoDesdeArgentina(f.desde);
+  const hastaIso = isoDesdeArgentina(f.hasta);
+  const completo = desdeIso && hastaIso && f.servidorMqttId && f.bucketRef && f.topico.trim();
+  const rangoValido = completo && new Date(hastaIso) > new Date(desdeIso);
 
-  const solicitar = async () => {
+  const borrar = async () => {
     if (!rangoValido) { onError('Revisá el rango: la fecha de fin debe ser posterior a la de inicio.'); return; }
     const [servidorInfluxId, bucket] = f.bucketRef.split('|');
     setEnviando(true);
     try {
-      await api.laboratorio.crearBorrado({
-        desde: new Date(f.desde).toISOString(),
-        hasta: new Date(f.hasta).toISOString(),
+      const fila = await api.laboratorio.crearBorrado({
+        desde: desdeIso,
+        hasta: hastaIso,
         servidorMqttId: Number(f.servidorMqttId),
         servidorInfluxId: Number(servidorInfluxId),
         bucket,
         topico: f.topico.trim(),
       });
-      setF({ ...FORM_BORRADO }); setConfirmando(false); onError('');
+      setResultado(fila);
+      // Como la pantalla vieja: el formulario se limpia solo si efectivamente borró.
+      if (fila.estado === 'ejecutado') setF({ ...FORM_BORRADO });
+      setConfirmando(false); onError('');
       recargar();
-    } catch (e) { onError(e.message || 'No se pudo registrar la solicitud'); }
+    } catch (e) { onError(e.message || 'No se pudo ejecutar el borrado'); }
     finally { setEnviando(false); }
+  };
+
+  const ejecutar = async (b) => {
+    setEjecutando(b.id);
+    try { setResultado(await api.laboratorio.ejecutarBorrado(b.id)); onError(''); recargar(); }
+    catch (e) { onError(e.message || 'No se pudo ejecutar'); }
+    finally { setEjecutando(null); }
   };
 
   const cancelar = async (b) => {
@@ -321,18 +360,20 @@ function BorradoInflux({ mqtt, influx, borrados, onError, recargar }) {
   };
 
   const campo = 'border border-slate-300 rounded-lg px-2 py-1.5 text-sm w-full';
+  const bucketElegido = f.bucketRef.split('|')[1];
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4">
       <p className="font-semibold text-coop-negro mb-1">Borrado de datos en InfluxDB</p>
       <p className="text-xs text-slate-400 mb-3">
-        Cada solicitud queda registrada acá y la ejecuta un proceso del área contra InfluxDB (no borra al instante).
+        Se ejecuta al confirmar: primero se comprueba que haya datos del tópico en el rango, se borran y se
+        vuelve a comprobar. Todo queda en el historial de abajo. Las horas son de Argentina.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-3xl">
-        <label className="text-xs text-slate-500">Fecha de inicio *
-          <input type="datetime-local" value={f.desde} onChange={set('desde')} className={campo} />
+        <label className="text-xs text-slate-500">Fecha y hora de inicio *
+          <input type="datetime-local" step="1" value={f.desde} onChange={set('desde')} className={campo} />
         </label>
-        <label className="text-xs text-slate-500">Fecha de fin *
-          <input type="datetime-local" value={f.hasta} onChange={set('hasta')} className={campo} />
+        <label className="text-xs text-slate-500">Fecha y hora de fin *
+          <input type="datetime-local" step="1" value={f.hasta} onChange={set('hasta')} className={campo} />
         </label>
         <label className="text-xs text-slate-500">Servidor MQTT *
           <select value={f.servidorMqttId} onChange={set('servidorMqttId')} className={campo}>
@@ -362,52 +403,73 @@ function BorradoInflux({ mqtt, influx, borrados, onError, recargar }) {
       <div className="mt-3 flex items-center gap-2 flex-wrap">
         {confirmando ? (
           <span className="inline-flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700 flex-wrap">
-            Se registrará el borrado de <b>{f.bucketRef.split('|')[1]}</b> · tópico <b>{f.topico.trim()}</b> del {fmtFH(f.desde)} al {fmtFH(f.hasta)}. ¿Confirmás?
-            <button onClick={solicitar} disabled={enviando} className="px-3 py-1 rounded-lg bg-red-600 text-white disabled:opacity-40">{enviando ? 'Enviando…' : 'Sí, solicitar'}</button>
-            <button onClick={() => setConfirmando(false)} className="px-3 py-1 rounded-lg border border-slate-300 text-slate-500">No</button>
+            Se van a borrar los datos de <b>{bucketElegido}</b> · tópico <b>{f.topico.trim()}</b> del {fmtFH(desdeIso)} al {fmtFH(hastaIso)} (hora de Argentina). No se puede deshacer. ¿Confirmás?
+            <button onClick={borrar} disabled={enviando} className="px-3 py-1 rounded-lg bg-red-600 text-white disabled:opacity-40">{enviando ? 'Borrando…' : 'Sí, borrar'}</button>
+            <button onClick={() => setConfirmando(false)} disabled={enviando} className="px-3 py-1 rounded-lg border border-slate-300 text-slate-500 disabled:opacity-40">No</button>
           </span>
         ) : (
           <button onClick={() => setConfirmando(true)} disabled={!rangoValido}
             className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium disabled:opacity-40">
-            Solicitar borrado
+            Borrar datos
           </button>
         )}
       </div>
 
-      <p className="font-medium text-slate-700 text-sm mt-5 mb-2">Historial de solicitudes</p>
-      {borrados.length === 0 ? <p className="text-sm text-slate-400">Todavía no hay solicitudes.</p> : (
+      {resultado && (
+        <div className={`mt-4 border rounded-lg px-3 py-2 text-sm flex items-start justify-between gap-2 ${BANNER[resultado.estado] || BANNER.error}`}>
+          <span>
+            <b>{ESTADO[resultado.estado]?.label || resultado.estado}</b> · {resultado.bucket} · {resultado.topico}
+            {resultado.resultado ? <>: {resultado.resultado}</> : null}
+          </span>
+          <button onClick={() => setResultado(null)} className="opacity-60 hover:opacity-100" title="Cerrar">✕</button>
+        </div>
+      )}
+
+      <p className="font-medium text-slate-700 text-sm mt-5 mb-2">Historial de borrados</p>
+      {borrados.length === 0 ? <p className="text-sm text-slate-400">Todavía no hay borrados.</p> : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 860 }}>
+          <table className="w-full text-sm" style={{ minWidth: 900 }}>
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200">
                 <th className="px-3 py-2 font-semibold">Solicitado</th>
-                <th className="px-3 py-2 font-semibold">Rango a borrar</th>
+                <th className="px-3 py-2 font-semibold">Rango (hora Argentina)</th>
                 <th className="px-3 py-2 font-semibold">Servidor MQTT</th>
                 <th className="px-3 py-2 font-semibold">Bucket</th>
                 <th className="px-3 py-2 font-semibold">Tópico</th>
-                <th className="px-3 py-2 font-semibold">Estado</th>
+                <th className="px-3 py-2 font-semibold">Resultado</th>
                 <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>
-              {borrados.map((b) => (
-                <tr key={b.id} className="border-b border-slate-100 align-top">
-                  <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{fmtFH(b.createdAt)}{b.solicitadoPor ? <div className="text-xs text-slate-400">{b.solicitadoPor}</div> : null}</td>
-                  <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{fmtFH(b.desde)} → {fmtFH(b.hasta)}</td>
-                  <td className="px-3 py-2 text-slate-600">{b.servidorNombre || '—'}</td>
-                  <td className="px-3 py-2 text-slate-600">{b.bucket}{b.servidorInfluxNombre ? <div className="text-xs text-slate-400">{b.servidorInfluxNombre}</div> : null}</td>
-                  <td className="px-3 py-2 text-slate-600 break-all">{b.topico}</td>
-                  <td className="px-3 py-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${ESTADO_CHIP[b.estado] || ESTADO_CHIP.pendiente}`} title={b.resultado || ''}>{b.estado}</span>
-                    {b.estado === 'error' && b.resultado ? <div className="text-xs text-red-600 mt-0.5 max-w-[220px]">{b.resultado}</div> : null}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {b.estado === 'pendiente' && (
-                      <button onClick={() => cancelar(b)} className="text-xs px-2 py-1 rounded-lg border border-slate-300 text-slate-500 hover:border-red-300 hover:text-red-600">Cancelar</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {borrados.map((b) => {
+                const est = ESTADO[b.estado] || ESTADO.pendiente;
+                const reintentable = ['pendiente', 'error'].includes(b.estado);
+                return (
+                  <tr key={b.id} className="border-b border-slate-100 align-top">
+                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{fmtFH(b.createdAt)}{b.solicitadoPor ? <div className="text-xs text-slate-400">{b.solicitadoPor}</div> : null}</td>
+                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{fmtFH(b.desde)} → {fmtFH(b.hasta)}</td>
+                    <td className="px-3 py-2 text-slate-600">{b.servidorNombre || '—'}</td>
+                    <td className="px-3 py-2 text-slate-600">{b.bucket}{b.servidorInfluxNombre ? <div className="text-xs text-slate-400">{b.servidorInfluxNombre}</div> : null}</td>
+                    <td className="px-3 py-2 text-slate-600 break-all">{b.topico}</td>
+                    <td className="px-3 py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${est.cls}`}>{est.label}</span>
+                      {b.resultado ? <div className={`text-xs mt-0.5 max-w-[260px] ${b.estado === 'error' ? 'text-red-600' : 'text-slate-400'}`}>{b.resultado}</div> : null}
+                      {b.ejecutadoAt ? <div className="text-[11px] text-slate-400 mt-0.5">{fmtFH(b.ejecutadoAt)}</div> : null}
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {reintentable && (
+                        <button onClick={() => ejecutar(b)} disabled={ejecutando === b.id}
+                          className="text-xs px-2 py-1 rounded-lg bg-red-600 text-white disabled:opacity-40 mr-1">
+                          {ejecutando === b.id ? 'Borrando…' : (b.estado === 'error' ? 'Reintentar' : 'Ejecutar')}
+                        </button>
+                      )}
+                      {b.estado === 'pendiente' && (
+                        <button onClick={() => cancelar(b)} className="text-xs px-2 py-1 rounded-lg border border-slate-300 text-slate-500 hover:border-red-300 hover:text-red-600">Cancelar</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
