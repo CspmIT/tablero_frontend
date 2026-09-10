@@ -97,7 +97,8 @@ export const api = {
     editarServidor: (id, body) => http.patch(`/laboratorio/servidores/${id}`, body),
     borrarServidor: (id) => http.del(`/laboratorio/servidores/${id}`),
     borrados: () => http.get('/laboratorio/borrados'),
-    crearBorrado: (body) => http.post('/laboratorio/borrados', body),
+    crearBorrado: (body) => http.post('/laboratorio/borrados', body), // 10/09: se ejecuta al crear y vuelve con resultado
+    ejecutarBorrado: (id) => http.post(`/laboratorio/borrados/${id}/ejecutar`), // reintento de pendiente/error
     cancelarBorrado: (id) => http.del(`/laboratorio/borrados/${id}`),
   },
   // Campañas publicitarias (26/08): período como línea en el calendario.
