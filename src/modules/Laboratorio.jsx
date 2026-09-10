@@ -338,7 +338,8 @@ function BorradoInflux({ mqtt, influx, borrados, onError, recargar }) {
   const opcionesBucket = influx.flatMap((s) => (Array.isArray(s.buckets) ? s.buckets : []).map((b) => ({ ref: `${s.id}|${b}`, bucket: b, servidor: s })));
   const desdeIso = isoDesdeArgentina(f.desde);
   const hastaIso = isoDesdeArgentina(f.hasta);
-  const completo = desdeIso && hastaIso && f.servidorMqttId && f.bucketRef && f.topico.trim();
+  // El servidor MQTT es opcional (10/09, como la pantalla vieja): solo referencia en el historial.
+  const completo = desdeIso && hastaIso && f.bucketRef && f.topico.trim();
   const rangoValido = completo && new Date(hastaIso) > new Date(desdeIso);
 
   const borrar = async () => {
@@ -349,7 +350,7 @@ function BorradoInflux({ mqtt, influx, borrados, onError, recargar }) {
       const fila = await api.laboratorio.crearBorrado({
         desde: desdeIso,
         hasta: hastaIso,
-        servidorMqttId: Number(f.servidorMqttId),
+        servidorMqttId: f.servidorMqttId ? Number(f.servidorMqttId) : null,
         servidorInfluxId: Number(servidorInfluxId),
         bucket,
         topico: f.topico.trim(),
@@ -391,12 +392,12 @@ function BorradoInflux({ mqtt, influx, borrados, onError, recargar }) {
         <label className="text-xs text-slate-500">Fecha y hora de fin *
           <input type="datetime-local" step="1" value={f.hasta} onChange={set('hasta')} className={campo} />
         </label>
-        <label className="text-xs text-slate-500">Servidor MQTT *
+        <label className="text-xs text-slate-500">Servidor MQTT (opcional)
           <select value={f.servidorMqttId} onChange={set('servidorMqttId')} className={campo}>
-            <option value="">Seleccionar…</option>
+            <option value="">Sin especificar</option>
             {mqtt.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
           </select>
-          {mqtt.length === 0 && <span className="text-[11px] text-amber-600">No hay servidores MQTT cargados (solapa «Servidores MQTT»).</span>}
+          <span className="text-[11px] text-slate-400">Solo queda como referencia en el historial; el borrado no lo usa.</span>
         </label>
         <label className="text-xs text-slate-500">Bucket *
           <select value={f.bucketRef} onChange={set('bucketRef')} className={campo}>
