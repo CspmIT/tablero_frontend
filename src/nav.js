@@ -2,7 +2,7 @@
 // `roles`: si está, sólo esos tipos ven el ítem por defecto; si falta, todos.
 // El panel de Configuración puede otorgar (extra) u ocultar (ocultas) solapas
 // por usuario, por encima de estos defaults.
-import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Inbox, Settings, Wrench, Megaphone, FlaskConical } from 'lucide-react';
+import { Gauge, CalendarDays, CalendarCheck, CalendarMinus, Shield, SquareKanban, Handshake, Target, TrendingUp, Users, Wallet, Upload, FileSpreadsheet, FileText, Sparkles, BarChart3, Inbox, Settings, Wrench, Megaphone, FlaskConical, Building2 } from 'lucide-react';
 
 // 28/08 (Leonardo: «que el menú no se vuelva inmanejable»): Guardias DEJA el
 // menú lateral y pasa a ser una pestaña del selector de la Grilla (entre
@@ -29,6 +29,11 @@ export const MODULOS = [
   // Laboratorio (28/08): funciones IoT migradas desde la Oficina Virtual
   // (servidores InfluxDB/MQTT + borrado de datos). Equipo interno.
   { id: 'laboratorio', label: 'Laboratorio', icon: FlaskConical, listo: true, roles: ['manager', 'gerencial', 'collaborator'] },
+  // Administracion de Cooptech (16/09): el ABM de organizaciones y sus usuarios,
+  // traido desde el sitio cooptech.com.ar, que queda solo como sitio
+  // institucional. `roles: []` significa que ningun rol la da por defecto: se
+  // otorga persona por persona desde Configuracion > Permisos.
+  { id: 'organizaciones', label: 'Organizaciones', icon: Building2, listo: true, roles: [] },
 ];
 
 // Agrupados bajo "Análisis" (ex "Información adicional", renombrado 07/08).
@@ -66,6 +71,8 @@ export const AJUSTES = [
 export const SOLAPAS_GESTIONABLES = [...MODULOS, GUARDIAS_TAB, ...INFO];
 
 // Visibilidad efectiva: rol default + extra − ocultas (overrides del panel).
+// Una solapa con `roles: []` no la da ningun rol: solo se ve si figura en las
+// otorgadas (`extra`) de esa persona.
 export function puedeVerSolapa(item, me) {
   const solapas = me?.solapas || { extra: [], ocultas: [] };
   if (solapas.ocultas?.includes(item.id)) return false;
