@@ -6,6 +6,7 @@ import FotoImg from './FotoImg.jsx';
 import DesktopDownloadModal from './DesktopDownloadModal.jsx';
 import { isTauri } from '../utils/isTauri.js';
 import iconUrl from '../assets/cooptech-icon.png';
+import { puedeVerSolapa } from '../nav.js';
 
 // Ítems de navegación compartidos entre el sidebar de escritorio y el drawer móvil.
 // `expandido`: si se muestran las etiquetas. `enMovil`: el grupo "Análisis"
@@ -124,14 +125,11 @@ export default function Layout({ modulos, infoGrupo = [], configuracion = null, 
   const yo = colaboradores?.find((c) => String(c.id) === String(me?.colaboradorId));
   const inicial = (me?.nombre || 'U').trim().charAt(0).toUpperCase();
 
-  // Visibilidad efectiva: rol default + solapas otorgadas − ocultadas desde el
-  // panel de permisos (me.solapas viene del /me).
-  const puedeVer = (item) => {
-    const ov = me?.solapas || { extra: [], ocultas: [] };
-    if (ov.ocultas?.includes(item.id)) return false;
-    if (!item.roles || item.roles.includes(me?.tipo)) return true;
-    return !!ov.extra?.includes(item.id);
-  };
+  // Visibilidad efectiva: la decide puedeVerSolapa() en nav.js — rol default +
+  // solapas otorgadas − ocultadas (me.solapas viene del /me), y el filtro por
+  // perfil de Cooptech. Antes esta regla estaba duplicada acá y quedaba fuera de
+  // sincronía cada vez que se tocaba una de las dos copias.
+  const puedeVer = (item) => puedeVerSolapa(item, me);
   const modulosVisibles = modulos.filter(puedeVer);
   const infoVisibles = infoGrupo.filter(puedeVer);
   const configVisible = configuracion && puedeVer(configuracion) ? configuracion : null;

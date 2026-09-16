@@ -25,6 +25,7 @@ import Inbox from './modules/Inbox.jsx'; // 20/08: Mis deseos → Inbox (solapas
 import Marketing from './modules/Marketing.jsx'; // 20/08: planificación + repositorio de marca
 import Laboratorio from './modules/Laboratorio.jsx'; // 28/08: IoT (Influx/MQTT) migrado desde la OV
 import Configuracion from './modules/Configuracion.jsx';
+import Organizaciones from './modules/Organizaciones.jsx';
 import { MODULOS, INFO, CONFIGURACION } from './nav.js';
 import Campo from './modules/Campo.jsx';
 import MiMes from './modules/MiMes.jsx';
@@ -68,6 +69,7 @@ function Contenido({ activo }) {
   if (activo === 'marketing') return <Marketing />;
   if (activo === 'laboratorio') return <Laboratorio />;
   if (activo === 'visitas') return <Campo />;
+  if (activo === 'organizaciones') return <Organizaciones />;
   if (activo === 'configuracion') return <Configuracion />;
   if (activo === 'importar') return <Importar />;
   if (activo === 'importar_grilla') return <ImportarGrilla />;
