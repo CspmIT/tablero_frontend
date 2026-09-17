@@ -142,7 +142,7 @@ input[type=range]{accent-color:var(--green)}
 <main>
 <!-- ============ INPUTS ============ -->
 <section class="tab-panel active" id="tab-inputs">
-  <p class="intro">Cargá acá los datos de infraestructura y costos. Todo se recalcula en vivo y se guarda automáticamente en este navegador. Montos en USD.</p>
+  <p class="intro">Cargá acá los datos de infraestructura y costos. Todo se recalcula en vivo y se guarda automáticamente. Montos en USD.</p>
 
   <div class="card"><div class="head"><span class="hex"></span><h3>Parámetros globales</h3></div><div class="body">
     <div class="grid g4">
@@ -316,7 +316,7 @@ input[type=range]{accent-color:var(--green)}
   </div></div>
 </section>
 
-<p class="muted-foot">CoopCloud · Simulador de costos — los datos se guardan localmente en este navegador.</p>
+<p class="muted-foot">CoopCloud · Simulador de costos — <span id="notaGuardado">los datos se guardan localmente en este navegador.</span></p>
 </main>
 
 <script>
@@ -364,10 +364,29 @@ function setPath(o,p,v){const k=p.split('.');let c=o;for(let i=0;i<k.length-1;i+
 function getPath(o,p){return p.split('.').reduce((c,k)=>c?c[k]:undefined,o);}
 
 /* ============================== PERSISTENCIA ============================== */
-function save(){try{localStorage.setItem('coopcloud_sim',JSON.stringify(S));setSaveState('Guardado ✓');coopBridgePost('estado_actualizado',{estado:S});}catch(e){setSaveState('Sesión sin guardado local');}}
-function load(){try{const raw=localStorage.getItem('coopcloud_sim');if(raw){S=Object.assign(defaultState(),JSON.parse(raw));}}catch(e){}}
+/* 17/09 (bug «los datos quedan en el navegador de cada uno»): EMBEBIDO en el
+   Tablero, la fuente de verdad es EL LEAD (via puente). El localStorage queda
+   solo para el uso standalone (abrir el html suelto). Además, los autosaves
+   esperan el HANDSHAKE (cargar_estado del Tablero): antes, el recalc() del
+   boot emitía el estado viejo del navegador y podía pisar el del lead. */
+var EMBEBIDO=(function(){try{return !!(window.parent&&window.parent!==window);}catch(e){return true;}})();
+var __handshake=!EMBEBIDO; // embebido: sin autosave hasta recibir cargar_estado
+function save(){try{if(!EMBEBIDO){localStorage.setItem('coopcloud_sim',JSON.stringify(S));}setSaveState(EMBEBIDO?(__handshake?'Guardado en el tablero ✓':'Cargando…'):'Guardado ✓');if(__handshake)coopBridgePost('estado_actualizado',{estado:S});}catch(e){setSaveState('Sesión sin guardado local');}}
+function load(){if(EMBEBIDO)return;try{const raw=localStorage.getItem('coopcloud_sim');if(raw){S=Object.assign(defaultState(),JSON.parse(raw));}}catch(e){}}
 let saveTimer;function setSaveState(t){const el=document.getElementById('saveState');if(el)el.textContent=t;}
-function resetAll(){if(confirm('¿Restablecer todos los valores a los de referencia?')){S=defaultState();try{localStorage.removeItem('coopcloud_sim')}catch(e){}; bindInputs(); renderDynamic(); recalc();}}
+/* 17/09: sin confirm() nativo (en Tauri mete el encabezado «tauri://localhost
+   dice…») — doble paso: el primer click arma el botón, el segundo ejecuta. */
+var __resetArmado=null;
+function resetAll(){
+  var btn=document.querySelector('[onclick="resetAll()"]');
+  if(!__resetArmado){
+    __resetArmado=setTimeout(function(){__resetArmado=null;if(btn)btn.textContent='↺ Restablecer';},5000);
+    if(btn)btn.textContent='¿Seguro? tocá de nuevo';
+    return;
+  }
+  clearTimeout(__resetArmado);__resetArmado=null;if(btn)btn.textContent='↺ Restablecer';
+  S=defaultState();try{localStorage.removeItem('coopcloud_sim')}catch(e){}; bindInputs(); renderDynamic(); recalc();
+}
 
 /* ============================== MOTOR DE CÁLCULO ============================== */
 function sumDiscos(tipo){return (S.discos[tipo]||[]).reduce((a,d)=>a+(+d.t||0)*(+d.c||0),0);}
@@ -796,10 +815,30 @@ window.addEventListener('message', function(ev){
   if (!msg || msg.coopBridge !== true) return;
   if (msg.type === 'precargar_datos') {
     window.__coopLeadId = msg.leadId || null;
-    if (typeof msg.razon === 'string') S.cliente = msg.razon;
+    if (typeof msg.razon === 'string') { window.__coopRazon = msg.razon; S.cliente = msg.razon; }
     bindInputs();
-  } else if (msg.type === 'cargar_estado' && msg.estado) {
-    try { S = Object.assign(defaultState(), msg.estado); bindInputs(); renderDynamic(); recalc(); } catch(e){}
+  } else if (msg.type === 'cargar_estado') {
+    /* 17/09: llega SIEMPRE (estado null si el lead no tiene). Recién acá se
+       liberan los autosaves (__handshake). Lead sin estado: se RESCATA lo del
+       navegador si existe (compat con lo cargado antes del fix), avisando que
+       puede ser de otro cliente — la clave local era una sola, global. */
+    try {
+      if (msg.estado) { S = Object.assign(defaultState(), msg.estado); }
+      else {
+        try {
+          var raw = localStorage.getItem('coopcloud_sim');
+          if (raw) {
+            S = Object.assign(defaultState(), JSON.parse(raw));
+            if (window.__coopRazon) S.cliente = window.__coopRazon;
+            setSaveState('Recuperado de este navegador — revisá que corresponda a este cliente');
+          }
+        } catch(e){}
+      }
+      __handshake = true;
+      var nota=document.getElementById('notaGuardado');
+      if(nota)nota.textContent='los datos se guardan en el tablero.';
+      bindInputs(); renderDynamic(); recalc();
+    } catch(e){ __handshake = true; }
   }
 });
 coopBridgePost('iframe_listo');

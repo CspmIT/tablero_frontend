@@ -1,5 +1,8 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Settings } from 'lucide-react';
+import logoReconecta from '../assets/logo-reconecta.png';
+import logoAgua from '../assets/logo-agua.png';
+import logoCoopCloud from '../assets/logo-coopcloud.png';
 import { useData } from '../data/DataContext.jsx';
 import { buildVideollamadaICS, descargarICS, mailtoVideollamada } from './videollamadaUtils.js';
 import MisNotas from './MisNotas.jsx';
@@ -140,6 +143,29 @@ export default function CRM() {
       setPresupCtx((c) => (c ? { ...c, lead: { ...c.lead, [campo]: valor } } : c));
     } catch { /* el iframe conserva el estado; reintenta al próximo autosave */ }
   }, [api, presupCtx]);
+
+  // SIMULADOR GLOBAL CoopCloud (17/09, hallazgo de Leonardo: el botón sin lead
+  // es la definición de precios/monómicos y vivía en el localStorage de cada
+  // navegador). Ahora es UNA definición compartida en el servidor: se trae
+  // ANTES de abrir (mismo patrón que abrirPresup con el lead — evita que el
+  // rescate local pise la global) y el autosave va con debounce. Escritura de
+  // conducción: si el PUT da 403, se avisa solo-lectura y no se insiste.
+  const simTimer = useRef(null);
+  const [simSoloLectura, setSimSoloLectura] = useState(false);
+  const abrirSimuladorCoopCloud = useCallback(async () => {
+    setSimSoloLectura(false);
+    let estado = null;
+    try { estado = (await api.coopcloudSimulador.get())?.estado ?? null; } catch { /* abre con rescate local */ }
+    setPresupCtx({ tipo: 'coopcloud', lead: null, simulador: estado });
+  }, [api]);
+  const guardarSimulador = useCallback((estado) => {
+    if (simSoloLectura) return;
+    clearTimeout(simTimer.current);
+    simTimer.current = setTimeout(async () => {
+      try { await api.coopcloudSimulador.put(estado); }
+      catch (e) { if (e?.status === 403) setSimSoloLectura(true); /* otros: reintenta al próximo autosave */ }
+    }, 800);
+  }, [api, simSoloLectura]);
 
   const valorDeTotales = (totales) => {
     const total = totales && (totales.totalUSD ?? totales.total ?? totales.totalUsd);
@@ -395,6 +421,20 @@ export default function CRM() {
               </button>
             ))}
           </div>
+          {/* Presupuestar sin lead (17/09, pedido de Leonardo: abajo de todo no
+              se encontraba). Badges oficiales de producto, con tooltip. */}
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <span className="text-xs text-slate-400">Presupuestar sin lead:</span>
+            <button onClick={() => setPresupCtx({ tipo: 'reconecta', lead: null })} title="Presupuesto Reconecta (sin lead)" aria-label="Presupuesto Reconecta sin lead"
+              className="p-0.5 rounded-lg border border-slate-200 hover:border-coop-azul/50 hover:shadow-sm transition-shadow">
+              <img src={logoReconecta} alt="Reconecta" className="w-7 h-7 rounded-md" /></button>
+            <button onClick={() => setPresupCtx({ tipo: 'agua', modo: 'presupuesto', lead: null })} title="Presupuesto +Agua (sin lead)" aria-label="Presupuesto +Agua sin lead"
+              className="p-0.5 rounded-lg border border-slate-200 hover:border-coop-azul/50 hover:shadow-sm transition-shadow">
+              <img src={logoAgua} alt="+Agua" className="w-7 h-7 rounded-md" /></button>
+            <button onClick={abrirSimuladorCoopCloud} title="Simulador CoopCloud (definición global de precios)" aria-label="Simulador CoopCloud"
+              className="p-0.5 rounded-lg border border-slate-200 hover:border-coop-azul/50 hover:shadow-sm transition-shadow">
+              <img src={logoCoopCloud} alt="CoopCloud" className="w-7 h-7 rounded-md" /></button>
+          </div>
           <p className="text-sm text-slate-500">Pipeline activo: <span className="font-mono text-emerald-700">{fmtUSD(pipeline)}</span></p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -627,13 +667,8 @@ export default function CRM() {
         </div>
       )}
 
-      {/* Accesos directos a los presupuestadores, sin lead (presupuesto suelto; el PDF se descarga desde la herramienta). */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-slate-500 mr-1">Presupuestar sin lead:</span>
-        <button onClick={() => setPresupCtx({ tipo: 'reconecta', lead: null })} className="text-sm text-coop-azul border border-coop-azul/30 rounded-lg px-3 py-1.5 hover:bg-coop-azul/5">Reconecta</button>
-        <button onClick={() => setPresupCtx({ tipo: 'agua', modo: 'presupuesto', lead: null })} className="text-sm text-coop-azul border border-coop-azul/30 rounded-lg px-3 py-1.5 hover:bg-coop-azul/5">+Agua</button>
-        <button onClick={() => setPresupCtx({ tipo: 'coopcloud', lead: null })} className="text-sm text-coop-azul border border-coop-azul/30 rounded-lg px-3 py-1.5 hover:bg-coop-azul/5">CoopCloud</button>
-      </div>
+      {/* 17/09: los accesos «Presupuestar sin lead» viven arriba, bajo las
+          pestañas del CRM (badges de producto) — acá abajo no se encontraban. */}
 
       {form && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onMouseDown={(e) => e.target === e.currentTarget && (setForm(null))}>
@@ -1044,8 +1079,9 @@ export default function CRM() {
       <CoopCloudModal
         open={presupCtx?.tipo === 'coopcloud'}
         lead={presupCtx?.lead}
-        estadoInicial={presupCtx?.lead?.coopcloudEstado}
-        onAutoSave={(estado) => guardarEstado('coopcloudEstado', estado)}
+        estadoInicial={presupCtx?.lead ? presupCtx?.lead?.coopcloudEstado : presupCtx?.simulador}
+        aviso={!presupCtx?.lead && simSoloLectura ? 'Solo lectura: la definición global la guarda la conducción (tus cambios no se comparten).' : null}
+        onAutoSave={(estado) => (presupCtx?.lead ? guardarEstado('coopcloudEstado', estado) : guardarSimulador(estado))}
         onPdfDescargado={(estado, totales) => guardarEstado('coopcloudEstado', estado, {
           ...(totales?.costoMensual != null ? { coopcloudCostoMensual: Number(totales.costoMensual) } : {}),
           // PDF de la solapa Facturación: el total mensual viaja al valor del lead

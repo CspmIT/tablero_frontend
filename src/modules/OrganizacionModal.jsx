@@ -4,11 +4,11 @@ import { cooptechAdmin } from '../api/cooptech.js';
 
 // Alta y edición de una organización de Cooptech.
 //
-// El formulario pide sólo lo que se usa: nombre, número de cliente, domicilio,
-// el usuario administrador y qué productos tiene contratados. Los campos que
-// traía el sitio viejo y nadie completaba (CUIL, código postal, número de cuenta
-// por producto, fechas de aprobación y puesta en marcha, y los contactos) se
-// sacaron el 16/09.
+// El formulario pide sólo lo que se usa: nombre, domicilio, el usuario
+// administrador y qué productos tiene contratados. Los campos que traía el sitio
+// viejo y nadie completaba (CUIL, código postal, número de cuenta por producto,
+// fechas de aprobación y puesta en marcha, y los contactos) se sacaron el 16/09,
+// y el número de cliente después, porque el dato cargado no era confiable.
 //
 // Lo que se sacó de la pantalla NO se borra de la base: esas claves simplemente
 // no viajan en el payload, y la API sólo escribe lo que recibe. Una organización
@@ -32,7 +32,7 @@ function Campo({ label, obligatorio, children, ayuda }) {
 
 export default function OrganizacionModal({ cliente, productos, onClose, onSaved }) {
   const esNueva = !cliente;
-  const [datos, setDatos] = useState({ name: '', numberClient: '', address: '', id_state: '', id_cities: '' });
+  const [datos, setDatos] = useState({ name: '', address: '', id_state: '', id_cities: '' });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [idUsuarioAdmin, setIdUsuarioAdmin] = useState(null);
@@ -88,7 +88,7 @@ export default function OrganizacionModal({ cliente, productos, onClose, onSaved
         const c = (res.data || [])[0];
         if (!c) throw new Error('La organización ya no existe.');
         setDatos({
-          name: c.name || '', numberClient: c.numberClient || '', address: c.address || '',
+          name: c.name || '', address: c.address || '',
           id_state: c.id_state ?? '', id_cities: c.id_cities ?? '',
         });
         setEmail(c.email || '');
@@ -120,7 +120,6 @@ export default function OrganizacionModal({ cliente, productos, onClose, onSaved
 
   const validar = () => {
     if (!datos.name.trim()) return 'Falta el nombre de la organización.';
-    if (!datos.numberClient.trim()) return 'Falta el número de cliente.';
     if (!email.trim()) return 'Falta el email del usuario administrador.';
     if (esNueva) {
       if (password.length < 8) return 'La contraseña tiene que tener al menos 8 caracteres.';
@@ -168,7 +167,6 @@ export default function OrganizacionModal({ cliente, productos, onClose, onSaved
     const localidad = localidades.find((l) => String(l.id) === String(datos.id_cities));
     const comunes = {
       name: datos.name.trim(),
-      numberClient: datos.numberClient.trim(),
       address: oNulo(datos.address.trim()),
       id_state: datos.id_state ? parseInt(datos.id_state, 10) : null,
       id_cities: datos.id_cities ? parseInt(datos.id_cities, 10) : null,
@@ -225,13 +223,9 @@ export default function OrganizacionModal({ cliente, productos, onClose, onSaved
               <Campo label="Nombre" obligatorio>
                 <input value={datos.name} onChange={set('name')} className={inputCls} />
               </Campo>
-              <Campo label="N° de cliente" obligatorio>
-                <input value={datos.numberClient} onChange={set('numberClient')} className={inputCls} />
-              </Campo>
               <Campo label="Dirección">
                 <input value={datos.address} onChange={set('address')} className={inputCls} />
               </Campo>
-              <div />
               <Campo label="Provincia">
                 <select
                   value={datos.id_state}
