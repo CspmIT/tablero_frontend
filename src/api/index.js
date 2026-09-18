@@ -90,6 +90,12 @@ export const api = {
     update: (id, body) => http.patch(`/contactos/${id}`, body),
     remove: (id) => http.del(`/contactos/${id}`),
   },
+  // Simulador global CoopCloud (17/09): definición de precios/monómicos
+  // COMPARTIDA (antes vivía en el localStorage de cada navegador).
+  coopcloudSimulador: {
+    get: () => http.get('/coopcloud/simulador'),
+    put: (estado) => http.put('/coopcloud/simulador', { estado }),
+  },
   // Laboratorio (28/08): servidores InfluxDB/MQTT + cola de borrados.
   laboratorio: {
     servidores: () => http.get('/laboratorio/servidores'),
