@@ -36,7 +36,7 @@ export default function UsuarioOrganizacionModal({
 }) {
   const editando = !!usuario;
   const [datos, setDatos] = useState({
-    first_name: '', last_name: '', dni: '', type_sex: '',
+    first_name: '', last_name: '', type_sex: '',
     id_state: '', id_cities: '', address: '', email: '',
   });
   const [password, setPassword] = useState('');
@@ -112,7 +112,7 @@ export default function UsuarioOrganizacionModal({
         ]);
         const u = resUsuario.data;
         setDatos({
-          first_name: u.first_name || '', last_name: u.last_name || '', dni: u.dni || '',
+          first_name: u.first_name || '', last_name: u.last_name || '',
           type_sex: u.type_sex ?? '', id_state: u.id_state ?? '', id_cities: u.id_cities ?? '',
           address: u.address || '', email: u.email || '',
         });
@@ -146,7 +146,7 @@ export default function UsuarioOrganizacionModal({
       const res = await cooptechAdmin.buscarUsuarioPorEmail(emailBusqueda.trim(), cliente.id);
       const u = res.data;
       setEncontrado(u);
-      setDatos((d) => ({ ...d, first_name: u.first_name || '', last_name: u.last_name || '', dni: u.dni || '', email: u.email || '' }));
+      setDatos((d) => ({ ...d, first_name: u.first_name || '', last_name: u.last_name || '', email: u.email || '' }));
       setAccesos(Object.fromEntries(disponibles.map((p) => [p.id, 0])));
     } catch (e) {
       // La API contesta con el motivo: no existe, el perfil no lo permite, o ya
@@ -166,7 +166,6 @@ export default function UsuarioOrganizacionModal({
       if (!datos.first_name.trim()) return 'Falta el nombre.';
       if (!datos.last_name.trim()) return 'Falta el apellido.';
       if (!datos.email.trim()) return 'Falta el email.';
-      if (datos.dni && datos.dni.trim().length > 9) return 'El DNI no puede tener más de 9 caracteres.';
       if (!editando) {
         if (password.length < 8) return 'La contraseña tiene que tener al menos 8 caracteres.';
         if (password !== passwordConfirmacion) return 'Las dos contraseñas no coinciden.';
@@ -204,7 +203,8 @@ export default function UsuarioOrganizacionModal({
     return {
       first_name: datos.first_name.trim(),
       last_name: datos.last_name.trim(),
-      dni: oNulo(datos.dni.trim()),
+      // El DNI ya no se pide. En la edición tampoco se manda, y la API deja el
+      // que ya tenía: `dni` toma el valor guardado cuando la clave no viene.
       type_sex: datos.type_sex === '' ? null : Number(datos.type_sex),
       id_state: datos.id_state ? parseInt(datos.id_state, 10) : null,
       id_cities: datos.id_cities ? parseInt(datos.id_cities, 10) : null,
@@ -260,7 +260,7 @@ export default function UsuarioOrganizacionModal({
         await sincronizarConOficinaVirtual({
           name: guardado.first_name ?? datos.first_name.trim(),
           last_name: guardado.last_name ?? datos.last_name.trim(),
-          dni: guardado.dni ?? oNulo(datos.dni.trim()),
+          dni: guardado.dni ?? null,
           email: guardado.email ?? datos.email.trim(),
           type_sex: guardado.type_sex ?? (datos.type_sex === '' ? null : Number(datos.type_sex)),
           profile: perfilOv,
@@ -328,7 +328,7 @@ export default function UsuarioOrganizacionModal({
                 {encontrado && (
                   <div className="mt-3 border border-slate-200 rounded-xl px-3 py-2 text-sm">
                     <p className="font-medium text-slate-800">{encontrado.first_name} {encontrado.last_name}</p>
-                    <p className="text-slate-500 text-xs">{encontrado.email}{encontrado.dni ? ` · DNI ${encontrado.dni}` : ''}</p>
+                    <p className="text-slate-500 text-xs">{encontrado.email}</p>
                   </div>
                 )}
               </section>
@@ -343,9 +343,6 @@ export default function UsuarioOrganizacionModal({
                   </Campo>
                   <Campo label="Email" obligatorio ayuda={editando ? 'Es el usuario con el que entra.' : 'Se le manda el correo de activación de la cuenta.'}>
                     <input type="email" value={datos.email} onChange={set('email')} className={inputCls} />
-                  </Campo>
-                  <Campo label="DNI" ayuda="Hasta 9 caracteres.">
-                    <input value={datos.dni} onChange={set('dni')} className={inputCls} />
                   </Campo>
                   <Campo label="Sexo">
                     <select value={datos.type_sex} onChange={set('type_sex')} className={inputCls}>

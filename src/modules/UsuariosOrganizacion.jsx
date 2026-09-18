@@ -77,7 +77,7 @@ export default function UsuariosOrganizacion({ cliente, productos, onVolver }) {
     const lista = usuarios || [];
     if (!texto) return lista;
     return lista.filter((u) =>
-      [u.first_name, u.last_name, u.email, u.dni]
+      [u.first_name, u.last_name, u.email]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(texto))
     );
@@ -140,7 +140,7 @@ export default function UsuariosOrganizacion({ cliente, productos, onVolver }) {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar por nombre, email o DNI"
+              placeholder="Buscar por nombre o email"
               className="border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-sm w-56"
             />
           </div>
@@ -173,7 +173,6 @@ export default function UsuariosOrganizacion({ cliente, productos, onVolver }) {
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200">
                 <th className="px-3 py-2 font-semibold">Nombre</th>
                 <th className="px-3 py-2 font-semibold">Email</th>
-                <th className="px-3 py-2 font-semibold">DNI</th>
                 <th className="px-3 py-2 font-semibold">Accesos</th>
                 <th className="px-3 py-2 font-semibold">Estado</th>
                 <th className="px-3 py-2" />
@@ -182,7 +181,7 @@ export default function UsuariosOrganizacion({ cliente, productos, onVolver }) {
             <tbody className="divide-y divide-slate-100">
               {visibles.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-400">
                     Sin usuarios{q ? ` para «${q.trim()}»` : ''}.
                   </td>
                 </tr>
@@ -202,7 +201,6 @@ export default function UsuariosOrganizacion({ cliente, productos, onVolver }) {
                       )}
                     </td>
                     <td className="px-3 py-2 text-slate-600 break-all">{u.email}</td>
-                    <td className="px-3 py-2 text-slate-600">{u.dni || <span className="text-slate-300">—</span>}</td>
                     <td className="px-3 py-2">
                       <span className="flex flex-wrap gap-1">
                         {accesos.map((p) => (
