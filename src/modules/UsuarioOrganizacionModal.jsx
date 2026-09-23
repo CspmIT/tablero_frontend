@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import { cooptechAdmin, OFIVIR_URL, sincronizarConOficinaVirtual } from '../api/cooptech.js';
+import { cooptechAdmin, emailEnUsoEnOficinaVirtual, vincularUsuarioConProducto } from '../api/cooptech.js';
+import { tieneBackend } from '../api/appRoutes.js';
 import { PERFILES_PRODUCTO } from './UsuariosOrganizacion.jsx';
 
 // Alta, vinculación y edición de un usuario dentro de una organización.
@@ -10,9 +11,10 @@ import { PERFILES_PRODUCTO } from './UsuariosOrganizacion.jsx';
 //   vincular   -> POST  /addUserExistToClient  (ya tiene cuenta en Cooptech)
 //   editar     -> PATCH /updateUser
 //
-// Si el usuario queda con acceso a Oficina Virtual, además hay que darlo de alta
-// del lado de la OV (relationUserCooptech), que mantiene su propia tabla de
-// usuarios por esquema de cliente.
+// Guardar en Cooptech es sólo la mitad. Cada producto guarda sus usuarios en la
+// base del cliente (el schema_name de client_products), así que por cada
+// producto donde la persona quede con perfil hay que avisarle a ESE producto
+// para que cree su registro (/relationUserCooptech).
 
 const inputCls = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm';
 const GEOREF = 'https://apis.datos.gob.ar/georef/api';
@@ -176,8 +178,11 @@ export default function UsuarioOrganizacionModal({
     if (sinEsquema.length) {
       return `Falta configurar la base de datos (schema_name) de: ${sinEsquema.map((p) => p.name).join(', ')}.`;
     }
-    if (Number(accesos[oficinaVirtual?.id]) > 0 && !OFIVIR_URL) {
-      return 'No se puede dar acceso a Oficina Virtual: falta configurar VITE_OFIVIR_URL para poder darlo de alta allá.';
+    // Sin dirección de backend no se le puede crear el usuario a ese producto.
+    const sinBackend = disponibles.filter((p) => Number(accesos[p.id]) > 0 && !tieneBackend(p.name));
+    if (sinBackend.length) {
+      return `No hay dirección configurada para el backend de: ${sinBackend.map((p) => p.name).join(', ')}. `
+        + 'Sin eso no se puede crear el usuario del lado de ese producto (ver src/api/appRoutes.js).';
     }
     return '';
   };
@@ -226,6 +231,14 @@ export default function UsuarioOrganizacionModal({
 
     const userProduct = armarAccesos();
     try {
+      // Oficina Virtual no acepta un email que ya esté en uso allá con
+      // contraseña propia: seria pisarle la cuenta a otra persona.
+      if (oficinaVirtual && Number(accesos[oficinaVirtual.id]) > 0) {
+        if (await emailEnUsoEnOficinaVirtual((encontrado?.email ?? datos.email).trim())) {
+          throw new Error('Ese email ya está en uso en Oficina Virtual y no se puede reutilizar.');
+        }
+      }
+
       let respuesta;
       if (modoVincular) {
         respuesta = await cooptechAdmin.vincularUsuario({
@@ -253,20 +266,38 @@ export default function UsuarioOrganizacionModal({
         });
       }
 
-      // Alta en Oficina Virtual, si quedó con acceso.
-      const perfilOv = oficinaVirtual ? Number(accesos[oficinaVirtual.id]) || 0 : 0;
-      if (perfilOv > 0) {
-        const guardado = respuesta?.data || {};
-        await sincronizarConOficinaVirtual({
-          name: guardado.first_name ?? datos.first_name.trim(),
-          last_name: guardado.last_name ?? datos.last_name.trim(),
-          dni: guardado.dni ?? null,
-          email: guardado.email ?? datos.email.trim(),
-          type_sex: guardado.type_sex ?? (datos.type_sex === '' ? null : Number(datos.type_sex)),
-          profile: perfilOv,
-          token: guardado.token_apps,
-          schema_name: oficinaVirtual.schema_name,
-        });
+      // Alta en cada producto donde quedó con perfil. Se hace después de
+      // guardar en Cooptech porque hace falta el token_apps que devuelve.
+      const guardado = respuesta?.data || {};
+      const aVincular = disponibles.filter((p) => Number(accesos[p.id]) > 0);
+      const fallaron = [];
+      for (const producto of aVincular) {
+        try {
+          await vincularUsuarioConProducto(producto.name, {
+            name: guardado.first_name ?? datos.first_name.trim(),
+            last_name: guardado.last_name ?? datos.last_name.trim(),
+            dni: guardado.dni ?? null,
+            email: guardado.email ?? datos.email.trim(),
+            type_sex: guardado.type_sex ?? (datos.type_sex === '' ? null : Number(datos.type_sex)),
+            profile: Number(accesos[producto.id]),
+            status: 1,
+            token: guardado.token_apps,
+            schema_name: producto.schema_name,
+          });
+        } catch (e) {
+          fallaron.push(`${producto.name} (${e.message})`);
+        }
+      }
+      if (fallaron.length) {
+        // El usuario quedó bien en Cooptech: lo que falló es el alta del lado
+        // del producto, y decirlo con nombre y apellido evita que alguien crea
+        // que puede entrar cuando todavía no.
+        setError(
+          `El usuario se guardó en Cooptech, pero no se pudo crear en: ${fallaron.join('; ')}. `
+          + 'Hasta que eso se resuelva no va a poder entrar a ese producto.'
+        );
+        setGuardando(false);
+        return;
       }
       onSaved();
     } catch (e) {
