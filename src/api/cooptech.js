@@ -5,6 +5,7 @@
 // La URL de Cooptech depende del entorno (igual que app.routes.js de Reconecta).
 
 import { getCooptechSession } from './auth.js';
+import { backend } from './appRoutes.js';
 
 const ENTORNO = import.meta.env.VITE_ENTORNO || 'local';
 // VITE_COOPTECH_URL permite apuntar a un backend levantado a mano
@@ -98,28 +99,56 @@ export const cooptechAdmin = {
   validarCuenta: (id) => cooptechFetch('/validateAccount', { method: 'PATCH', body: { id }, token: token() }),
 };
 
-// --- Sincronización con Oficina Virtual -------------------------------------
-// Un usuario con Oficina Virtual habilitada tiene que existir también del lado
-// de la OV: Cooptech guarda la identidad y el token, pero la OV mantiene su
-// propia tabla de usuarios por esquema de cliente.
+// --- Alta del usuario en el esquema de cada producto ------------------------
 //
-// Sin VITE_OFIVIR_URL esto no se puede hacer, y la pantalla lo avisa en vez de
-// dar el alta por buena.
+// Crear el usuario en Cooptech no alcanza: cada producto guarda los suyos en la
+// base del cliente (el schema_name de client_products). Por eso, cuando alguien
+// queda con perfil en un producto, hay que avisarle a ESE producto para que cree
+// su registro. Lo hace el endpoint /relationUserCooptech, que existe en
+// Reconecta, Mas Agua y las Oficinas Virtuales con la misma forma.
 
-export const OFIVIR_URL = import.meta.env.VITE_OFIVIR_URL || '';
-
-export async function sincronizarConOficinaVirtual(datos) {
-  if (!OFIVIR_URL) throw new Error('Falta configurar VITE_OFIVIR_URL para poder sincronizar con Oficina Virtual.');
-  const res = await fetch(`${OFIVIR_URL}/relationUserCooptech`, {
+async function pedirAlProducto(nombreProducto, ruta, datos) {
+  const base = backend[nombreProducto];
+  if (!base) throw new Error(`No está configurada la dirección del backend de ${nombreProducto}.`);
+  const res = await fetch(base + ruta, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(datos),
   });
   let data = null;
   try { data = await res.json(); } catch { /* sin cuerpo */ }
-  if (!res.ok) throw new Error(data?.message || data?.error || 'Oficina Virtual rechazó la sincronización.');
+  if (!res.ok) {
+    // Estos backends contestan el error como string pelado o como { message }.
+    const msg = typeof data === 'string' ? data : (data?.message || data?.error || res.statusText);
+    throw new Error(msg || `${nombreProducto} rechazó el alta del usuario.`);
+  }
   return data;
 }
+
+/**
+ * Da de alta (o actualiza) al usuario en el esquema que ese cliente tiene en ese
+ * producto.
+ *
+ * @param {string} nombreProducto Nombre tal como figura en products.
+ * @param {object} datos { name, last_name, dni, email, type_sex, profile, status, token, schema_name }
+ */
+export const vincularUsuarioConProducto = (nombreProducto, datos) =>
+  pedirAlProducto(nombreProducto, '/relationUserCooptech', datos);
+
+/**
+ * Oficina Virtual no acepta un email que ya esté en uso allá con contraseña
+ * propia: sería pisarle la cuenta a alguien. Se pregunta antes de guardar.
+ */
+export const emailEnUsoEnOficinaVirtual = async (email) => {
+  try {
+    const res = await pedirAlProducto('Oficina Virtual', '/existEmailOfivir', { email });
+    return !!res?.password;
+  } catch {
+    // Si la consulta falla no se bloquea el alta: el propio alta va a fallar
+    // después con un mensaje más concreto.
+    return false;
+  }
+};
 
 // --- Extracción tolerante de la respuesta de /login -------------------------
 // Cooptech puede envolver la respuesta de distintas formas; normalizamos acá.
