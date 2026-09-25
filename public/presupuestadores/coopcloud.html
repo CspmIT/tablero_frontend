@@ -371,7 +371,17 @@ function getPath(o,p){return p.split('.').reduce((c,k)=>c?c[k]:undefined,o);}
    boot emitía el estado viejo del navegador y podía pisar el del lead. */
 var EMBEBIDO=(function(){try{return !!(window.parent&&window.parent!==window);}catch(e){return true;}})();
 var __handshake=!EMBEBIDO; // embebido: sin autosave hasta recibir cargar_estado
-function save(){try{if(!EMBEBIDO){localStorage.setItem('coopcloud_sim',JSON.stringify(S));}setSaveState(EMBEBIDO?(__handshake?'Guardado en el tablero ✓':'Cargando…'):'Guardado ✓');if(__handshake)coopBridgePost('estado_actualizado',{estado:S});}catch(e){setSaveState('Sesión sin guardado local');}}
+// 25/09 (landing pública): con cada autosave viaja también la FOTO de los
+// precios unitarios calculados (R.pu), con las claves que espera la web:
+// «ssd» = monómico SSD (definición Leonardo 25/09), «mbps» = ab (USD por Mbps).
+// El tablero la usa para el botón «Publicar precios en la web» del simulador
+// global; en un lead viaja igual y se ignora. null si aún no corrió calc().
+function __monSnap(){try{
+  if(typeof R==='undefined'||!R||!R.pu)return null;
+  var r4=function(n){return isFinite(n)?Math.round(n*10000)/10000:0;};
+  return {vcpu:r4(R.pu.vcpu),ram:r4(R.pu.ram),ssd:r4(R.pu.ssd),hdd:r4(R.pu.hdd),ip:r4(R.pu.ip),mbps:r4(R.pu.ab)};
+}catch(e){return null;}}
+function save(){try{if(!EMBEBIDO){localStorage.setItem('coopcloud_sim',JSON.stringify(S));}setSaveState(EMBEBIDO?(__handshake?'Guardado en el tablero ✓':'Cargando…'):'Guardado ✓');if(__handshake)coopBridgePost('estado_actualizado',{estado:S,monomicos:__monSnap()});}catch(e){setSaveState('Sesión sin guardado local');}}
 function load(){if(EMBEBIDO)return;try{const raw=localStorage.getItem('coopcloud_sim');if(raw){S=Object.assign(defaultState(),JSON.parse(raw));}}catch(e){}}
 let saveTimer;function setSaveState(t){const el=document.getElementById('saveState');if(el)el.textContent=t;}
 /* 17/09: sin confirm() nativo (en Tauri mete el encabezado «tauri://localhost

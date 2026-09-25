@@ -95,6 +95,9 @@ export const api = {
   coopcloudSimulador: {
     get: () => http.get('/coopcloud/simulador'),
     put: (estado) => http.put('/coopcloud/simulador', { estado }),
+    // 25/09: publica la foto de los 6 monómicos en la landing pública
+    // (GET /api/landing/monomicos, sin login). Solo conducción.
+    publicar: (monomicos) => http.put('/coopcloud/simulador/publicar', { monomicos }),
   },
   // Laboratorio (28/08): servidores InfluxDB/MQTT + cola de borrados.
   laboratorio: {
