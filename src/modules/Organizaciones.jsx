@@ -98,7 +98,8 @@ export default function Organizaciones() {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
           <Building2 size={20} className="text-coop-azul" />
-          Organizaciones
+          {/* 25/09: renombrada (pedido de Leonardo); el id de permisos sigue siendo 'organizaciones' */}
+          Gestión de Organizaciones y Usuarios
         </h2>
         <span className="text-sm text-slate-400">
           {clientes === null ? '' : `${visibles.length} de ${clientes.length}`}
