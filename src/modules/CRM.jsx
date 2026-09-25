@@ -1082,6 +1082,12 @@ export default function CRM() {
         estadoInicial={presupCtx?.lead ? presupCtx?.lead?.coopcloudEstado : presupCtx?.simulador}
         aviso={!presupCtx?.lead && simSoloLectura ? 'Solo lectura: la definición global la guarda la conducción (tus cambios no se comparten).' : null}
         onAutoSave={(estado) => (presupCtx?.lead ? guardarEstado('coopcloudEstado', estado) : guardarSimulador(estado))}
+        // 25/09 (landing pública): publicar la foto de los 6 monómicos en la web.
+        // Solo en el simulador global (sin lead) y solo conducción — con lead los
+        // precios calculados salen de los inputs guardados de ESE cliente.
+        onPublicar={!presupCtx?.lead && (me?.tipo === 'manager' || me?.tipo === 'gerencial')
+          ? (monomicos) => api.coopcloudSimulador.publicar(monomicos)
+          : undefined}
         onPdfDescargado={(estado, totales) => guardarEstado('coopcloudEstado', estado, {
           ...(totales?.costoMensual != null ? { coopcloudCostoMensual: Number(totales.costoMensual) } : {}),
           // PDF de la solapa Facturación: el total mensual viaja al valor del lead

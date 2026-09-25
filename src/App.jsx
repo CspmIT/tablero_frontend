@@ -23,11 +23,9 @@ import Asistente from './modules/Asistente.jsx';
 import Analisis from './modules/Analisis.jsx';
 import Inbox from './modules/Inbox.jsx'; // 20/08: Mis deseos → Inbox (solapas Tickets + Mis deseos)
 import Marketing from './modules/Marketing.jsx'; // 20/08: planificación + repositorio de marca
-import Laboratorio from './modules/Laboratorio.jsx'; // 28/08: IoT (Influx/MQTT) migrado desde la OV
 import Configuracion from './modules/Configuracion.jsx';
-import Organizaciones from './modules/Organizaciones.jsx';
 import { MODULOS, INFO, CONFIGURACION } from './nav.js';
-import Campo from './modules/Campo.jsx';
+import Operaciones from './modules/Operaciones.jsx'; // 25/09: Campo + Laboratorio + Organizaciones como pestañas
 import MiMes from './modules/MiMes.jsx';
 import MiDia from './modules/MiDia.jsx';
 
@@ -67,9 +65,12 @@ function Contenido({ activo }) {
   if (activo === 'analisis') return <Analisis />;
   if (activo === 'deseos') return <Inbox />;
   if (activo === 'marketing') return <Marketing />;
-  if (activo === 'laboratorio') return <Laboratorio />;
-  if (activo === 'visitas') return <Campo />;
-  if (activo === 'organizaciones') return <Organizaciones />;
+  if (activo === 'operaciones') return <Operaciones />;
+  // compat 25/09: los tres dejaron el menú (pestañas de Operaciones) pero un
+  // permiso o vista inicial vieja puede aterrizar acá — abre la pestaña justa.
+  if (activo === 'laboratorio') return <Operaciones tabInicial="laboratorio" />;
+  if (activo === 'visitas') return <Operaciones tabInicial="visitas" />;
+  if (activo === 'organizaciones') return <Operaciones tabInicial="organizaciones" />;
   if (activo === 'configuracion') return <Configuracion />;
   if (activo === 'importar') return <Importar />;
   if (activo === 'importar_grilla') return <ImportarGrilla />;
