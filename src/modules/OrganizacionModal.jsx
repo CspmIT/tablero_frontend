@@ -30,7 +30,11 @@ function Campo({ label, obligatorio, children, ayuda }) {
   );
 }
 
-export default function OrganizacionModal({ cliente, productos, onClose, onSaved }) {
+// `inicial` (28/09, conector CRM Ganado→acá): precarga para un alta que nace de
+// un lead ganado — nombre, email del contacto y productos sugeridos tildados.
+// Provincia/localidad no se pueden precargar (son selects de Georef): el dato
+// del lead se muestra como ayuda para elegirlas a mano.
+export default function OrganizacionModal({ cliente, productos, onClose, onSaved, inicial }) {
   const esNueva = !cliente;
   const [datos, setDatos] = useState({ name: '', address: '', id_state: '', id_cities: '' });
   const [email, setEmail] = useState('');
@@ -79,7 +83,19 @@ export default function OrganizacionModal({ cliente, productos, onClose, onSaved
 
   useEffect(() => {
     if (esNueva) {
-      setContratos(Object.fromEntries(productos.map((p) => [p.id, { activo: false, id: 0 }])));
+      // Precarga del conector (28/09): match laxo de productos (el CRM dice
+      // «+Agua», el catálogo de Cooptech «Mas Agua»).
+      const norm = (x) => String(x || '').toLowerCase().replace(/[\s+]/g, '');
+      const sugeridos = (inicial?.productos || []).map(norm);
+      setContratos(Object.fromEntries(productos.map((p) => {
+        const pn = norm(p.name);
+        const activo = sugeridos.some((sg) => sg && (pn.includes(sg) || sg.includes(pn)));
+        return [p.id, { activo, id: 0 }];
+      })));
+      if (inicial) {
+        setDatos((d) => ({ ...d, name: inicial.organizacion || '' }));
+        if (inicial.email) setEmail(inicial.email);
+      }
       return;
     }
     (async () => {
@@ -220,6 +236,11 @@ export default function OrganizacionModal({ cliente, productos, onClose, onSaved
             )}
 
             <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {esNueva && inicial && (
+                <div className="sm:col-span-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
+                  Del lead ganado: {[inicial.ciudad, inicial.contacto, inicial.telefono].filter(Boolean).join(' · ') || 'sin datos extra'} — elegí provincia y localidad a mano.
+                </div>
+              )}
               <Campo label="Nombre" obligatorio>
                 <input value={datos.name} onChange={set('name')} className={inputCls} />
               </Campo>

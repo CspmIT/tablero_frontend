@@ -34,6 +34,7 @@ import { Megaphone, Folder, FolderPlus, CalendarPlus, ArrowLeft, Pencil } from '
 import { useData } from '../data/DataContext.jsx';
 import { getImage, saveImage } from '../api/minio.js';
 import { LIMITE_UNA_PASADA, subirEnPartes, esGrande, urlDirecta } from '../api/storageGrande.js';
+import MarketingLanding from './MarketingLanding.jsx'; // 28/09: administración de la landing pública
 
 const CONTEXTO = 'marketing';
 
@@ -66,7 +67,10 @@ const CATS_MARCA = [
 
 // Extensiones aceptadas (pedido de Leonardo: manual .pdf, logos .svg/.png,
 // videos .mp4, imágenes .jpg; sumamos gif/webp y comprimidos por las dudas).
-const EXTS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'zip', 'rar', '7z'];
+// 28/09: doc/docx aceptados (el documento de planificación de Booster llega en
+// Word). El gateway nació para imágenes: si rechaza la extensión, la subida ya
+// reintenta camuflada como .pdf y la descarga restituye el nombre real.
+const EXTS = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'zip', 'rar', '7z', 'doc', 'docx'];
 const ACCEPT = EXTS.map((e) => `.${e}`).join(',');
 // Tope de subida. El 20/08 eran 100 MB (el techo de Cloudflare) y los videos
 // más pesados iban por link externo; desde el 21/08 lo que pasa de 90 MB sube en
@@ -81,9 +85,10 @@ const MIME_POR_EXT = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
   gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', mp4: 'video/mp4',
   zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
+  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
 const mimeDe = (n) => MIME_POR_EXT[extDe(n)] || 'application/octet-stream';
-const iconoDe = (n) => (esImagen(n) ? '🖼' : esVideo(n) ? '🎬' : esComprimido(n) ? '🗜' : extDe(n) === 'svg' ? '🔷' : '📄');
+const iconoDe = (n) => (esImagen(n) ? '🖼' : esVideo(n) ? '🎬' : esComprimido(n) ? '🗜' : extDe(n) === 'svg' ? '🔷' : ['doc', 'docx'].includes(extDe(n)) ? '📝' : '📄');
 
 const fmtTam = (n) => {
   if (n == null) return '—';
@@ -169,6 +174,9 @@ export default function Marketing() {
   useEffect(() => { cargarPosts(mes); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [mes]);
   const [archivos, setArchivos] = useState(null); // null = cargando (todas las refs del contexto)
   const [carpetas, setCarpetas] = useState({});   // { rutaZona: [subnombres] } (Configuracion)
+  // Documento del mes (28/09): estados de revisión { archivoId: {estado, por, fecha, obs?} }
+  const [planDocEstados, setPlanDocEstados] = useState({});
+  const [obsDoc, setObsDoc] = useState(null); // { id, texto } — observación en edición
   const [error, setError] = useState('');
   const [busca, setBusca] = useState('');
   // Vista galería (ola 2): subcarpeta abierta { ruta, migas: [..] } | null
@@ -176,12 +184,14 @@ export default function Marketing() {
 
   const cargar = async () => {
     try {
-      const [r, rc] = await Promise.all([
+      const [r, rc, rd] = await Promise.all([
         api.archivos.list({ contexto: CONTEXTO }),
         api.archivos.marketingCarpetas().catch(() => null), // backend viejo: la sección sigue sin subcarpetas
+        api.archivos.planDocEstados().catch(() => null),    // estados del documento del mes (28/09)
       ]);
       setArchivos(Array.isArray(r?.data) ? r.data : []);
       if (rc && rc.carpetas && typeof rc.carpetas === 'object') setCarpetas(rc.carpetas);
+      if (rd && rd.estados && typeof rd.estados === 'object') setPlanDocEstados(rd.estados);
       setError('');
     } catch (e) { setArchivos([]); setError(e.message || 'No se pudo cargar Marketing'); }
   };
@@ -1041,7 +1051,7 @@ export default function Marketing() {
           <Megaphone size={20} className="text-coop-naranja" /> Marketing
         </h2>
         <div className="flex gap-1.5">
-          {[{ id: 'plan', label: 'Planificación' }, { id: 'eventos', label: 'Eventos' }, { id: 'marca', label: 'Marca' }].map((s) => (
+          {[{ id: 'plan', label: 'Planificación' }, { id: 'eventos', label: 'Eventos' }, { id: 'marca', label: 'Marca' }, { id: 'landing', label: 'Landing' }].map((s) => (
             <button key={s.id} onClick={() => { setSolapa(s.id); setVista(null); }}
               className={`px-3.5 py-1.5 rounded-full text-sm ${solapa === s.id ? 'bg-coop-azul text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-coop-azul hover:text-coop-azul'}`}>
               {s.label}
@@ -1064,7 +1074,8 @@ export default function Marketing() {
         </div>
       )}
 
-      {cargando ? <p className="text-slate-400 text-sm">Cargando…</p> : resultados ? (
+      {/* 28/09: la pestaña Landing es un módulo propio (no participa del buscador ni de la galería) */}
+      {solapa === 'landing' ? <MarketingLanding /> : cargando ? <p className="text-slate-400 text-sm">Cargando…</p> : resultados ? (
         // Resultados del buscador: cruza meses, categorías, subcarpetas y marca.
         <div className="bg-white rounded-xl border border-slate-200 p-3">
           <p className="text-xs text-slate-400 mb-1">{resultados.length} resultado{resultados.length === 1 ? '' : 's'} en todo Marketing</p>
@@ -1088,6 +1099,97 @@ export default function Marketing() {
               className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-coop-azul hover:text-coop-azul">⬇ Word</button>
             <span className="text-xs text-slate-400 w-full sm:w-auto sm:ml-2">Superior a 90 MB sube en partes. Tope por archivo: {TOPE_MB} MB</span>
           </div>
+
+
+          {/* DOCUMENTO DEL MES (28/09, pedido de Leonardo: Booster todavía arma la
+              planificación en Word — que puedan subirla tal cual, SIN procesar,
+              y quede a la vista para revisión/aprobación de conducción). El
+              archivo es un Archivo común en `plan/<mes>/documento`; el estado
+              vive en Configuracion. Se pueden subir versiones nuevas: quedan
+              todas, la más reciente arriba. */}
+          {(() => {
+            const rutaDoc = `plan/${mes}/documento`;
+            const docs = enRuta(rutaDoc);
+            const estadoDe = (a) => planDocEstados[String(a.id)] || { estado: 'pendiente' };
+            const guardarEstado = async (a, estado, obs) => {
+              try {
+                const r = await api.archivos.guardarPlanDocEstado({ archivoId: a.id, estado, ...(obs ? { obs } : {}) });
+                if (r?.estados) setPlanDocEstados(r.estados);
+                setObsDoc(null);
+              } catch (e) { setError(e.message || 'No se pudo guardar el estado'); }
+            };
+            const Chip = ({ e }) => e.estado === 'aprobado'
+              ? <span title={`Aprobado por ${e.por || '—'} · ${e.fecha ? new Date(e.fecha).toLocaleString('es-AR') : ''}`} className="text-[10.5px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">✓ Aprobado</span>
+              : e.estado === 'observado'
+                ? <span title={`Observado por ${e.por || '—'} · ${e.fecha ? new Date(e.fecha).toLocaleString('es-AR') : ''}`} className="text-[10.5px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">⚠ Observado</span>
+                : <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">Pendiente de revisión</span>;
+            return (
+              <div className="bg-white rounded-xl border border-slate-200 p-3 mb-4"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); subirArchivos(e.dataTransfer.files, rutaDoc); }}>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-semibold text-coop-negro">📝 Documento del mes <span className="text-[11px] font-normal text-slate-400">(la planificación de Booster, tal cual llega)</span></h3>
+                  <button onClick={() => abrirPicker(rutaDoc)}
+                    className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul">＋ Subir Word/PDF</button>
+                </div>
+                {docs.length === 0 ? (
+                  <p className="text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg px-2 py-2">
+                    Acá va el documento de planificación del mes (Word o PDF), tal cual lo manda Booster — no se procesa, queda para revisión y aprobación. También se puede arrastrar acá.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-50">
+                    {docs.map((a, idx) => {
+                      const e = estadoDe(a);
+                      return (
+                        <div key={a.id} className="py-1.5">
+                          <div className="flex items-center gap-2 group">
+                            <span className="shrink-0">{iconoDe(a.nombre)}</span>
+                            <span className="text-sm text-slate-700 truncate" title={a.nombre}>{a.nombre}</span>
+                            {idx === 0 && docs.length > 1 && <span className="text-[10px] text-slate-400 shrink-0">(última versión)</span>}
+                            <span className="text-[11px] text-slate-300 shrink-0">{fmtTam(a.tamano)} · {a.createdAt ? new Date(a.createdAt).toLocaleDateString('es-AR') : ''}</span>
+                            <Chip e={e} />
+                            <span className="flex-1" />
+                            {puedeCurar && e.estado !== 'aprobado' && (
+                              <button onClick={() => guardarEstado(a, 'aprobado')} className="px-2 py-0.5 text-xs rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 shrink-0">✓ Aprobar</button>
+                            )}
+                            {puedeCurar && e.estado === 'aprobado' && (
+                              <button onClick={() => guardarEstado(a, 'pendiente')} title="Vuelve a Pendiente de revisión" className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul shrink-0">↺ Quitar aprobación</button>
+                            )}
+                            {puedeCurar && e.estado !== 'aprobado' && (
+                              <button onClick={() => setObsDoc(obsDoc?.id === a.id ? null : { id: a.id, texto: e.obs || '' })} className="px-2 py-0.5 text-xs rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 shrink-0">⚠ Observar</button>
+                            )}
+                            <button onClick={() => descargar(a)} disabled={descarga?.estado === 'bajando'} title={`Descargar ${a.nombre}`}
+                              className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500 hover:border-coop-azul hover:text-coop-azul shrink-0">⬇</button>
+                            {puedeCurar && (borrando === a.id ? (
+                              <span className="flex items-center gap-1 text-xs shrink-0">
+                                <button onClick={() => borrar(a)} className="px-1.5 py-0.5 rounded bg-red-600 text-white">Sí</button>
+                                <button onClick={() => setBorrando(null)} className="px-1.5 py-0.5 rounded border border-slate-300 text-slate-500">No</button>
+                              </span>
+                            ) : (
+                              <button onClick={() => setBorrando(a.id)} title="Eliminar" className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs shrink-0">🗑</button>
+                            ))}
+                          </div>
+                          {e.estado === 'observado' && e.obs && obsDoc?.id !== a.id && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1 mt-1 ml-6">Observación de {e.por || 'conducción'}: {e.obs}</p>
+                          )}
+                          {obsDoc?.id === a.id && (
+                            <div className="flex items-center gap-2 mt-1.5 ml-6">
+                              <input autoFocus value={obsDoc.texto} onChange={(ev) => setObsDoc({ ...obsDoc, texto: ev.target.value })}
+                                onKeyDown={(ev) => ev.key === 'Enter' && guardarEstado(a, 'observado', obsDoc.texto)}
+                                placeholder="Qué hay que corregir (lo ve Booster)…" maxLength={500}
+                                className="flex-1 px-2 py-1 text-xs rounded-lg border border-amber-300 focus:outline-none focus:border-amber-500" />
+                              <button onClick={() => guardarEstado(a, 'observado', obsDoc.texto)} className="px-2 py-0.5 text-xs rounded-lg bg-amber-500 text-white">Guardar</button>
+                              <button onClick={() => setObsDoc(null)} className="px-2 py-0.5 text-xs rounded-lg border border-slate-300 text-slate-500">Cancelar</button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Bandeja de IDEAS (26/08): la etapa previa — sin fecha. Booster propone,
               el tilde ✓ aprueba, «📅» programa y la idea pasa al calendario. */}

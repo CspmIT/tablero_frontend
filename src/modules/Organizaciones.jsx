@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Building2, Pencil, Plus, Power, Search, Users } from 'lucide-react';
 import { cooptechAdmin } from '../api/cooptech.js';
+import { useData } from '../data/DataContext.jsx'; // 28/09: cola «Pendientes de crear» (viene del CRM, vive en el backend propio)
 import OrganizacionModal from './OrganizacionModal.jsx';
 import UsuariosOrganizacion from './UsuariosOrganizacion.jsx';
 
@@ -30,6 +31,13 @@ export default function Organizaciones() {
   // Organización cuyos usuarios se están mirando. Antes esto exigía entrar con
   // el usuario administrador de esa cooperativa; ahora se entra desde acá.
   const [viendoUsuarios, setViendoUsuarios] = useState(null);
+  // Conector CRM Ganado → acá (28/09): leads ganados con Reconecta/+Agua que
+  // esperan su organización. NADA se crea solo: el alta la hace una persona.
+  const { api } = useData();
+  const [pendientes, setPendientes] = useState([]);
+  const [inicial, setInicial] = useState(null); // precarga del modal al crear desde un pendiente
+  const [descartandoPend, setDescartandoPend] = useState(null);
+  const cargarPendientes = () => api.organizacionesPendientes.list().then((r) => setPendientes(r?.pendientes || [])).catch(() => {});
 
   const cargar = async () => {
     setError('');
@@ -48,6 +56,8 @@ export default function Organizaciones() {
 
   useEffect(() => {
     cargar();
+    cargarPendientes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const visibles = useMemo(() => {
@@ -80,6 +90,11 @@ export default function Organizaciones() {
 
   const guardado = async () => {
     setEditando(undefined);
+    // 28/09: si el alta nació de un pendiente del CRM, marcarlo creado.
+    if (inicial?.leadId) {
+      api.organizacionesPendientes.actualizar(inicial.leadId, 'creada').then(cargarPendientes).catch(() => {});
+      setInicial(null);
+    }
     await cargar();
   };
 
@@ -127,6 +142,37 @@ export default function Organizaciones() {
         <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700 flex items-center justify-between gap-2">
           <span>{error}</span>
           <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
+
+      {/* PENDIENTES DE CREAR (28/09): leads GANADOS del CRM con Reconecta/+Agua.
+          El conector no crea nada solo: propone, y el alta la hace una persona
+          con el formulario precargado. */}
+      {pendientes.length > 0 && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-3">
+          <p className="text-sm font-medium text-amber-800 mb-2">Pendientes de crear ({pendientes.length}) — leads ganados en el CRM que todavía no tienen organización</p>
+          <div className="grid gap-2">
+            {pendientes.map((pd) => (
+              <div key={pd.leadId} className="bg-white border border-amber-100 rounded-lg px-3 py-2 flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-medium text-coop-negro">{pd.organizacion}</span>
+                {(pd.productos || []).map((pr) => <span key={pr} className="text-[10.5px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{pr}</span>)}
+                <span className="text-xs text-slate-400">{[pd.ciudad, pd.contacto, pd.email || pd.telefono].filter(Boolean).join(' · ')}</span>
+                <span className="text-[11px] text-slate-300 ml-auto">{pd.fecha ? new Date(pd.fecha).toLocaleDateString('es-AR') : ''}</span>
+                <button onClick={() => { setInicial(pd); setEditando(null); }}
+                  className="text-xs bg-coop-azul text-white rounded-lg px-2.5 py-1.5 hover:opacity-90">Crear organización</button>
+                {descartandoPend === pd.leadId ? (
+                  <span className="flex items-center gap-1 text-xs">
+                    <button onClick={() => { api.organizacionesPendientes.actualizar(pd.leadId, 'descartada').then(cargarPendientes).catch(() => {}); setDescartandoPend(null); }}
+                      className="px-2 py-1 rounded bg-red-600 text-white">Sí</button>
+                    <button onClick={() => setDescartandoPend(null)} className="px-2 py-1 rounded border border-slate-300 text-slate-500">No</button>
+                  </span>
+                ) : (
+                  <button onClick={() => setDescartandoPend(pd.leadId)} title="Quitar de pendientes (p. ej. la organización ya existe)"
+                    className="text-xs text-slate-400 hover:text-red-500 px-1.5 py-1.5">Descartar</button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -209,7 +255,8 @@ export default function Organizaciones() {
         <OrganizacionModal
           cliente={editando}
           productos={productos}
-          onClose={() => setEditando(undefined)}
+          inicial={editando === null ? inicial : null}
+          onClose={() => { setEditando(undefined); setInicial(null); }}
           onSaved={guardado}
         />
       )}
