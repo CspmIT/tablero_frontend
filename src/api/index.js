@@ -72,6 +72,10 @@ export const api = {
     remove: (id) => http.del(`/archivos/${id}`),
     // Subcarpetas de Marketing (ola 2): mapa { rutaZona: [nombres] } en Configuracion.
     marketingCarpetas: () => http.get('/archivos/marketing-carpetas'),
+    // Documento del mes de Planificación (28/09): estados de revisión
+    // { archivoId: {estado, por, fecha, obs?} } — cambiarlos es de conducción.
+    planDocEstados: () => http.get('/archivos/plan-doc-estados'),
+    guardarPlanDocEstado: (body) => http.put('/archivos/plan-doc-estados', body),
     guardarMarketingCarpetas: (carpetas) => http.put('/archivos/marketing-carpetas', { carpetas }),
   },
   // Calendario de publicaciones de Marketing (ola 3).
@@ -98,6 +102,25 @@ export const api = {
     // 25/09: publica la foto de los 6 monómicos en la landing pública
     // (GET /api/landing/monomicos, sin login). Solo conducción.
     publicar: (monomicos) => http.put('/coopcloud/simulador/publicar', { monomicos }),
+  },
+  // Marketing → Landing (28/09): administración del contenido de la landing
+  // pública. Borrador editable por el equipo; publicar es de conducción.
+  landing: {
+    admin: () => http.get('/landing-admin'),
+    guardarBorrador: (borrador) => http.put('/landing-admin/borrador', { borrador }),
+    publicar: (notas) => http.post('/landing-admin/publicar', { notas }),
+    versiones: () => http.get('/landing-admin/versiones'),
+    republicar: (numero) => http.post(`/landing-admin/versiones/${numero}/republicar`, {}),
+  },
+  // Conector Ganado → Organizaciones (28/09): cola «Pendientes de crear».
+  organizacionesPendientes: {
+    list: () => http.get('/organizaciones-pendientes'),
+    actualizar: (leadId, estado) => http.patch(`/organizaciones-pendientes/${leadId}`, { estado }),
+  },
+  // Bandeja «Consultas web» (28/09): lo que entra por el POST público de la landing.
+  landingConsultas: {
+    list: (estado) => http.get('/landing-consultas', estado ? { estado } : undefined),
+    actualizar: (id, body) => http.patch(`/landing-consultas/${id}`, body),
   },
   // Laboratorio (28/08): servidores InfluxDB/MQTT + cola de borrados.
   laboratorio: {

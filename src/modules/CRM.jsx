@@ -10,6 +10,7 @@ import { isActiveCollab } from './grillaUtils.js';
 import PresupuestadorReconecta from './PresupuestadorReconecta.jsx';
 import AguaModal from './AguaModal.jsx';
 import CoopCloudModal from './CoopCloudModal.jsx';
+import ConsultasWeb, { detalleLineas } from './ConsultasWeb.jsx'; // 28/09: bandeja de la landing
 import ImportarLeads from './ImportarLeads.jsx';
 import CRMMetricas from './CRMMetricas.jsx';
 import ContactosView from './ContactosView.jsx'; // Agenda de contactos externos (26/08)
@@ -89,12 +90,17 @@ export default function CRM() {
   const [periodo, setPeriodo] = useState('acumulado');
   const [dimFecha, setDimFecha] = useState('contacto');
   const [showMetricas, setShowMetricas] = useState(false);
+  // Consultas web (28/09): bandeja de lo que entra desde la landing pública.
+  const [consultasOpen, setConsultasOpen] = useState(false);
+  const [consultasNuevas, setConsultasNuevas] = useState(0);
+  const [convirtiendo, setConvirtiendo] = useState(null); // id de consulta en conversión
   const [productosCat, setProductosCat] = useState(PRODUCTOS_DEFAULT);
   const [menuAcciones, setMenuAcciones] = useState(false);
   const [productosOpen, setProductosOpen] = useState(false);
   const [vista, setVista] = useState('embudo'); // 'embudo' | 'cuentas' | 'novedades'
   useEffect(() => {
     api.leads.productosCatalogo().then((r) => { if (Array.isArray(r?.productos) && r.productos.length) setProductosCat(r.productos); }).catch(() => {});
+    api.landingConsultas.list('nueva').then((r) => setConsultasNuevas(r?.nuevas ?? 0)).catch(() => {});
   }, [api]);
   const [presupCtx, setPresupCtx] = useState(null); // { tipo, modo, lead }
   // Datos de facturación: viven en el Cliente, no en el lead. `fact` refleja la
@@ -295,6 +301,13 @@ export default function CRM() {
       if (factOpen && leadId && Object.values(fact).some((v) => v.trim())) {
         await api.leads.setFacturacion(leadId, factPayload());
       }
+      // Consultas web (28/09): si este lead nació de una consulta de la landing,
+      // marcarla convertida y vincular el lead (fire-and-forget: el lead ya existe).
+      if (convirtiendo && leadId && !form.id) {
+        api.landingConsultas.actualizar(convirtiendo, { estado: 'convertida', leadId }).catch(() => {});
+        setConvirtiendo(null);
+        setConsultasNuevas((n) => Math.max(0, n - 1));
+      }
       setForm(null); await cargar();
     } catch (e) { alert('No se pudo guardar: ' + (e.message || '')); }
   };
@@ -306,6 +319,7 @@ export default function CRM() {
 
   const dstr = (v) => (v ? String(v).slice(0, 10) : '');
   const editar = async (l) => {
+    setConvirtiendo(null); // editar un lead existente nunca es una conversión
     setForm({
       ...leadVacio, ...l, productos: l.productos || [], valorEstimadoUsd: l.valorEstimadoUsd ?? '', esEvento: !!l.esEvento, cantidadEquipos: l.cantidadEquipos ?? '',
       ownerId: l.ownerId ?? '', equiposDetalle: l.equiposDetalle || '', fuente: l.fuente || '', fuenteOtra: l.fuenteOtra || '',
@@ -447,10 +461,15 @@ export default function CRM() {
             {responsables.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
           <button onClick={() => setShowMetricas(true)} className="border border-slate-200 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-50">Métricas</button>
+          <button onClick={() => setConsultasOpen(true)} title="Consultas que entraron desde la landing de Cooptech"
+            className="relative border border-slate-200 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-50">
+            Consultas web
+            {consultasNuevas > 0 && <span className="absolute -top-1.5 -right-1.5 bg-coop-naranja text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">{consultasNuevas}</span>}
+          </button>
           <button onClick={togglePerdidos} className="border border-slate-200 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-50">
             {mostrarPerdidos ? 'Ocultar perdidos/declinados' : 'Mostrar perdidos/declinados'}
           </button>
-          <button onClick={() => setForm({ ...leadVacio })} className="bg-coop-naranja text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">+ Lead</button>
+          <button onClick={() => { setConvirtiendo(null); setForm({ ...leadVacio }); }} className="bg-coop-naranja text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">+ Lead</button>
           <div className="relative">
             <button onClick={() => setMenuAcciones((v) => !v)} title="Acciones del CRM"
               className="relative p-2 rounded-lg text-slate-400 hover:text-coop-azul hover:bg-slate-100">
@@ -1097,6 +1116,24 @@ export default function CRM() {
       />
       <ImportarLeads open={importOpen} onClose={() => setImportOpen(false)} onDone={cargar} />
       <CRMMetricas open={showMetricas} leads={leadsBase} periodo={periodo} onClose={() => setShowMetricas(false)} />
+      <ConsultasWeb open={consultasOpen} api={api} onCerrar={() => setConsultasOpen(false)} onCambioNuevas={setConsultasNuevas}
+        onConvertir={(c) => {
+          // Abre el formulario +Lead PRECARGADO (reusa validaciones y obligatorios);
+          // al guardar, la consulta queda convertida y vinculada al lead.
+          const prodMatch = productosCat.find((pn) => pn.toLowerCase().replace(/\s/g, '').includes(String(c.producto || '').replace(/-/g, ''))
+            || String(c.producto || '').replace(/-/g, '').includes(pn.toLowerCase().replace(/\s/g, '')));
+          const lineas = detalleLineas(c);
+          const notas = [`Consulta desde la landing (${c.createdAt ? new Date(c.createdAt).toLocaleDateString('es-AR') : ''})`,
+            c.mensaje ? `Mensaje: ${c.mensaje}` : null, ...lineas].filter(Boolean).join('\n');
+          setConvirtiendo(c.id);
+          setForm({
+            ...leadVacio,
+            organizacion: c.organizacion || '', contactoNombre: c.contacto || '', email: c.email || '', telefono: c.telefono || '',
+            ciudad: c.localidad || '', fechaPrimerContacto: c.createdAt ? String(c.createdAt).slice(0, 10) : hoy(),
+            productos: prodMatch ? [prodMatch] : [], fuente: 'Web', ownerId: me?.colaboradorId ?? '', notas,
+          });
+          setConsultasOpen(false);
+        }} />
       {graphOpen && (
         <GraphConfigModal api={api} estado={graphEstado}
           onClose={() => {
