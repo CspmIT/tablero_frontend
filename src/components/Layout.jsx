@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { Menu, X, BarChart3, ChevronDown, LogOut, MonitorDown } from 'lucide-react';
+import { Menu, X, BarChart3, ChevronDown, LogOut, MonitorDown, HelpCircle } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
 import { VERSION } from '../version.js';
 import FotoImg from './FotoImg.jsx';
 import DesktopDownloadModal from './DesktopDownloadModal.jsx';
+import AyudaPanel from './AyudaPanel.jsx'; // 28/09: ayuda contextual del módulo activo
 import { isTauri } from '../utils/isTauri.js';
 import iconUrl from '../assets/cooptech-icon.png';
 import { puedeVerSolapa } from '../nav.js';
@@ -121,6 +122,7 @@ export default function Layout({ modulos, infoGrupo = [], configuracion = null, 
   const [drawerAbierto, setDrawerAbierto] = useState(false); // drawer móvil
   const [userAbierto, setUserAbierto] = useState(false);
   const [descargaAbierto, setDescargaAbierto] = useState(false);
+  const [ayudaAbierta, setAyudaAbierta] = useState(false); // 28/09: panel de ayuda
   const { me, colaboradores } = useData();
   const yo = colaboradores?.find((c) => String(c.id) === String(me?.colaboradorId));
   const inicial = (me?.nombre || 'U').trim().charAt(0).toUpperCase();
@@ -170,6 +172,12 @@ export default function Layout({ modulos, infoGrupo = [], configuracion = null, 
           <span className="hidden sm:inline text-sm text-blue-200 truncate">· Tablero de Mando</span>
         </div>
         <div className="relative flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* 28/09: ayuda contextual — abre la ayuda del módulo activo, con índice
+              filtrado por permisos (cada uno ve solo la ayuda de lo que usa). */}
+          <button onClick={() => setAyudaAbierta(true)} title="Ayuda de esta sección" aria-label="Ayuda"
+            className="p-1.5 rounded-lg hover:bg-white/15 shrink-0">
+            <HelpCircle size={20} />
+          </button>
           {!isTauri() && (
             <button onClick={() => setDescargaAbierto(true)}
               title="Descargar versión escritorio"
@@ -238,6 +246,7 @@ export default function Layout({ modulos, infoGrupo = [], configuracion = null, 
         <main className="flex-1 p-3 sm:p-4 md:p-6 overflow-auto">{children}</main>
       </div>
 
+      <AyudaPanel abierto={ayudaAbierta} activo={activo} onCerrar={() => setAyudaAbierta(false)} />
       <DesktopDownloadModal open={descargaAbierto} onClose={() => setDescargaAbierto(false)} />
     </div>
   );
