@@ -22,9 +22,17 @@ export default {
         {
           "q": "Configurar una placa",
           "pasos": [
-            "AutonomIA → Configuraciones: elegí el firmware (Reconecta DNP3 o DLMS Itron son guiados; Terminal libre para el resto).",
-            "En guiado, «Grabar» muestra los comandos exactos, manda solo los cambios y relee la placa.",
+            "AutonomIA → Configuraciones: elegí el firmware (Reconecta DNP3, DLMS Itron y +Agua Universal_agua son guiados; Terminal libre para el resto).",
+            "En guiado, «Grabar» muestra los comandos exactos, manda solo los cambios, relee la placa y VALIDA campo por campo (contraseñas enmascaradas en pantalla).",
             "«⚡ Aprovisionar desde un planteo CriterIA» sirve para proyectos +Agua con planteo hecho."
+          ]
+        },
+        {
+          "q": "Configurar una placa de +Agua (schema de tópicos y sensores)",
+          "pasos": [
+            "AutonomIA → Configuraciones → «+Agua — Universal_agua»: verifica que el firmware sea de agua antes de leer nada (si es otro, lo dice y no toca la placa).",
+            "Además de la config (COMs, red, WiFi, MQTT, FTP), editás el SCHEMA: el último renglón vacío de Tópicos/Sensores es el alta; ✕ da de baja (queda tachado hasta grabar); al elegir el tipo de sensor, los parámetros se arman con los defaults exactos del firmware.",
+            "Los cambios de schema agregan solos save_schema + reload_schema; si tras grabar algo no impactó, reintenta solo (2 s) y, con cambios de schema, reinicia la placa como último recurso y re-valida."
           ]
         },
         {

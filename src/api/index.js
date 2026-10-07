@@ -201,6 +201,14 @@ export const api = {
     chat: (messages) => http.post('/asistente/chat', { messages }),
     setClave: (apiKey) => http.put('/asistente/clave', { apiKey }),
     borrarClave: () => http.del('/asistente/clave'),
+    // 07/10: análisis IA de tickets recurrentes (vive en Métricas OV y en el Asistente)
+    analisisTickets: () => http.get('/asistente/analisis-tickets'),
+    generarAnalisisTickets: (periodo) => http.post('/asistente/analisis-tickets', periodo || {}),
+    // 07/10 bis: panel de informes archivados (historial IA + guardados del chat)
+    informes: () => http.get('/asistente/informes'),
+    informe: (id) => http.get(`/asistente/informes/${id}`),
+    guardarInforme: (data) => http.post('/asistente/informes', data),
+    borrarInforme: (id) => http.del(`/asistente/informes/${id}`),
   },
   analisis: {
     horasExtra: (mes) => http.get('/analisis/horas-extra', { mes }),
