@@ -17,6 +17,7 @@ import { getImage, saveImage } from '../api/minio.js';
 // Configuración guiada por firmware (13/08): formulario que lee/edita/graba
 // la config de la placa — el terminal queda como registro limpio.
 import MultivacConfigReconecta from './MultivacConfigReconecta.jsx';
+import MultivacConfigAgua from './MultivacConfigAgua.jsx'; // 07/10: port del configurador de Lorenzo
 // Uso desde el CELULAR (14/08): en Chrome de Android el Web Serial por cable
 // no existe (el picker solo lista Bluetooth) — se usa WebUSB con driver
 // CP210x propio, con la misma interfaz que un SerialPort.
@@ -1343,7 +1344,8 @@ export default function Multivac() {
         <option value="">— Seleccionar —</option>
         <option value="reconecta">Reconecta — DNP3 Universal (guiado)</option>
         <option value="itron">DLMS Itron — SL7000/ACE6000 (guiado)</option>
-        <option value="agua" disabled>+Agua (próximamente)</option>
+        {/* 07/10: port nativo del configurador standalone de Lorenzo */}
+        <option value="agua">+Agua — Universal_agua (guiado)</option>
         <option value="libre">Terminal libre (avanzado)</option>
       </select>
     </div>
@@ -1427,9 +1429,25 @@ export default function Multivac() {
           formulario guiado se ve desde la entrada con los campos bloqueados y
           los pasos a seguir; selector + botones USB/BT juntos en la sección
           «1 · Conexión y elección de versión». */}
-      {cfgModo !== 'libre' && cfgModo !== 'itron' && (
+      {cfgModo !== 'libre' && cfgModo !== 'itron' && cfgModo !== 'agua' && (
         <MultivacConfigReconecta
           habilitado={cfgModo === 'reconecta'}
+          conectado={conectado && transporte === 'serial'}
+          enviarLinea={enviarLinea}
+          rxSink={rxSink}
+          terminal={cajaTerminal('h-80')}
+          log={log}
+          selectorFirmware={selectorFirmware}
+          botonesConexion={botonesConexion}
+        />
+      )}
+
+      {/* Flujo guiado +AGUA (07/10): port nativo del configurador de Lorenzo —
+          config granular por COM + schema de tópicos/sensores con validación
+          releyendo la placa. La conexión es la compartida del módulo. */}
+      {cfgModo === 'agua' && (
+        <MultivacConfigAgua
+          habilitado
           conectado={conectado && transporte === 'serial'}
           enviarLinea={enviarLinea}
           rxSink={rxSink}
