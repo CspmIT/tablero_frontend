@@ -31,6 +31,16 @@ export default {
             "Verde = sin incidentes; amarillo = todos resueltos al cierre; rojo = alguno pendiente. Cualquier incidente reinicia el contador de «días sin incidente».",
             "«🖨 Imprimir / PDF» → «Guardar como PDF» (sale en A4)."
           ]
+        },
+        {
+          "q": "Ver qué tickets se repiten y cómo cortarlos de raíz (Análisis IA)",
+          "pasos": [
+            "Botón «✨ Análisis IA» del tablero ejecutivo: abre el último informe generado (verlo no consume IA).",
+            "La IA agrupa los tickets que describen el MISMO problema aunque estén escritos distinto (son carga humana), cuenta la frecuencia y, mirando cómo se resolvieron, propone una solución de fondo por grupo con su impacto.",
+            "Regenerarlo (elegís el período, por defecto 6 meses) es de conducción porque consume la API de IA; tarda 1 a 2 minutos.",
+            "Cada generación queda ADEMÁS archivada en Asistente IA → panel «Informes», con descarga en PDF — ahí se pueden comparar períodos.",
+            "El agrupado lo hace la IA: verificá los números de ticket citados antes de tomar decisiones."
+          ]
         }
       ]
     },

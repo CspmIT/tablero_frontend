@@ -9,6 +9,7 @@
 // el tablero mienta por omisión.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '../data/DataContext.jsx';
+import AnalisisIATickets from './AnalisisIATickets.jsx'; // 07/10 bis: compartido con el panel del Asistente
 
 // Paleta institucional validada (diseño §9) — orden FIJO por causa.
 // 27/08 (pedido de GERENCIA vía Leonardo): renombradas y reordenadas — los ids
@@ -48,8 +49,11 @@ const lunesDe = (fecha) => {
 };
 
 export default function MetricasOV() {
-  const { api } = useData();
+  const { api, me } = useData();
   const [vista, setVista] = useState('tablero'); // tablero | reporte | bandeja | detalle
+  // 07/10 (pedido de Sofía): análisis IA de tickets recurrentes. Lo ve el
+  // equipo; GENERAR es de conducción (controla el costo de API).
+  const [analisisOpen, setAnalisisOpen] = useState(false);
   // 26/08 (Leonardo, orden visual): solo Tablero y Reporte como solapas; la
   // Bandeja y el Detalle son herramientas de mantenimiento → viven en el ⚙.
   const [menuAjustes, setMenuAjustes] = useState(false);
@@ -446,8 +450,12 @@ export default function MetricasOV() {
         </select>
         {cargando && <span className="text-xs text-slate-400">⏳ Cargando…</span>}
         {vista === 'tablero' && (
-          <button onClick={imprimirTablero} title="Exportar este informe como PDF (elegí «Guardar como PDF» en el diálogo)"
-            className="ml-auto px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90">🖨 Imprimir / PDF</button>
+          <span className="ml-auto flex items-center gap-2">
+            <button onClick={() => setAnalisisOpen(true)} title="Agrupa con IA los tickets que se repiten (aunque estén escritos distinto) y propone soluciones de fondo"
+              className="px-3 py-1.5 text-sm rounded-lg border border-coop-azul text-coop-azul bg-white hover:bg-coop-azul/5">✨ Análisis IA</button>
+            <button onClick={imprimirTablero} title="Exportar este informe como PDF (elegí «Guardar como PDF» en el diálogo)"
+              className="px-3 py-1.5 text-sm rounded-lg bg-coop-azul text-white hover:opacity-90">🖨 Imprimir / PDF</button>
+          </span>
         )}
       </div>
 
@@ -722,6 +730,11 @@ export default function MetricasOV() {
       )}
 
       {vista === 'reporte' && <ReporteSemanalOV api={api} />}
+
+      {analisisOpen && (
+        <AnalisisIATickets api={api} puedeGenerar={['manager', 'gerencial'].includes(me?.tipo)}
+          onClose={() => setAnalisisOpen(false)} />
+      )}
     </div>
   );
 }
