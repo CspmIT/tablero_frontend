@@ -8,6 +8,25 @@ import { useEffect, useRef, useState } from 'react';
 // `onPublicar` (opcional, 25/09): async(monomicos) — publica los 6 precios
 // unitarios en la web pública. Solo se muestra sin lead; con doble click de
 // confirmación (publicar pisa los precios que ve cualquier visitante).
+// PRECIOS VIGENTES en el lead (09/10 — hallazgo de Leonardo con el lead de
+// Sebastián: el estado guardado de cada lead arrastra una COPIA de los Inputs
+// de cuando se creó, y los leads viejos/sembrados cotizaban distinto que el
+// simulador global y la landing). Decisión: al abrir el presupuestador de un
+// lead, los Inputs (costos, margen, ponderadores, planes) vienen SIEMPRE de la
+// DEFINICIÓN GLOBAL vigente; del lead solo lo que es suyo — cliente, la
+// configuración elegida y sus ajustes de Procoop. La foto comercial de un
+// precio pasado queda en el PDF que se envió. Sin definición global sembrada,
+// el lead abre con su estado tal cual (compat). Función pura: se testea sola.
+export function mezclarEstadoLead(globalEstado, leadEstado, razon) {
+  if (!globalEstado || typeof globalEstado !== 'object') return leadEstado || null;
+  const mezclado = { ...globalEstado };
+  // Lo PROPIO del lead (nunca se hereda del global):
+  mezclado.cliente = String(leadEstado?.cliente || razon || '');
+  mezclado.cfg = leadEstado?.cfg || globalEstado.cfg;
+  mezclado.procoop = leadEstado?.procoop ?? null; // el procoop del global es de la herramienta, no del cliente
+  return mezclado;
+}
+
 export default function CoopCloudModal({ open, lead, estadoInicial, aviso, onAutoSave, onPublicar, onPdfDescargado, onClose }) {
   const iframeRef = useRef(null);
   // Última foto de monómicos que mandó el iframe (viaja con cada autosave).
