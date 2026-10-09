@@ -20,6 +20,31 @@ const CAMPOS_DETALLE = {
   plantas: 'Plantas', pozos: 'Pozos / perforaciones', osmosis: 'Ósmosis', telemetriaActual: 'Telemetría actual',
 };
 
+// 08/10 (pedido de Leonardo): una consulta CoopCloud trae la configuración que
+// el visitante armó en la landing — al CONVERTIRLA en lead, el presupuestador
+// del lead se SIEMBRA con esa config (nada que re-tipear; el bloque Procoop de
+// la hoja se arma solo). Mapper puro: claves del contrato de la landing
+// (Landing_captura_leads_para_ClaudeDesign_28_09.md) → S.cfg del presupuestador.
+// Devuelve null si la consulta no es CoopCloud o el detalle no trae config.
+const TIPOS_DISCO = ['nvme', 'ssd', 'hdd'];
+export function cfgDesdeConsulta(c) {
+  if (String(c?.producto || '') !== 'coopcloud') return null;
+  let d = null;
+  try { d = c.detalle ? JSON.parse(c.detalle) : null; } catch { d = null; }
+  if (!d || typeof d !== 'object') return null;
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : null);
+  const base = { vcpu: n(d.vcpu), ram: n(d.ram), disco: n(d.discoGb), bw: n(d.bwMbps), ips: n(d.ips), sf: n(d.snapshotCadaHs), sr: n(d.retencionDias) };
+  if (Object.values(base).every((v) => v === null)) return null; // detalle sin config (solo mensaje)
+  const tipo = String(d.tipoDisco || '').toLowerCase();
+  // cfg COMPLETA: el iframe reemplaza el objeto entero — lo que la consulta no
+  // trae cae en los defaults del simulador (mismos que defaultState().cfg).
+  return {
+    vcpu: base.vcpu ?? 4, ram: base.ram ?? 8, disco: base.disco ?? 250,
+    tipo: TIPOS_DISCO.includes(tipo) ? tipo : 'ssd',
+    bw: base.bw ?? 100, ips: base.ips ?? 1, sf: base.sf ?? 24, sr: base.sr ?? 7,
+  };
+}
+
 export function detalleLineas(c) {
   let d = null;
   try { d = c.detalle ? JSON.parse(c.detalle) : null; } catch { d = null; }

@@ -16,6 +16,15 @@ export default {
       "titulo": "¿Cómo hago…?",
       "recetas": [
         {
+          "q": "Exportar las guardias al sistema de RRHH",
+          "pasos": [
+            "Vista Guardias → «⬇ Exportar para RRHH»: tildá las semanas y genera el Excel EXACTO que el importador de RRHH consume (un bloque del equipo por semana; quien no hace guardia va con el renglón vacío).",
+            "El teléfono se recibe el primer día hábil de la semana a las 08:00 y se entrega el primer día hábil de la siguiente a las 08:00 — los feriados corren el día solos.",
+            "Los legajos y el nombre según RRHH se completan una vez (conducción) y quedan guardados para todos.",
+            "El importador solo admite UN franco: si una guardia gana franco doble (feriado/puente), el modal lo avisa — el 2do franco se carga a mano en el sistema de RRHH."
+          ]
+        },
+        {
           "q": "Cargar mi día",
           "pasos": [
             "Tocá la celda del día (o la tarjeta en Mi semana).",

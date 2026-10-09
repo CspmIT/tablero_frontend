@@ -32,6 +32,7 @@ export default {
           "pasos": [
             "AutonomIA → Configuraciones → «+Agua — Universal_agua»: verifica que el firmware sea de agua antes de leer nada (si es otro, lo dice y no toca la placa).",
             "Además de la config (COMs, red, WiFi, MQTT, FTP), editás el SCHEMA: el último renglón vacío de Tópicos/Sensores es el alta; ✕ da de baja (queda tachado hasta grabar); al elegir el tipo de sensor, los parámetros se arman con los defaults exactos del firmware.",
+            "Exenciones por tipo: gralf no usa tópico ni field (publica bajo su base_topic); bomba_3f no usa field — esas celdas dicen «(no aplica)». t_ref vacío = default del firmware. DNS de la IP estática opcional: vacío = usa el gateway (fw 0.6.21+).",
             "Los cambios de schema agregan solos save_schema + reload_schema; si tras grabar algo no impactó, reintenta solo (2 s) y, con cambios de schema, reinicia la placa como último recurso y re-valida."
           ]
         },

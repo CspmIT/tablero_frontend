@@ -30,7 +30,9 @@ const limpiar3 = (v) => ((v === '***' || v === '(none)' || v == null) ? '' : Str
 // --- Tablas EXACTAS del CLI del firmware de agua (de Lorenzo) ---------------
 const BAUD_IDX = { 1200: 1, 2400: 2, 4800: 3, 9600: 4, 19200: 5, 38400: 6, 57600: 7, 115200: 8 };
 const FRAMINGS = ['', '8N1', '8E1', '8O1', '8N2', '7N1', '7E1', '7O1', '7N2']; // idx 1..8
-const PORT_LABELS = { 0: 'NONE (deshabilitado)', 1: '485A Half-Duplex', 2: '485B Half-Duplex', 3: '485 Full-Duplex (A+B)', 4: '232' };
+// Nomenclatura en pantalla: RS485-1 / RS485-2 (los tokens del firmware siguen
+// siendo 485A/485B; se evita "A/B" porque colisiona con los PINES A/B del bus).
+const PORT_LABELS = { 0: 'NONE (deshabilitado)', 1: 'RS485-1 Half-Duplex', 2: 'RS485-2 Half-Duplex', 3: 'RS485 Full-Duplex (1+2)', 4: 'RS-232' };
 const portOptDesde = (rx, tx) => {
   if (rx === 'NONE' || rx === '' || rx == null) return '0';
   if (rx === '485A' && tx === '485A') return '1';
@@ -46,7 +48,7 @@ const MQTT_PERFILES = [
 ];
 
 // --- Specs de sensores (espejo del Schema_Parser del firmware, de Lorenzo) --
-const DECODES = ['uint16_ab', 'int16_ab', 'uint16_ba', 'int16_ba', 'uint32_abcd', 'int32_abcd',
+const DECODES = ['uint16_ab', 'int16_ab', 'uint16_ba', 'int16_ba', 'frac100_int', 'int_frac100', 'uint32_abcd', 'int32_abcd',
   'uint32_cdab', 'int32_cdab', 'uint32_badc', 'int32_badc', 'uint32_dcba', 'int32_dcba',
   'float_abcd', 'float_cdab', 'float_badc', 'float_dcba',
   'uint64_abcdefgh', 'uint64_hgfedcba', 'uint64_badcfehg', 'uint64_ghefcdab',
@@ -105,6 +107,17 @@ export const SENSOR_SPECS = {
     { k: 'decode', l: 'Decode', c: 'sel', opts: DECODES, d: 'uint16_ab' },
     { k: 'source_sensor_id', l: 'Sensor fuente', c: 's', d: '' },
   ],
+  relay_modbus: [
+    { k: 'port', l: 'Puerto', c: 'sel', opts: COMS_OPT, d: 'COM1' },
+    { k: 'slave_addr', l: 'Dirección módulo', c: 'n', d: '' },
+    { k: 'coil_addr', l: 'Coil del canal', c: 'n', d: '0' },
+    { k: 'auto_off_ms', l: 'Auto-off ms (0=nunca)', c: 'n', d: '0' },
+  ],
+  dummy: [
+    { k: 'steps', l: 'Pasos por ciclo', c: 'n', d: '10' },
+    { k: 'scale_k', l: 'Amplitud k', c: 'n', d: '1' },
+    { k: 'scale_c', l: 'Offset c', c: 'n', d: '0' },
+  ],
   modbus_slave_sink: [
     { k: 'port', l: 'Puerto', c: 'sel', opts: COMS_OPT, d: 'COM1' },
     { k: 'slave_addr', l: 'Direccion propia', c: 'n', d: '' },
@@ -162,10 +175,14 @@ export function armarComandosAgua(v, o) {
   // IP estática: los 4 campos viajan JUNTOS (set_eth_ip ip mask gw dns).
   const ipOk = (x) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(x || '')) && String(x).split('.').every((n) => +n <= 255);
   if (dif('ethIp') || dif('ethMask') || dif('ethGw') || dif('ethDns')) {
-    if (ipOk(v.ethIp) && ipOk(v.ethMask) && ipOk(v.ethGw) && ipOk(v.ethDns)) {
-      cmds.push(`set_eth_ip ${v.ethIp} ${v.ethMask} ${v.ethGw} ${v.ethDns}`);
+    // DNS OPCIONAL (fw 0.6.21+): vacío → el comando sale con 3 argumentos y el
+    // firmware usa el gateway como DNS (el router corre forwarder en casi toda
+    // red; un DNS público hardcodeado sería un número muerto en VLANs cerradas).
+    const dnsVacio = String(v.ethDns || '').trim() === '';
+    if (ipOk(v.ethIp) && ipOk(v.ethMask) && ipOk(v.ethGw) && (dnsVacio || ipOk(v.ethDns))) {
+      cmds.push(`set_eth_ip ${v.ethIp} ${v.ethMask} ${v.ethGw}` + (dnsVacio ? '' : ` ${v.ethDns}`));
     } else {
-      avisos.push('IP estática: los 4 campos (IP, máscara, gateway, DNS) deben estar completos y válidos — NO se envía.');
+      avisos.push('IP estática: IP, máscara y gateway completos y válidos (DNS opcional: vacío = gateway) — NO se envía.');
     }
   }
   if (dif('wifiOn') && v.wifiOn) cmds.push(`set_wifi ${v.wifiOn}`);
@@ -192,9 +209,16 @@ export function armarComandosAgua(v, o) {
 }
 
 // --- Filas de schema (modelo de Lorenzo) ------------------------------------
+// Exenciones del parser (Lorenzo 08/10): gralf no usa topic_id NI field (publica
+// bajo su base_topic, que acepta path literal o el ID de un tópico del listado);
+// bomba_3f usa topic_id pero no field (los fields los pone el perfil).
+export const sinTopic = (tipo) => tipo === 'gralf';
+export const sinField = (tipo) => tipo === 'gralf' || tipo === 'bomba_3f';
 const filaCompleta = (r) => {
   if ('path' in r) return !!(r.id && r.path); // tópico
-  if (!(r.id && r.tipo && r.topic && r.field && String(r.tref))) return false;
+  if (!(r.id && r.tipo)) return false; // t_ref vacío = default del firmware (60 s; dummy 5 s)
+  if (!sinTopic(r.tipo) && !r.topic) return false;
+  if (!sinField(r.tipo) && !r.field) return false;
   const spec = SENSOR_SPECS[r.tipo] || [];
   return spec.every((f) => f.d !== '' || String((r.params || {})[f.k] ?? '') !== '');
 };
@@ -216,7 +240,10 @@ export function armarComandosSchema(topicos, sensores, avisos) {
   topAdd.filter(filaCompleta).forEach((r) => cmds.push(`add_topic ${r.id} ${r.path}`));
   for (const r of sensAddEdit.filter(filaCompleta)) {
     const extra = r.extra ? (',' + r.extra) : '';
-    const json = `{"id":"${r.id}","type":"${r.tipo}","topic_id":"${r.topic}","field":"${r.field}","t_ref":${r.tref},"retries":2${extra}}`;
+    const comun = `{"id":"${r.id}","type":"${r.tipo}"`
+      + (sinTopic(r.tipo) ? '' : `,"topic_id":"${r.topic}"`)
+      + (sinField(r.tipo) ? '' : `,"field":"${r.field}"`);
+    const json = comun + (r.tref ? `,"t_ref":${r.tref}` : '') + `,"retries":2${extra}}`;
     try { JSON.parse(json); } catch {
       avisos.push(`Sensor '${r.id}': los parámetros no forman JSON válido — NO se envía.`); continue;
     }
@@ -618,7 +645,17 @@ export default function MultivacConfigAgua({ habilitado, conectado, enviarLinea,
   // --- Piezas de formulario (mismas convenciones visuales que Reconecta) ----
   const esDirty = (k) => orig && String(campos[k]) !== String(orig[k]);
   const claseCampo = (k) => `w-full border rounded-lg px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400 ${esDirty(k) ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`;
-  const set = (k, val) => setCampos((c) => ({ ...c, [k]: val }));
+  const set = (k, val) => {
+    // Al tildar «Usar la siguiente dirección IP» con la máscara vacía se sugiere
+    // la típica — también en el baseline, para que NO quede marcada como cambio
+    // (es sugerencia, no edición — criterio de Lorenzo).
+    if (k === 'ethStatic' && val === 'on' && !String(campos.ethMask || '').trim()) {
+      setCampos((c) => ({ ...c, ethStatic: 'on', ethMask: '255.255.255.0' }));
+      setOrig((o) => (o ? { ...o, ethMask: '255.255.255.0' } : o));
+      return;
+    }
+    setCampos((c) => ({ ...c, [k]: val }));
+  };
   const campoTexto = (k, label, props = {}) => (
     <div className="mb-1.5">
       {label !== '' && <label className="block text-xs text-slate-500 mb-0.5">{label}</label>}
@@ -777,7 +814,7 @@ export default function MultivacConfigAgua({ habilitado, conectado, enviarLinea,
                 {campoIp('ethGw', 'Puerta de enlace (gateway)')}
                 {campoIp('ethDns', 'DNS')}
               </div>
-              <p className="text-[10.5px] text-slate-400 mb-1.5">Con firmware 0.6.20+ los 4 campos se leen de la placa; con previos, completalos. Los 4 se envían juntos (set_eth_ip).</p>
+              <p className="text-[10.5px] text-slate-400 mb-1.5">Con firmware 0.6.20+ los campos se leen de la placa. Viajan juntos (set_eth_ip); <b>DNS opcional</b>: vacío = el firmware usa el gateway (0.6.21+).</p>
             </div>
             <div className="border-t border-slate-100 pt-2">
               {campoCheck('wifiOn', 'Utilizar WiFi')}
@@ -857,14 +894,17 @@ export default function MultivacConfigAgua({ habilitado, conectado, enviarLinea,
                 <option value="" />
                 {TIPOS_SENSOR.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
-              <input value={r.topic} disabled={bloqueado || r.borrada} list={`ag-topicos-${r.uid}`}
+              <input value={sinTopic(r.tipo) ? '' : r.topic} disabled={bloqueado || r.borrada || sinTopic(r.tipo)}
+                placeholder={sinTopic(r.tipo) ? '(no aplica)' : ''} list={`ag-topicos-${r.uid}`}
+                title={sinTopic(r.tipo) ? 'gralf publica bajo su base_topic (path literal o ID de un tópico del listado)' : undefined}
                 onChange={(e2) => updSensor(r.uid, { topic: e2.target.value.trim() })} className={claseSch(r, 'topic')} />
               <datalist id={`ag-topicos-${r.uid}`}>
                 {topicos.filter((t) => t.id && !t.borrada).map((t) => <option key={t.uid} value={t.id} />)}
               </datalist>
-              <input value={r.field} disabled={bloqueado || r.borrada}
+              <input value={sinField(r.tipo) ? '' : r.field} disabled={bloqueado || r.borrada || sinField(r.tipo)}
+                placeholder={sinField(r.tipo) ? '(no aplica)' : ''}
                 onChange={(e2) => updSensor(r.uid, { field: e2.target.value.trim() })} className={claseSch(r, 'field')} />
-              <input value={r.tref} disabled={bloqueado || r.borrada} placeholder={r.nuevo ? '60000' : ''} inputMode="numeric"
+              <input value={r.tref} disabled={bloqueado || r.borrada} placeholder="60000 (default; dummy: 5000)" inputMode="numeric"
                 onChange={(e2) => updSensor(r.uid, { tref: e2.target.value.trim() })} className={claseSch(r, 'tref')} />
               <div className="flex flex-wrap gap-1.5 col-span-2 xl:col-span-1">
                 {(SENSOR_SPECS[r.tipo] || []).map((f) => (
