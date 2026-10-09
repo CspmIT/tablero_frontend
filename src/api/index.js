@@ -33,6 +33,9 @@ export const api = {
   guardias: {
     list: (anio) => http.get('/guardias', { anio }),
     setWeek: (body) => http.put('/guardias', body),
+    // 09/10: mapeo legajos/nombres para el export al importador de RRHH (Mirko)
+    exportRrhh: () => http.get('/guardias/export-rrhh'),
+    guardarExportRrhh: (config) => http.put('/guardias/export-rrhh', { config }),
   },
   carryover: {
     list: (anio) => http.get('/carryover', { anio }),
