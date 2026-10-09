@@ -15,6 +15,13 @@ export default {
       "titulo": "¿Cómo hago…?",
       "recetas": [
         {
+          "q": "Cargar el legajo de RRHH de un colaborador",
+          "pasos": [
+            "Equipo → editar la ficha → campo «Legajo (RRHH)» (opcional: externos y otras áreas pueden dejarlo vacío).",
+            "Lo usa «Exportar para RRHH» de Guardias — sin legajo, el export avisa a quién le falta."
+          ]
+        },
+        {
           "q": "Dar o quitar acceso a una solapa",
           "pasos": [
             "Permisos de vistas: tocá la celda persona × solapa. Cuatro estados: ✓ azul (la da su rol), ✓+ verde (otorgada acá), — gris (no la ve), ✕ rojo (ocultada).",
