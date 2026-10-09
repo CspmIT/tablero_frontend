@@ -10,7 +10,7 @@ import { isActiveCollab } from './grillaUtils.js';
 import PresupuestadorReconecta from './PresupuestadorReconecta.jsx';
 import AguaModal from './AguaModal.jsx';
 import CoopCloudModal from './CoopCloudModal.jsx';
-import ConsultasWeb, { detalleLineas } from './ConsultasWeb.jsx'; // 28/09: bandeja de la landing
+import ConsultasWeb, { detalleLineas, cfgDesdeConsulta } from './ConsultasWeb.jsx'; // 28/09: bandeja de la landing · 08/10: siembra del presupuesto
 import ImportarLeads from './ImportarLeads.jsx';
 import CRMMetricas from './CRMMetricas.jsx';
 import ContactosView from './ContactosView.jsx'; // Agenda de contactos externos (26/08)
@@ -93,7 +93,7 @@ export default function CRM() {
   // Consultas web (28/09): bandeja de lo que entra desde la landing pública.
   const [consultasOpen, setConsultasOpen] = useState(false);
   const [consultasNuevas, setConsultasNuevas] = useState(0);
-  const [convirtiendo, setConvirtiendo] = useState(null); // id de consulta en conversión
+  const [convirtiendo, setConvirtiendo] = useState(null); // consulta en conversión (objeto: 08/10, hace falta su detalle para sembrar el presupuesto)
   const [productosCat, setProductosCat] = useState(PRODUCTOS_DEFAULT);
   const [menuAcciones, setMenuAcciones] = useState(false);
   const [productosOpen, setProductosOpen] = useState(false);
@@ -304,7 +304,16 @@ export default function CRM() {
       // Consultas web (28/09): si este lead nació de una consulta de la landing,
       // marcarla convertida y vincular el lead (fire-and-forget: el lead ya existe).
       if (convirtiendo && leadId && !form.id) {
-        api.landingConsultas.actualizar(convirtiendo, { estado: 'convertida', leadId }).catch(() => {});
+        api.landingConsultas.actualizar(convirtiendo.id, { estado: 'convertida', leadId }).catch(() => {});
+        // 08/10 (pedido de Leonardo): si la consulta es CoopCloud, el
+        // presupuestador del lead nace SEMBRADO con la configuración que el
+        // visitante armó en la landing — Carola abre el lead y la hoja ya
+        // muestra esa config con el plan Procoop armado abajo. Fire-and-forget:
+        // si falla, el lead queda igual (el detalle sigue en las notas).
+        const cfgWeb = cfgDesdeConsulta(convirtiendo);
+        if (cfgWeb) {
+          api.leads.update(leadId, { coopcloudEstado: { cliente: form.organizacion?.trim() || '', cfg: cfgWeb } }).catch(() => {});
+        }
         setConvirtiendo(null);
         setConsultasNuevas((n) => Math.max(0, n - 1));
       }
@@ -1125,7 +1134,7 @@ export default function CRM() {
           const lineas = detalleLineas(c);
           const notas = [`Consulta desde la landing (${c.createdAt ? new Date(c.createdAt).toLocaleDateString('es-AR') : ''})`,
             c.mensaje ? `Mensaje: ${c.mensaje}` : null, ...lineas].filter(Boolean).join('\n');
-          setConvirtiendo(c.id);
+          setConvirtiendo(c); // la consulta entera: el detalle siembra el presupuesto al guardar
           setForm({
             ...leadVacio,
             organizacion: c.organizacion || '', contactoNombre: c.contacto || '', email: c.email || '', telefono: c.telefono || '',

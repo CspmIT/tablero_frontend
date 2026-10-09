@@ -37,7 +37,11 @@ export default function CoopCloudModal({ open, lead, estadoInicial, aviso, onAut
           // El iframe retiene sus autosaves hasta recibirlo (handshake) — antes,
           // su primer recalc() del boot mandaba el estado VIEJO del localStorage
           // y podía pisar el del lead antes de que llegara la verdad.
-          win?.postMessage({ coopBridge: true, type: 'cargar_estado', estado: estadoInicial || null }, '*');
+          // 07/10 (pedido de Leonardo): `vista` le dice al iframe cómo mostrarse —
+          // 'lead' = hoja única simplificada para cargar el presupuesto del
+          // cliente (sin pestañas, Procoop en vivo abajo); 'global' = simulador
+          // completo con Planes y Configurador unificados estilo landing.
+          win?.postMessage({ coopBridge: true, type: 'cargar_estado', estado: estadoInicial || null, vista: lead ? 'lead' : 'global' }, '*');
           break;
         case 'estado_actualizado':
           if (msg.monomicos) monRef.current = msg.monomicos;
