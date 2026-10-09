@@ -109,6 +109,26 @@ td.num{font-variant-numeric:tabular-nums}
 .slider-field .top{display:flex;justify-content:space-between;align-items:baseline}
 .slider-field .val{font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums}
 input[type=range]{accent-color:var(--green)}
+/* Chips de planes (07/10, unificación estilo landing — pedido de Leonardo) */
+.plan-chips{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 16px}
+.plan-chips button{border:1.5px solid var(--navy);background:#fff;color:var(--navy);border-radius:10px;padding:8px 16px;font-weight:700;font-size:13px;cursor:pointer}
+.plan-chips button.active{background:var(--navy);color:#fff}
+.plan-chips button:hover:not(.active){background:#eef3f8}
+details.def-planes{margin-top:18px}
+details.def-planes>summary{cursor:pointer;font-weight:700;color:var(--navy);padding:10px 14px;background:#fff;border:1px solid var(--border);border-radius:10px;list-style:none}
+details.def-planes>summary::before{content:'▸ ';}
+details.def-planes[open]>summary::before{content:'▾ ';}
+details.def-planes[open]>summary{border-radius:10px 10px 0 0}
+/* VISTA LEAD (07/10): hoja única para cargar el presupuesto del cliente —
+   sin pestañas, sin definición de planes; Procoop EN VIVO abajo. */
+body.vista-lead nav.tabs{display:none}
+/* En la hoja del lead NINGÚN panel hereda el .active por defecto (Inputs):
+   solo se ven el configurador y el plan Procoop. */
+body.vista-lead .tab-panel{display:none !important}
+body.vista-lead #tab-planes,body.vista-lead #tab-procoop{display:block !important}
+body.vista-lead details.def-planes{display:none}
+body.vista-lead #btnTomarCfg{display:none}
+body.vista-lead #tab-procoop{border-top:2px solid var(--border);margin-top:8px;padding-top:6px}
 </style>
 </head>
 <body>
@@ -118,7 +138,7 @@ input[type=range]{accent-color:var(--green)}
       <img src="data:image/png;base64,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" alt="CoopCloud">
       <div class="titles">
         <h1>Simulador de Costos Cloud</h1>
-        <p>Definición de precios y monómicos · CoopCloud — Coopmorteros</p>
+        <p id="subHeader">Definición de precios y monómicos · CoopCloud — Coopmorteros</p>
       </div>
     </div>
     <div class="actions">
@@ -132,8 +152,7 @@ input[type=range]{accent-color:var(--green)}
 <nav class="tabs" id="tabs">
   <button data-tab="inputs" class="active">Inputs</button>
   <button data-tab="monomicos">Monómicos</button>
-  <button data-tab="planes">Planes</button>
-  <button data-tab="config">Configurador</button>
+  <button data-tab="planes">Planes y configurador</button>
   <button data-tab="adicionales">Adicionales</button>
   <button data-tab="internos">Recursos internos</button>
   <button data-tab="procoop">Facturación</button>
@@ -244,21 +263,16 @@ input[type=range]{accent-color:var(--green)}
 
 <!-- ============ PLANES ============ -->
 <section class="tab-panel" id="tab-planes">
-  <p class="intro">Editá las specs de cada plan y mirá el costo, el precio y la ganancia en vivo. Hacé clic en un plan para ver el desglose por monómico.</p>
-  <div class="card"><div class="head"><span class="hex"></span><h3>Planes</h3></div><div class="body" style="padding:0;overflow-x:auto">
-    <table><thead><tr><th>Plan</th><th>vCPU</th><th>RAM</th><th>Disco</th><th>Tipo</th><th>BW Mbps</th><th>IPs</th><th>Snap c/h</th><th>Ret. días</th><th>Costo</th><th>Precio</th><th>Ganancia</th></tr></thead><tbody id="planBody"></tbody></table>
-  </div></div>
+  <!-- 07/10 (ítem 7 del backlog, pedido de Leonardo): Planes y Configurador
+       UNIFICADOS estilo landing — chips de planes arriba, sliders y resultado;
+       tocar un slider pasa a «Personalizado» (el chip activo se deriva
+       comparando la config con las specs, sin clave nueva en el estado).
+       La tabla editable de la DEFINICIÓN de planes no se pierde: vive plegada
+       abajo (no estorba a quien viene a presupuestar). -->
+  <p class="intro">Elegí un plan o personalizalo con los sliders — igual que en la landing. El precio y el desglose se actualizan en vivo.</p>
+  <div class="plan-chips" id="planChips"></div>
   <div class="grid g2">
-    <div class="card"><div class="head"><span class="hex"></span><h3>Composición del precio por plan</h3></div><div class="body"><div class="chart-box"><canvas id="chPlanStack"></canvas></div></div></div>
-    <div class="card"><div class="head"><span class="hex"></span><h3>Ganancia mensual por plan</h3></div><div class="body"><div class="chart-box"><canvas id="chPlanGain"></canvas></div><p class="sub">Ganancia por unidad de plan (precio − costo).</p></div></div>
-  </div>
-</section>
-
-<!-- ============ CONFIGURADOR ============ -->
-<section class="tab-panel" id="tab-config">
-  <p class="intro">Armá una VM a medida y obtené su costo y precio al instante. Generá un presupuesto en PDF para el cliente.</p>
-  <div class="grid g2">
-    <div class="card"><div class="head"><span class="hex"></span><h3>Configuración de la VM</h3></div><div class="body" id="cfgControls"></div></div>
+    <div class="card"><div class="head"><span class="hex"></span><h3>Configuración</h3></div><div class="body" id="cfgControls"></div></div>
     <div>
       <div class="card"><div class="head"><span class="hex"></span><h3>Resultado</h3></div><div class="body">
         <div class="kpis" id="cfgKpis"></div>
@@ -270,6 +284,16 @@ input[type=range]{accent-color:var(--green)}
       </div></div>
     </div>
   </div>
+  <details class="def-planes" id="defPlanes">
+    <summary>✎ Definición de planes — specs, costo, precio y ganancia (herramienta de conducción)</summary>
+    <div class="card" style="border-radius:0 0 10px 10px;border-top:none"><div class="body" style="padding:0;overflow-x:auto">
+      <table><thead><tr><th>Plan</th><th>vCPU</th><th>RAM</th><th>Disco</th><th>Tipo</th><th>BW Mbps</th><th>IPs</th><th>Snap c/h</th><th>Ret. días</th><th>Costo</th><th>Precio</th><th>Ganancia</th></tr></thead><tbody id="planBody"></tbody></table>
+    </div></div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><div class="head"><span class="hex"></span><h3>Composición del precio por plan</h3></div><div class="body"><div class="chart-box"><canvas id="chPlanStack"></canvas></div></div></div>
+      <div class="card"><div class="head"><span class="hex"></span><h3>Ganancia mensual por plan</h3></div><div class="body"><div class="chart-box"><canvas id="chPlanGain"></canvas></div><p class="sub">Ganancia por unidad de plan (precio − costo).</p></div></div>
+    </div>
+  </details>
 </section>
 
 <!-- ============ PROCOOP ============ -->
@@ -278,7 +302,7 @@ input[type=range]{accent-color:var(--green)}
   <div class="card">
     <div id="pcCliente" style="font-weight:700;margin-bottom:8px"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-      <button class="btn" onclick="procoopDesdeConfigurador()">⟵ Tomar del Configurador</button>
+      <button class="btn" id="btnTomarCfg" onclick="procoopDesdeConfigurador()">⟵ Tomar del Configurador</button>
       <button class="btn" onclick="copiarProcoop()">📋 Copiar plan para Procoop</button>
       <button class="btn" onclick="exportPDFFacturacion()">🧾 PDF de facturación</button>
     </div>
@@ -370,7 +394,12 @@ function getPath(o,p){return p.split('.').reduce((c,k)=>c?c[k]:undefined,o);}
    esperan el HANDSHAKE (cargar_estado del Tablero): antes, el recalc() del
    boot emitía el estado viejo del navegador y podía pisar el del lead. */
 var EMBEBIDO=(function(){try{return !!(window.parent&&window.parent!==window);}catch(e){return true;}})();
-var __handshake=!EMBEBIDO; // embebido: sin autosave hasta recibir cargar_estado
+var __handshake=!EMBEBIDO;
+// 07/10: la vista la decide el tablero en el handshake. 'global' = simulador
+// completo (con pestañas); 'lead' = HOJA ÚNICA para el presupuesto del cliente
+// (decisión de Leonardo: el iframe completo confundía a Carola) — sin
+// pestañas, chips+sliders+resultado y abajo el plan Procoop EN VIVO.
+var VISTA='global'; // embebido: sin autosave hasta recibir cargar_estado
 // 25/09 (landing pública): con cada autosave viaja también la FOTO de los
 // precios unitarios calculados (R.pu), con las claves que espera la web:
 // «ssd» = monómico SSD (definición Leonardo 25/09), «mbps» = ab (USD por Mbps).
@@ -533,6 +562,16 @@ function pcSet(k,v){
   P[k]=+v||0;
   save();renderProcoop();
 }
+// Vista lead (07/10): el plan Procoop se deriva EN VIVO de la configuración —
+// pisa SOLO los campos derivados; VPN/cert./descuento y sus precios manuales
+// se conservan (spread del previo). Sin save ni render acá: lo hace recalc().
+function procoopSyncCfg(){
+  const c=S.cfg, t=String(c.tipo||'nvme').toLowerCase();
+  const prev=S.procoop||{};
+  S.procoop=Object.assign({},prev,{vcpu:+c.vcpu,ram:+c.ram,disco_nvme:0,disco_ssd:0,disco_hdd:0,bw:+c.bw,ips:+c.ips,sf:+c.sf,sr:+c.sr});
+  S.procoop['disco_'+t]=+c.disco;
+}
+const PC_DERIVADOS=['vcpu','ram','disco_nvme','disco_ssd','disco_hdd','bw','ips','sf','sr'];
 function renderProcoop(){
   const ls=lineasProcoop();
   const sub=ls.filter(l=>l.precio>0).reduce((a,l)=>a+l.cant*l.precio,0);
@@ -544,6 +583,9 @@ function renderProcoop(){
     let celda;
     if(l.k===null){
       celda=`<b>${l.cant}</b> <span class="sub" title="Se recalcula solo desde Disco, Snap c/h y Ret.">⚙</span>`;
+    } else if(VISTA==='lead' && PC_DERIVADOS.includes(l.k)){
+      // Hoja del lead: lo derivado se mira, no se edita (viene de la config de arriba).
+      celda=`<b>${l.cant}</b>`;
     } else {
       celda=`<input type="number" min="0" step="any" value="${l.cant}" onchange="pcSet('${l.k}',this.value)" style="width:90px;text-align:right">`;
     }
@@ -564,9 +606,25 @@ function copiarProcoop(){
 /* ============================== RENDER ============================== */
 function recalc(){R=calc();renderActive();save();}
 function renderActive(){
+  if(VISTA==='lead'){
+    // Hoja única (07/10): configurador estilo landing + plan Procoop EN VIVO.
+    renderConfig();
+    procoopSyncCfg();
+    renderProcoop();
+    return;
+  }
   const t=document.querySelector('.tab-panel.active').id.replace('tab-','');
-  ({inputs:renderInputsAux,monomicos:renderMon,planes:renderPlanes,config:renderConfig,adicionales:renderAdic,internos:renderInternos,procoop:renderProcoop}[t]||(()=>{}))();
+  if(t==='planes'){
+    renderConfig();
+    // La definición plegada: los gráficos solo se dibujan con el <details>
+    // abierto (un canvas sin layout queda en 0×0 y Chart.js lo rompe).
+    if(document.getElementById('defPlanes')?.open) renderPlanes();
+    return;
+  }
+  ({inputs:renderInputsAux,monomicos:renderMon,adicionales:renderAdic,internos:renderInternos,procoop:renderProcoop}[t]||(()=>{}))();
 }
+// Al abrir la definición de planes recién ahí se renderizan tabla y gráficos.
+document.getElementById('defPlanes')?.addEventListener('toggle',()=>{if(document.getElementById('defPlanes').open)renderPlanes();});
 
 function renderInputsAux(){
   const p=S.pond, sum=p.vcpu+p.ram+p.nvme+p.ssd+p.hdd+p.ip+p.ab;
@@ -632,7 +690,27 @@ function renderPlanes(){
 }
 function toggleExp(i){const e=document.getElementById('exp-'+i);if(e)e.style.display=e.style.display==='none'?'table-row':'none';}
 
+// Chips de planes estilo landing (07/10): click = cargar las specs del plan en
+// la config; tocar cualquier slider pasa a «Personalizado». SIN clave nueva en
+// el estado: el chip activo se deriva comparando S.cfg con las specs — un
+// estado viejo guardado cae solo en el chip correcto (o en Personalizado).
+function planCoincide(pl,c){
+  return ['vcpu','ram','disco','bw','ips','sf','sr'].every(k=>+pl[k]===+c[k]) && String(pl.tipo)===String(c.tipo);
+}
+function usarPlan(i){
+  const pl=S.planes[i]; if(!pl)return;
+  S.cfg={vcpu:+pl.vcpu,ram:+pl.ram,disco:+pl.disco,tipo:pl.tipo,bw:+pl.bw,ips:+pl.ips,sf:+pl.sf,sr:+pl.sr};
+  recalc();
+}
+function renderChips(){
+  const el=document.getElementById('planChips'); if(!el)return;
+  const act=S.planes.findIndex(pl=>planCoincide(pl,S.cfg));
+  el.innerHTML=S.planes.map((pl,i)=>`<button class="${i===act?'active':''}" onclick="usarPlan(${i})">${pl.n}</button>`).join('')+
+    `<button class="${act<0?'active':''}" title="Config a medida: movete con los sliders" ${act<0?'':'onclick="void(0)"'}>Personalizado</button>`;
+}
+
 function renderConfig(){
+  renderChips();
   const c=S.cfg;
   const sl=(f,label,min,max,step,u)=>`<div class="slider-field"><div class="top"><label>${label}</label><span class="val" id="cv-${f}">${fmtN(c[f])} ${u}</span></div><input type="range" data-cfg="${f}" min="${min}" max="${max}" step="${step}" value="${c[f]}"></div>`;
   document.getElementById('cfgControls').innerHTML=
@@ -833,7 +911,13 @@ window.addEventListener('message', function(ev){
        navegador si existe (compat con lo cargado antes del fix), avisando que
        puede ser de otro cliente — la clave local era una sola, global. */
     try {
-      if (msg.estado) { S = Object.assign(defaultState(), msg.estado); }
+      if (msg.estado) {
+        S = Object.assign(defaultState(), msg.estado);
+        // El estado guardado puede no traer cliente (leads viejos): la razón
+        // social del lead (precargar_datos) lo completa — nombra el PDF,
+        // el «Plan para:» de Procoop y el encabezado de la hoja.
+        if (!S.cliente && window.__coopRazon) S.cliente = window.__coopRazon;
+      }
       else {
         try {
           var raw = localStorage.getItem('coopcloud_sim');
@@ -845,6 +929,17 @@ window.addEventListener('message', function(ev){
         } catch(e){}
       }
       __handshake = true;
+      if (msg.vista === 'lead') {
+        VISTA = 'lead';
+        document.body.classList.add('vista-lead');
+        var sh=document.getElementById('subHeader');
+        // El nombre del lead viaja en precargar_datos (llega ANTES que este
+        // mensaje): el encabezado dice DE QUIÉN es el presupuesto — ordena.
+        var razon=(window.__coopRazon||'').trim()||(msg.estado&&msg.estado.cliente)||'';
+        if(sh)sh.textContent=(razon?('Presupuesto de '+razon):'Presupuesto del cliente')+' · CoopCloud — Coopmorteros';
+        var ip=document.querySelector('#tab-procoop .intro');
+        if(ip)ip.innerHTML='<b>Cómo se carga en Procoop</b> — se recalcula solo con cada cambio de la configuración de arriba (cantidades de solo lectura). VPN, certificados y descuento se cargan a mano y se conservan.';
+      }
       var nota=document.getElementById('notaGuardado');
       if(nota)nota.textContent='los datos se guardan en el tablero.';
       bindInputs(); renderDynamic(); recalc();

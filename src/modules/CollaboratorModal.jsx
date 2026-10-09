@@ -62,6 +62,9 @@ export default function CollaboratorModal({ open, collaborator, allCollaborators
   const [role, setRole] = useState('collaborator');
   const [sector, setSector] = useState('');
   const [doesGuardia, setDoesGuardia] = useState(false);
+  // 09/10 (pedido de Leonardo): legajo del sistema de RRHH — OPCIONAL (externos
+  // y otras áreas no lo necesitan). Lo lee el export de guardias para Mirko.
+  const [legajo, setLegajo] = useState('');
   const [fechaIngreso, setFechaIngreso] = useState('');
   const [fechaSalida, setFechaSalida] = useState('');
   const [email, setEmail] = useState('');
@@ -80,6 +83,7 @@ export default function CollaboratorModal({ open, collaborator, allCollaborators
       setRole(collaborator.tipo || 'collaborator');
       setSector(collaborator.sector || '');
       setDoesGuardia(!!collaborator.haceGuardia);
+      setLegajo(collaborator.legajo || '');
       setFechaIngreso(toDateInput(collaborator.fechaIngreso));
       setFechaSalida(toDateInput(collaborator.fechaSalida));
       setPeriodos(
@@ -93,7 +97,7 @@ export default function CollaboratorModal({ open, collaborator, allCollaborators
       setAutoInit(false);
     } else {
       setName(''); setInitials(''); setAutoInit(true); setRole('collaborator');
-      setSector(''); setDoesGuardia(false); setFechaIngreso(''); setFechaSalida('');
+      setSector(''); setDoesGuardia(false); setLegajo(''); setFechaIngreso(''); setFechaSalida('');
       setEmail(''); setPeriodos([]); setFoto(null); setFuncionCosto('desarrollo');
     }
     // Al abrir/cambiar, descarta cualquier foto nueva pendiente.
@@ -187,6 +191,7 @@ export default function CollaboratorModal({ open, collaborator, allCollaborators
       sector: showSector ? sector.trim() || null : null,
       funcionCosto,
       haceGuardia: isNonOperative ? false : doesGuardia,
+      legajo: legajo.trim() || null,
       fechaIngreso: isNonOperative ? null : fechaIngreso || null,
       fechaSalida: isNonOperative ? null : fechaSalida || null,
       periodos: isNonOperative ? null : cleanPeriodos.length > 0 ? cleanPeriodos : null,
@@ -357,6 +362,12 @@ export default function CollaboratorModal({ open, collaborator, allCollaborators
                   Participa de la rotación de guardias
                 </label>
                 <p className="text-xs text-slate-400 mt-1">Aparece en la grilla de guardias y suma francos ganados por cada guardia.</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <label className="text-sm text-slate-600 shrink-0">Legajo (RRHH)</label>
+                  <input value={legajo} onChange={(e) => setLegajo(e.target.value)} maxLength={20} inputMode="numeric"
+                    placeholder="opcional" className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-24" />
+                </div>
+                <p className="text-xs text-slate-400 mt-1">El legajo del sistema de RRHH — lo usa «Exportar para RRHH» de Guardias. Externos y otras áreas pueden dejarlo vacío.</p>
               </div>
             </>
           )}

@@ -20,7 +20,7 @@ export default {
           "pasos": [
             "Vista Guardias → «⬇ Exportar para RRHH»: tildá las semanas y genera el Excel EXACTO que el importador de RRHH consume (un bloque del equipo por semana; quien no hace guardia va con el renglón vacío).",
             "El teléfono se recibe el primer día hábil de la semana a las 08:00 y se entrega el primer día hábil de la siguiente a las 08:00 — los feriados corren el día solos.",
-            "Los legajos y el nombre según RRHH se completan una vez (conducción) y quedan guardados para todos.",
+            "El legajo de cada uno se carga UNA vez en Equipo → ficha del colaborador (campo opcional «Legajo (RRHH)»); el nombre según RRHH se completa en el modal del export (conducción) y queda guardado para todos.",
             "El importador solo admite UN franco: si una guardia gana franco doble (feriado/puente), el modal lo avisa — el 2do franco se carga a mano en el sistema de RRHH."
           ]
         },

@@ -9,7 +9,7 @@ import MisNotas from './MisNotas.jsx';
 import { isActiveCollab } from './grillaUtils.js';
 import PresupuestadorReconecta from './PresupuestadorReconecta.jsx';
 import AguaModal from './AguaModal.jsx';
-import CoopCloudModal from './CoopCloudModal.jsx';
+import CoopCloudModal, { mezclarEstadoLead } from './CoopCloudModal.jsx';
 import ConsultasWeb, { detalleLineas, cfgDesdeConsulta } from './ConsultasWeb.jsx'; // 28/09: bandeja de la landing · 08/10: siembra del presupuesto
 import ImportarLeads from './ImportarLeads.jsx';
 import CRMMetricas from './CRMMetricas.jsx';
@@ -136,6 +136,16 @@ export default function CRM() {
     if (!ctx.lead?.id) { setPresupCtx(ctx); return; }
     try {
       const full = await api.leads.get(ctx.lead.id);
+      // 09/10 (drift de precios, caso Sebastián): el presupuestador CoopCloud
+      // del lead cotiza SIEMPRE con la definición global VIGENTE — del estado
+      // del lead solo quedan cliente, configuración y ajustes de Procoop. El
+      // próximo autosave guarda el estado ya refrescado en el lead.
+      if (ctx.tipo === 'coopcloud') {
+        try {
+          const g = await api.coopcloudSimulador.get();
+          full.coopcloudEstado = mezclarEstadoLead(g?.estado, full.coopcloudEstado, full.organizacion || ctx.lead.organizacion || '');
+        } catch { /* sin definición global o sin permiso de lectura: abre como hasta ahora */ }
+      }
       setPresupCtx({ ...ctx, lead: { ...ctx.lead, ...full } });
     } catch { setPresupCtx(ctx); }
   }, [api]);

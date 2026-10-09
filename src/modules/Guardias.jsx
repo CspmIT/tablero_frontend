@@ -204,8 +204,16 @@ function ExportRrhhModal({ api, weeks, roster, feriadosMap, anio, esConduccion, 
 
   const exportables = semanasExportables(weeks);
   const semanasSel = exportables.filter((w) => sel.has(w.week));
+  // 09/10 bis (pedido de Leonardo): el LEGAJO vive en la ficha del colaborador
+  // (Equipo → campo opcional «Legajo (RRHH)») — acá solo se muestra. El nombre
+  // según RRHH sigue siendo un override de este modal (Configuracion). Compat:
+  // si alguien cargó un legajo acá antes del cambio, vale como respaldo.
+  const mapeoEfectivo = Object.fromEntries(roster.map((c) => [c.id, {
+    legajo: String(c.legajo ?? '').trim() || String(mapping[c.id]?.legajo ?? '').trim(),
+    nombre: mapping[c.id]?.nombre || '',
+  }]));
   const { filas, francoDobles, faltanLegajos } = armarExportRrhh({
-    semanas: semanasSel, roster, mapping, area, feriadosMap, anio, weeks,
+    semanas: semanasSel, roster, mapping: mapeoEfectivo, area, feriadosMap, anio, weeks,
   });
   const nombresDe = (w) => (w.asignaciones || []).filter((a) => !a.vacation)
     .map((a) => roster.find((c) => c.id === a.id)?.nombre).filter(Boolean).join(', ');
@@ -266,7 +274,7 @@ function ExportRrhhModal({ api, weeks, roster, feriadosMap, anio, esConduccion, 
         {/* Mapeo legajos / nombre RRHH (dato maestro, lo guarda conducción) */}
         <div className="border border-slate-200 rounded-xl p-3 mb-3">
           <div className="flex items-center gap-2 mb-2">
-            <p className="text-sm font-medium text-slate-700">Legajos y nombres según RRHH</p>
+            <p className="text-sm font-medium text-slate-700">Legajos (de la ficha de Equipo) y nombres según RRHH</p>
             <span className="ml-auto flex items-center gap-1 text-xs text-slate-500">Área:
               <input value={area} onChange={(e) => { setArea(e.target.value); setExportado(''); }} disabled={!esConduccion}
                 className="border border-slate-300 rounded-lg px-2 py-1 text-xs w-28 disabled:bg-slate-50" />
@@ -276,9 +284,10 @@ function ExportRrhhModal({ api, weeks, roster, feriadosMap, anio, esConduccion, 
             <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5">
               {roster.map((c) => (
                 <div key={c.id} className="flex items-center gap-1.5">
-                  <input value={mapping[c.id]?.legajo || ''} onChange={(e) => setMap(c.id, 'legajo', e.target.value)}
-                    placeholder="Leg." disabled={!esConduccion} inputMode="numeric"
-                    className="border border-slate-300 rounded-lg px-2 py-1 text-xs w-14 disabled:bg-slate-50" />
+                  <span title="El legajo se carga en Equipo → ficha del colaborador («Legajo (RRHH)»)"
+                    className={`text-xs font-mono rounded-lg px-2 py-1 w-14 text-center border ${mapeoEfectivo[c.id]?.legajo ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-red-200 bg-red-50 text-red-400'}`}>
+                    {mapeoEfectivo[c.id]?.legajo || '—'}
+                  </span>
                   <input value={mapping[c.id]?.nombre || ''} onChange={(e) => setMap(c.id, 'nombre', e.target.value)}
                     placeholder={c.nombre} disabled={!esConduccion} title="Nombre tal como lo lista RRHH (Apellido Nombre)"
                     className="border border-slate-300 rounded-lg px-2 py-1 text-xs flex-1 disabled:bg-slate-50" />
@@ -286,7 +295,7 @@ function ExportRrhhModal({ api, weeks, roster, feriadosMap, anio, esConduccion, 
               ))}
             </div>
           )}
-          {!esConduccion && <p className="text-[11px] text-slate-400 mt-1.5">El mapeo lo completa la conducción; vos exportás con el guardado.</p>}
+          {!esConduccion && <p className="text-[11px] text-slate-400 mt-1.5">Los nombres según RRHH los completa la conducción; vos exportás con lo guardado.</p>}
         </div>
 
         {/* Semanas a exportar */}
@@ -308,7 +317,7 @@ function ExportRrhhModal({ api, weeks, roster, feriadosMap, anio, esConduccion, 
 
         {faltanLegajos.length > 0 && (
           <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 mb-2">
-            Falta el legajo de: <b>{faltanLegajos.join(', ')}</b> — completalo arriba para poder exportar.
+            Falta el legajo de: <b>{faltanLegajos.join(', ')}</b> — cargalo en Equipo → ficha del colaborador (campo «Legajo (RRHH)») y reabrí este modal.
           </p>
         )}
         {francoDobles.length > 0 && (

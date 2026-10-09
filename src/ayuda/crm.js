@@ -38,6 +38,7 @@ export default {
             "Abrí el lead: según producto y etapa aparecen los botones (Reconecta y Presupuesto +Agua desde Propuesta; Relevamiento +Agua desde Visita Técnica; CoopCloud siempre).",
             "El presupuestador guarda solo (autosave) EN el lead: cualquiera que abra ese lead ve lo mismo.",
             "CoopCloud dentro del lead es UNA sola hoja (como la landing): elegís un plan o movés los sliders, y abajo ya figura el plan tal como se carga en Procoop — se recalcula solo; VPN, certificados y descuento se cargan a mano y se conservan.",
+            "Los PRECIOS del presupuestador del lead son SIEMPRE los de la definición global vigente (los mismos de la landing): del lead solo quedan su configuración, sus ajustes de Procoop y el cliente. La foto comercial de un precio pasado es el PDF que se envió.",
             "Descargar el PDF actualiza el Valor (US$) del lead."
           ]
         },
