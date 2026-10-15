@@ -9,13 +9,14 @@
 // Extra nuestro: clasificación OV (tipo × causa, alimenta Métricas OV),
 // categoría de falla a/b/c (mandato M1) y vínculo a un ítem de grilla
 // (antidoble-conteo: manda el ticket, el ítem aporta las horas).
-// 14/10: también entran los tickets que abren las cooperativas en Reconecta
-// (origen=reconecta, empujados por su backend). Estado, mensajes y adjuntos
-// que se cargan acá vuelven a Reconecta; la clasificación OV no aplica.
+// 14/10 y 15/10: también entran los tickets que abren las cooperativas en
+// Reconecta y en Más Agua (origen=reconecta|masagua, empujados por su backend).
+// Estado, mensajes y adjuntos que se cargan acá vuelven al sistema de origen;
+// la clasificación OV no aplica.
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Paperclip, Send, Trash2, Link2, MessageSquare, Download, Pencil } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
-import { getImage, saveImage } from '../api/minio.js';
+import { getImage, saveAdjunto, mimeDeNombre } from '../api/minio.js';
 import { comprimirImagen } from '../lib/comprimirImagen.js';
 
 const ESTADOS = {
@@ -31,15 +32,18 @@ const ORIGEN = {
   manual:     { label: 'Manual',        cls: 'bg-slate-100 text-slate-500' },
   whatsapp:   { label: 'WhatsApp',      cls: 'bg-emerald-50 text-emerald-600' },
   mesa_ayuda: { label: 'Mesa de ayuda', cls: 'bg-blue-50 text-blue-600' },
-  reconecta:  { label: 'Reconecta',     cls: 'bg-violet-50 text-violet-600' },
+  // Sistemas externos: `coop` es el color de la etiqueta con la cooperativa.
+  reconecta:  { label: 'Reconecta',     cls: 'bg-violet-50 text-violet-600', externo: true, coop: 'bg-violet-600', texto: 'text-violet-600' },
+  masagua:    { label: 'Más Agua',      cls: 'bg-cyan-50 text-cyan-700',     externo: true, coop: 'bg-cyan-600',   texto: 'text-cyan-700' },
 };
-// Cooperativa de un ticket de Reconecta: el nombre del cliente (client_products)
-// y, si Reconecta no lo pudo resolver, el schema.
+const esExterno = (t) => !!ORIGEN[t.origen]?.externo;
+// Cooperativa de un ticket externo: el nombre del cliente (client_products) y,
+// si el sistema no lo pudo resolver, el schema.
 const nombreCoop = (t) => t.cooperativaNombre || t.cooperativa || '';
 const origenLabel = (t) => (ORIGEN[t.origen] || ORIGEN.manual).label;
-// Aviso cuando lo hecho acá no llegó a Reconecta (la cooperativa no lo ve).
-const avisoReconecta = (r, que) => (r && !r.ok && r.motivo !== 'sin_config'
-  ? `${que} se guardó acá pero NO llegó a Reconecta (${r.motivo}) — la cooperativa no lo ve. Reintentá.`
+// Aviso cuando lo hecho acá no llegó al sistema de origen (la cooperativa no lo ve).
+const avisoExterno = (t, r, que) => (r && !r.ok && r.motivo !== 'sin_config'
+  ? `${que} se guardó acá pero NO llegó a ${origenLabel(t)} (${r.motivo}) — la cooperativa no lo ve. Reintentá.`
   : '');
 const OV_TIPO_LABEL = { incidente: 'Incidente', solicitud: 'Solicitud' };
 // 27/08 (gerencia): nombres nuevos; «No vinculado a OV» siempre último. Ids intactos.
@@ -67,8 +71,8 @@ export default function TicketsInbox() {
   // Orden (20/08, feedback de Juan: las cargas retroactivas del WhatsApp
   // desordenan la lista). Default: fecha REAL del reclamo (ocurridoAt||createdAt).
   const [orden, setOrden] = useState('fecha'); // fecha | carga
-  const [origen, setOrigen] = useState('todos'); // 14/10: todos | manual | whatsapp | mesa_ayuda | reconecta
-  const [coop, setCoop] = useState('todas');     // 15/10: schema de Reconecta
+  const [origen, setOrigen] = useState('todos'); // todos | manual | whatsapp | mesa_ayuda | reconecta | masagua
+  const [coop, setCoop] = useState('todas');     // 15/10: "<origen>:<schema>" de un ticket externo
   const [errorGlobal, setErrorGlobal] = useState('');
   // Conector Mesa de ayuda (24/08): estado + config (gestores) + sincronizar.
   const [sync, setSync] = useState(null);        // estado del conector | null
@@ -108,10 +112,13 @@ export default function TicketsInbox() {
   }, [api]);
 
   const lista = tickets || [];
-  // Cooperativas con tickets de Reconecta (schema → nombre), para el filtro.
+  // Cooperativas con tickets externos ("origen:schema" → nombre), para el filtro.
+  // La clave lleva el origen: el mismo schema en dos sistemas son dos clientes.
   const coops = useMemo(() => {
     const m = new Map();
-    for (const t of lista) if (t.origen === 'reconecta' && t.cooperativa) m.set(t.cooperativa, nombreCoop(t));
+    for (const t of lista) {
+      if (esExterno(t) && t.cooperativa) m.set(`${t.origen}:${t.cooperativa}`, `${nombreCoop(t)} · ${origenLabel(t)}`);
+    }
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [lista]);
   const porEstado = useMemo(() => {
@@ -124,7 +131,7 @@ export default function TicketsInbox() {
   const visibles = lista.filter((t) => {
     if (filtro !== 'todos' && t.estado !== filtro) return false;
     if (origen !== 'todos' && t.origen !== origen) return false;
-    if (coop !== 'todas' && t.cooperativa !== coop) return false;
+    if (coop !== 'todas' && `${t.origen}:${t.cooperativa}` !== coop) return false;
     if (q.trim()) {
       const n = norm(q);
       return [t.titulo, t.descripcion, t.solicitante, t.sector, t.cooperativa, t.cooperativaNombre, `#${t.id}`].some((x) => norm(x).includes(n));
@@ -136,7 +143,7 @@ export default function TicketsInbox() {
 
   const patch = async (t, body) => {
     try {
-      const { mesaAviso, reconectaAviso, ...r } = await api.tickets.update(t.id, body);
+      const { mesaAviso, externoAviso, ...r } = await api.tickets.update(t.id, body);
       setTickets((ls) => ls.map((x) => (x.id === t.id ? { ...x, ...r } : x)));
       if (detalle?.id === t.id) setDetalle((d) => ({ ...d, ...r }));
       // Ciclo completo (24/08): si el estado no llegó a la Mesa de ayuda, avisar
@@ -144,7 +151,7 @@ export default function TicketsInbox() {
       if (mesaAviso && !mesaAviso.ok && mesaAviso.motivo !== 'sin_config') {
         setErrorGlobal(`El estado se guardó acá pero NO llegó a la Mesa de ayuda (${mesaAviso.motivo}) — puede volver a abrirse en la próxima sincronización. Reintentá cambiando el estado de nuevo.`);
       }
-      const avisoRc = avisoReconecta(reconectaAviso, 'El estado');
+      const avisoRc = avisoExterno(t, externoAviso, 'El estado');
       if (avisoRc) setErrorGlobal(avisoRc);
       return true;
     } catch (e) { setErrorGlobal(e.message || 'No se pudo actualizar'); return false; }
@@ -186,10 +193,10 @@ export default function TicketsInbox() {
           {Object.entries(ORIGEN).map(([v, o]) => <option key={v} value={v}>{o.label}</option>)}
         </select>
         {coops.length > 0 && (
-          <select value={coop} onChange={(e) => setCoop(e.target.value)} title="Filtrar tickets de Reconecta por cooperativa"
+          <select value={coop} onChange={(e) => setCoop(e.target.value)} title="Filtrar tickets de Reconecta / Más Agua por cooperativa"
             className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-600">
             <option value="todas">Todas las cooperativas</option>
-            {coops.map(([schema, nombre]) => <option key={schema} value={schema}>{nombre}</option>)}
+            {coops.map(([clave, nombre]) => <option key={clave} value={clave}>{nombre}</option>)}
           </select>
         )}
         <select value={orden} onChange={(e) => setOrden(e.target.value)} title="Ordenar la lista"
@@ -205,7 +212,7 @@ export default function TicketsInbox() {
       <p className="text-xs text-slate-400 mb-3">
         Digitalizá acá los reclamos que llegan por el WhatsApp de guardia o que el cliente interno no cargó en la Mesa de ayuda.
         Con el conector configurado (⟳), los tickets del área «Oficina Virtual» de la Mesa de ayuda entran solos cada 5 minutos.
-        Los que abren las cooperativas en Reconecta entran en el momento, y lo que respondas acá les llega.
+        Los que abren las cooperativas en Reconecta y Más Agua entran en el momento, y lo que respondas acá les llega.
       </p>
       {errorGlobal && (
         <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700 flex items-center justify-between gap-2">
@@ -225,7 +232,7 @@ export default function TicketsInbox() {
         {visibles.map((t) => {
           const est = ESTADOS[t.estado] || ESTADOS.abierto;
           const org = ORIGEN[t.origen] || ORIGEN.manual;
-          const aplicaOV = t.origen !== 'reconecta';
+          const aplicaOV = !esExterno(t);
           const clasificado = t.ovTipo && t.ovCausa;
           const faltaCat = aplicaOV && t.ovTipo === 'incidente' && !t.categoriaFalla;
           return (
@@ -238,8 +245,8 @@ export default function TicketsInbox() {
                     <span className="font-medium text-slate-800 break-words">{t.titulo}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${est.cls}`}>{est.label}</span>
                     <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${org.cls}`}>{origenLabel(t)}</span>
-                    {t.origen === 'reconecta' && nombreCoop(t) && (
-                      <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-violet-600 text-white font-medium" title={`Schema: ${t.cooperativa}`}>{nombreCoop(t)}</span>
+                    {esExterno(t) && nombreCoop(t) && (
+                      <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${org.coop} text-white font-medium`} title={`Schema: ${t.cooperativa}`}>{nombreCoop(t)}</span>
                     )}
                     {t.prioridad === 'Alta' || t.prioridad === 'Urgente' ? (
                       <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-red-50 text-red-600">{t.prioridad}</span>
@@ -338,7 +345,7 @@ function NuevoTicketModal({ api, form, setForm, onDone }) {
       for (const f0 of archivos.slice(0, 5)) {
         try {
           const f = await comprimirImagen(f0);
-          const key = await saveImage(f);
+          const key = await saveAdjunto(f); // PDF → uploadFile, imágenes → uploadImg
           await api.archivos.create({ key, nombre: f.name, mime: f.type || null, tamano: f.size, contexto: 'ticket', url: `ticket:${t.id}` });
         } catch { setError((e) => e || 'El ticket se creó pero algún adjunto no se pudo subir — reintentá desde el detalle.'); }
       }
@@ -414,10 +421,10 @@ function NuevoTicketModal({ api, form, setForm, onDone }) {
             <div className="flex items-center gap-2 flex-wrap">
               <label className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 cursor-pointer hover:border-coop-azul flex items-center gap-1.5 text-slate-600">
                 <Paperclip size={14} /> Adjuntar archivos
-                <input type="file" multiple accept="image/*,application/pdf" className="hidden"
+                <input type="file" multiple accept="image/png,image/jpeg,application/pdf" className="hidden"
                   onChange={(e) => setArchivos((a) => [...a, ...Array.from(e.target.files || [])].slice(0, 5))} />
               </label>
-              <span className="text-xs text-slate-400">Imágenes o PDF · hasta 5</span>
+              <span className="text-xs text-slate-400">PNG, JPG o PDF · hasta 5</span>
             </div>
             {archivos.length > 0 && (
               <div className="mt-1.5 flex gap-1.5 flex-wrap">
@@ -494,16 +501,16 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
   const enviarMensaje = async () => {
     if (!texto.trim()) return;
     try {
-      const { reconectaAviso, ...m } = await api.tickets.mensaje(t.id, texto.trim());
+      const { externoAviso, ...m } = await api.tickets.mensaje(t.id, texto.trim());
       setMensajes((ms) => [...(ms || []), m]); setTexto('');
-      const aviso = avisoReconecta(reconectaAviso, 'El mensaje');
+      const aviso = avisoExterno(t, externoAviso, 'El mensaje');
       if (aviso) setErr(aviso);
     } catch (e) { setErr(e.message || 'No se pudo enviar'); }
   };
 
   const verAdjunto = async (a) => {
     try {
-      const url = await getImage(a.key);
+      const url = await getImage(a.key, a.mime || mimeDeNombre(a.nombre));
       const w = window.open(url, '_blank');
       if (!w) setErr('El navegador bloqueó la ventana — habilitá popups para ver el adjunto.');
     } catch { setErr('No se pudo descargar el adjunto'); }
@@ -513,10 +520,10 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
     for (const f0 of Array.from(files || []).slice(0, 5 - adjuntos.length)) {
       try {
         const f = await comprimirImagen(f0); // imágenes se achican antes de subir
-        const key = await saveImage(f);
-        const { reconectaAviso, ...ref } = await api.tickets.adjunto(t.id, { key, nombre: f.name, mime: f.type || null, tamano: f.size });
+        const key = await saveAdjunto(f);
+        const { externoAviso, ...ref } = await api.tickets.adjunto(t.id, { key, nombre: f.name, mime: f.type || null, tamano: f.size });
         setAdjuntos((as) => [...as, ref]);
-        const aviso = avisoReconecta(reconectaAviso, `El adjunto ${f.name}`);
+        const aviso = avisoExterno(t, externoAviso, `El adjunto ${f.name}`);
         if (aviso) setErr(aviso);
       } catch (e) { setErr(e.message || `No se pudo subir ${f.name}`); }
     }
@@ -551,7 +558,7 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
         <p className="text-xs text-slate-400 mb-3">
-          {origenLabel(t)}{t.origen === 'reconecta' && nombreCoop(t) ? <> · <b className="text-violet-600">{nombreCoop(t)}</b></> : null} · {t.solicitante || 'sin solicitante'}{t.sector ? ` (${t.sector})` : ''} ·
+          {origenLabel(t)}{esExterno(t) && nombreCoop(t) ? <> · <b className={ORIGEN[t.origen].texto}>{nombreCoop(t)}</b></> : null} · {t.solicitante || 'sin solicitante'}{t.sector ? ` (${t.sector})` : ''} ·
           {' '}{dstr(t.ocurridoAt || t.createdAt)} · {t.tipo} · prioridad {t.prioridad}
           {t.creadoPor ? ` · digitalizó ${t.creadoPor}` : ''}
         </p>
@@ -598,8 +605,8 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
           {t.resueltoAt && <span className="text-xs text-slate-400">Resuelto el {dstr(t.resueltoAt)}</span>}
         </div>
 
-        {/* Clasificación OV — no aplica a los tickets de Reconecta */}
-        {t.origen !== 'reconecta' && (
+        {/* Clasificación OV — no aplica a los tickets de Reconecta / Más Agua */}
+        {!esExterno(t) && (
         <div className="border border-slate-100 rounded-lg p-3 mb-3">
           <p className={`${label} mb-2`}>Clasificación OV (alimenta Métricas Oficina Virtual)</p>
           <div className="flex items-center gap-2 flex-wrap">
@@ -666,7 +673,7 @@ function DetalleTicket({ api, me, esGestor, colabs, ticket, onPatch, onClose, on
             {adjuntos.length < 5 && (
               <label className="text-xs border border-dashed border-slate-300 rounded px-2 py-1 cursor-pointer text-slate-500 hover:border-coop-azul flex items-center gap-1">
                 <Paperclip size={11} /> agregar
-                <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => subirAdjunto(e.target.files)} />
+                <input type="file" multiple accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={(e) => subirAdjunto(e.target.files)} />
               </label>
             )}
           </div>
