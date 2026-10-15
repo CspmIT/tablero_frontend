@@ -267,7 +267,7 @@ export const api = {
     create: (body) => http.post('/tickets', body),
     update: (id, body) => http.patch(`/tickets/${id}`, body),
     mensaje: (id, texto) => http.post(`/tickets/${id}/mensajes`, { texto }),
-    // 14/10: adjunto ya subido a MinIO; si el ticket es de Reconecta, le llega a la coop.
+    // 14/10: adjunto ya subido a MinIO; si el ticket es de Reconecta o Más Agua, le llega a la coop.
     adjunto: (id, body) => http.post(`/tickets/${id}/adjuntos`, body),
     del: (id) => http.del(`/tickets/${id}`),
     // Conector Mesa de ayuda (24/08): estado/config/sincronizar (token solo backend).
