@@ -14,7 +14,7 @@ const PRODUCTO_LABEL = {
 };
 const CAMPOS_DETALLE = {
   plan: 'Plan', vcpu: 'vCPU', ram: 'RAM (GB)', discoGb: 'Disco (GB)', tipoDisco: 'Tipo de disco',
-  bwMbps: 'Ancho de banda (Mbps)', ips: 'IPs públicas', snapshotCadaHs: 'Snapshot cada (hs)',
+  bwMbps: 'Ancho de banda (Mbps)', ips: 'IPs públicas', sistemaOperativo: 'Sistema operativo', snapshotCadaHs: 'Snapshot cada (hs)',
   retencionDias: 'Retención (días)', precioEstimado: 'Precio estimado (US$)',
   cantidad: 'Reconectadores', marcaModelo: 'Marca / modelo', estadoActual: 'Cómo los operan hoy',
   plantas: 'Plantas', pozos: 'Pozos / perforaciones', osmosis: 'Ósmosis', telemetriaActual: 'Telemetría actual',
@@ -36,12 +36,17 @@ export function cfgDesdeConsulta(c) {
   const base = { vcpu: n(d.vcpu), ram: n(d.ram), disco: n(d.discoGb), bw: n(d.bwMbps), ips: n(d.ips), sf: n(d.snapshotCadaHs), sr: n(d.retencionDias) };
   if (Object.values(base).every((v) => v === null)) return null; // detalle sin config (solo mensaje)
   const tipo = String(d.tipoDisco || '').toLowerCase();
+  // SO (19/10): la landing manda sistemaOperativo (botones «Linux»/«Microsoft»).
+  // Tolerante al texto exacto: cualquier cosa con win/microsoft es windows; el
+  // resto (o ausente) cae en linux. Parámetro técnico: no cambia el precio.
+  const so = /win|microsoft/.test(String(d.sistemaOperativo || '').toLowerCase()) ? 'windows' : 'linux';
   // cfg COMPLETA: el iframe reemplaza el objeto entero — lo que la consulta no
-  // trae cae en los defaults del simulador (mismos que defaultState().cfg).
+  // trae cae en los defaults del simulador (mismos que defaultState().cfg;
+  // snapshots 24 h / 5 días desde el 19/10, como la web).
   return {
     vcpu: base.vcpu ?? 4, ram: base.ram ?? 8, disco: base.disco ?? 250,
     tipo: TIPOS_DISCO.includes(tipo) ? tipo : 'ssd',
-    bw: base.bw ?? 100, ips: base.ips ?? 1, sf: base.sf ?? 24, sr: base.sr ?? 7,
+    bw: base.bw ?? 100, ips: base.ips ?? 1, sf: base.sf ?? 24, sr: base.sr ?? 5, so,
   };
 }
 

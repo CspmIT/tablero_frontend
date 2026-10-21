@@ -38,6 +38,8 @@ export default {
             "Abrí el lead: según producto y etapa aparecen los botones (Reconecta y Presupuesto +Agua desde Propuesta; Relevamiento +Agua desde Visita Técnica; CoopCloud siempre).",
             "El presupuestador guarda solo (autosave) EN el lead: cualquiera que abra ese lead ve lo mismo.",
             "CoopCloud dentro del lead es UNA sola hoja (como la landing): elegís un plan o movés los sliders, y abajo ya figura el plan tal como se carga en Procoop — se recalcula solo; VPN, certificados y descuento se cargan a mano y se conservan.",
+            "El Sistema operativo (Linux/Windows, como la web) es un parámetro técnico: no cambia el precio, pero viaja en la config, sale en el PDF y figura junto al «Plan para:» del bloque Procoop. Elegir un plan no lo pisa. Los snapshots arrancan en 24 h / 5 días (el estándar de la web), pero acá siguen siendo editables para casos pactados.",
+            "Cada renglón del bloque Procoop muestra su N° DE SERVICIO en Procoop (los pasó administración): con ese número el alta es directa. Los números se cargan y corrigen en el SIMULADOR GLOBAL (solapa Facturación, primera columna) y viajan a todos los leads como los precios; en el lead se ven de solo lectura. Un «—» significa que ese servicio aún no está creado en Procoop. El «Copiar» y el PDF de facturación los incluyen.",
             "Los PRECIOS del presupuestador del lead son SIEMPRE los de la definición global vigente (los mismos de la landing): del lead solo quedan su configuración, sus ajustes de Procoop y el cliente. La foto comercial de un precio pasado es el PDF que se envió.",
             "Descargar el PDF actualiza el Valor (US$) del lead."
           ]
@@ -81,7 +83,7 @@ export default {
           "pasos": [
             "Botón «Consultas web» en la barra del CRM (el globito naranja marca cuántas hay nuevas). También llega un push («CRM: consulta web», se apaga en Configuración → Notificaciones).",
             "Cada consulta trae organización, contacto y el detalle técnico que cargó el visitante (la configuración del simulador CoopCloud, los reconectadores o las plantas de agua).",
-            "Si la consulta es de CoopCloud, al convertirla el presupuestador del lead nace SEMBRADO con la configuración que armó el visitante: abrís el lead y la hoja ya muestra esa config con el plan Procoop abajo.",
+            "Si la consulta es de CoopCloud, al convertirla el presupuestador del lead nace SEMBRADO con la configuración que armó el visitante (sistema operativo incluido): abrís el lead y la hoja ya muestra esa config con el plan Procoop abajo.",
             "«Convertir en lead» abre el formulario +Lead PRECARGADO (fuente Web, detalle en las notas): completás lo que falte y al guardar la consulta queda convertida y vinculada.",
             "«Descartar» (con confirmación) saca el spam sin ensuciar las métricas; se puede restaurar desde «Todas»."
           ]
