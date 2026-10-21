@@ -307,7 +307,7 @@ body.vista-lead #tab-procoop{border-top:2px solid var(--border);margin-top:8px;p
       <button class="btn" onclick="exportPDFFacturacion()">🧾 PDF de facturación</button>
     </div>
     <div id="procoopKpis" class="kpis"></div>
-    <table><thead><tr><th>Servicio (idéntico en Procoop)</th><th class="num">Cantidad</th><th class="num">Precio unitario</th><th class="num">Subtotal facturado</th></tr></thead>
+    <table><thead><tr><th style="width:84px">N° serv.</th><th style="text-align:left">Servicio (idéntico en Procoop)</th><th class="num">Cantidad</th><th class="num">Precio unitario</th><th class="num">Subtotal facturado</th></tr></thead>
     <tbody id="procoopBody"></tbody></table>
     <div id="procoopTotal" style="text-align:right;font-size:1.25rem;font-weight:800;margin-top:12px"></div>
     <p class="hint" style="margin-top:10px">Regla de oro: "Snap c/h" y "Ret. (días)" no tienen precio propio pero su cantidad recalcula el "Snapshot retenido". Nunca editar el snapshot a mano en Procoop: cambió algo del cliente → regenerar el plan completo desde esta pestaña.</p>
@@ -346,6 +346,13 @@ body.vista-lead #tab-procoop{border-top:2px solid var(--border);margin-top:8px;p
 <script>
 /* ============================== ESTADO ============================== */
 const TIPOS = ['nvme','ssd','hdd'];
+// Sistema operativo (19/10, espejo de la landing): parámetro TÉCNICO de la VM —
+// no participa del costo ni del precio; viaja en S.cfg.so y sale en el
+// resultado, el PDF y el encabezado del plan Procoop. Estados guardados sin la
+// clave caen en 'linux' (soDe) sin marcar cambio.
+const SOS = ['linux','windows'];
+const soDe = c => (String(c&&c.so||'linux').toLowerCase()==='windows'?'windows':'linux');
+const soLabel = s => s==='windows'?'Windows':'Linux';
 function defaultState(){return{
   cliente:'',
   margenPct:40, utilPct:75, overcommitVCPU:3, overcommitRAM:1, sobreDisco:1, sobreAB:1,
@@ -360,18 +367,26 @@ function defaultState(){return{
   personal:[{rol:'Operaciones',ded:50,costo:2500}],
   pond:{vcpu:30, ram:25, nvme:10, ssd:10, hdd:5, ip:5, ab:15},
   planes:[
-    {n:'Starter',vcpu:2,ram:4,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:7},
-    {n:'Standard',vcpu:4,ram:8,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:7},
-    {n:'Standard Full',vcpu:4,ram:16,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:7},
-    {n:'Advanced Lite',vcpu:8,ram:16,disco:250,tipo:'nvme',bw:200,ips:1,sf:24,sr:7},
-    {n:'Advanced',vcpu:8,ram:32,disco:250,tipo:'nvme',bw:200,ips:1,sf:24,sr:7},
-    {n:'Exclusive Lite',vcpu:12,ram:64,disco:250,tipo:'nvme',bw:300,ips:1,sf:12,sr:7},
-    {n:'Exclusive',vcpu:12,ram:128,disco:250,tipo:'nvme',bw:300,ips:1,sf:12,sr:7},
-    {n:'Premium Lite',vcpu:16,ram:64,disco:250,tipo:'nvme',bw:500,ips:1,sf:12,sr:7},
-    {n:'Premium',vcpu:16,ram:128,disco:250,tipo:'nvme',bw:500,ips:1,sf:12,sr:7},
-    {n:'Full CPU',vcpu:24,ram:128,disco:250,tipo:'nvme',bw:500,ips:1,sf:12,sr:7}
+    {n:'Starter',vcpu:2,ram:4,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:5},
+    {n:'Standard',vcpu:4,ram:8,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:5},
+    {n:'Standard Full',vcpu:4,ram:16,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:5},
+    {n:'Advanced Lite',vcpu:8,ram:16,disco:250,tipo:'nvme',bw:200,ips:1,sf:24,sr:5},
+    {n:'Advanced',vcpu:8,ram:32,disco:250,tipo:'nvme',bw:200,ips:1,sf:24,sr:5},
+    {n:'Exclusive Lite',vcpu:12,ram:64,disco:250,tipo:'nvme',bw:300,ips:1,sf:24,sr:5},
+    {n:'Exclusive',vcpu:12,ram:128,disco:250,tipo:'nvme',bw:300,ips:1,sf:24,sr:5},
+    {n:'Premium Lite',vcpu:16,ram:64,disco:250,tipo:'nvme',bw:500,ips:1,sf:24,sr:5},
+    {n:'Premium',vcpu:16,ram:128,disco:250,tipo:'nvme',bw:500,ips:1,sf:24,sr:5},
+    {n:'Full CPU',vcpu:24,ram:128,disco:250,tipo:'nvme',bw:500,ips:1,sf:24,sr:5}
   ],
-  cfg:{vcpu:4,ram:8,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:7},
+  // Snapshots: default 24 h / 5 días (19/10 — la web los fijó ahí; acá los
+  // controles siguen libres para casos pactados, solo cambia el default).
+  cfg:{vcpu:4,ram:8,disco:250,tipo:'nvme',bw:100,ips:1,sf:24,sr:5,so:'linux'},
+  // Números de servicio en Procoop (21/10, los pasó administración): dato de
+  // CATÁLOGO — viven en la definición GLOBAL (mezclarEstadoLead los lleva al
+  // lead como los precios) y se editan en la solapa Facturación del simulador
+  // global. Vacío = servicio aún no creado en Procoop (NVMe, y los renglones
+  // informativos Snap c/h / Ret.). 'snap' es el Snapshot retenido.
+  procoopCod:{vcpu:'139',ram:'140',disco_nvme:'',disco_ssd:'141',disco_hdd:'142',bw:'143',ips:'144',sf:'',sr:'',snap:'145',vpn:'146',cert:'147',desc:'148'},
   procoop:null, // plan de facturación (pestaña Procoop); null = se inicializa del Configurador
   areas:{cooptech:[{n:'VM ERP',vcpu:4,ram:16,disco:500,tipo:'ssd',bw:100,ips:1,sf:24,sr:7}],telecom:[],administracion:[]}
 };}
@@ -511,6 +526,10 @@ function procoopEstado(){
   if(S.procoop.vpn===undefined)S.procoop.vpn=0;
   if(S.procoop.precioVpn===undefined)S.procoop.precioVpn=30;
   if(S.procoop.precioCert===undefined)S.procoop.precioCert=2;
+  // Y cert/desc, que podían quedar undefined en un plan armado por el sync del
+  // lead (21/10): sin esto los totales daban NaN («US$ —»).
+  if(S.procoop.cert===undefined)S.procoop.cert=0;
+  if(S.procoop.desc===undefined)S.procoop.desc=0;
   // Migración de estados guardados con el formato viejo (disco+tipo únicos).
   if(S.procoop.disco!==undefined){
     const t=String(S.procoop.tipo||'nvme').toLowerCase();
@@ -536,25 +555,36 @@ function pcGbSnapTotal(P){
   const gb=discos*snapCount(+P.sf,+P.sr)*fSnap;
   return gb>0?Math.ceil(gb-1e-9):0;
 }
+// Códigos de servicio en Procoop (21/10): accessor con compat — estados
+// guardados sin la clave arrancan con los seeds (los que pasó administración).
+function pcCodigos(){
+  if(!S.procoopCod) S.procoopCod=Object.assign({},defaultState().procoopCod);
+  return S.procoopCod;
+}
+function pcSetCod(ck,v){
+  pcCodigos()[ck]=String(v||'').trim();
+  save();
+}
 function lineasProcoop(){
-  const P=procoopEstado(), pu=R.pu;
+  const P=procoopEstado(), pu=R.pu, cod=pcCodigos();
   const M=(n,u)=>`${n} Monómico CoopCloud (${u})`;
   // Sin servicio "Tipo": los servicios dependientes del tier van POR TRIPLICADO
   // (cada uno con su precio unitario fijo e independiente en Procoop).
+  // ck = clave del N° de servicio en Procoop (el Snapshot retenido usa 'snap').
   return [
-    {nombre:M('vCPU','vCPU'),       k:'vcpu', cant:+P.vcpu, precio:pu.vcpu},
-    {nombre:M('RAM','GB'),          k:'ram',  cant:+P.ram,  precio:pu.ram},
-    {nombre:M('Disco NVMe','GB'),   k:'disco_nvme', cant:+P.disco_nvme, precio:pu.nvme},
-    {nombre:M('Disco SSD','GB'),    k:'disco_ssd',  cant:+P.disco_ssd,  precio:pu.ssd},
-    {nombre:M('Disco HDD','GB'),    k:'disco_hdd',  cant:+P.disco_hdd,  precio:pu.hdd},
-    {nombre:M('BW','Mbps'),         k:'bw',   cant:+P.bw,   precio:pu.ab},
-    {nombre:M('IPs','IP'),          k:'ips',  cant:+P.ips,  precio:pu.ip},
-    {nombre:M('Snap c/h','h'),      k:'sf',   cant:+P.sf,   precio:0},
-    {nombre:M('Ret.','días'),       k:'sr',   cant:+P.sr,   precio:0},
-    {nombre:M('Snapshot retenido','GB'), k:null, cant:pcGbSnapTotal(P), precio:pu.hdd},
-    {nombre:M('VPN','servicio'),    k:'vpn',  cant:+P.vpn,  precio:+P.precioVpn||0, pk:'precioVpn'},
-    {nombre:M('Cert.','unidad'),    k:'cert', cant:+P.cert, precio:+P.precioCert||0, pk:'precioCert'},
-    {nombre:M('Descuento','US$'),   k:'desc', cant:+P.desc, precio:-1},
+    {nombre:M('vCPU','vCPU'),       k:'vcpu', ck:'vcpu', cod:cod.vcpu, cant:+P.vcpu, precio:pu.vcpu},
+    {nombre:M('RAM','GB'),          k:'ram',  ck:'ram',  cod:cod.ram,  cant:+P.ram,  precio:pu.ram},
+    {nombre:M('Disco NVMe','GB'),   k:'disco_nvme', ck:'disco_nvme', cod:cod.disco_nvme, cant:+P.disco_nvme, precio:pu.nvme},
+    {nombre:M('Disco SSD','GB'),    k:'disco_ssd',  ck:'disco_ssd',  cod:cod.disco_ssd,  cant:+P.disco_ssd,  precio:pu.ssd},
+    {nombre:M('Disco HDD','GB'),    k:'disco_hdd',  ck:'disco_hdd',  cod:cod.disco_hdd,  cant:+P.disco_hdd,  precio:pu.hdd},
+    {nombre:M('BW','Mbps'),         k:'bw',   ck:'bw',   cod:cod.bw,   cant:+P.bw,   precio:pu.ab},
+    {nombre:M('IPs','IP'),          k:'ips',  ck:'ips',  cod:cod.ips,  cant:+P.ips,  precio:pu.ip},
+    {nombre:M('Snap c/h','h'),      k:'sf',   ck:'sf',   cod:cod.sf,   cant:+P.sf,   precio:0},
+    {nombre:M('Ret.','días'),       k:'sr',   ck:'sr',   cod:cod.sr,   cant:+P.sr,   precio:0},
+    {nombre:M('Snapshot retenido','GB'), k:null, ck:'snap', cod:cod.snap, cant:pcGbSnapTotal(P), precio:pu.hdd},
+    {nombre:M('VPN','servicio'),    k:'vpn',  ck:'vpn',  cod:cod.vpn,  cant:+P.vpn,  precio:+P.precioVpn||0, pk:'precioVpn'},
+    {nombre:M('Cert.','unidad'),    k:'cert', ck:'cert', cod:cod.cert, cant:+P.cert, precio:+P.precioCert||0, pk:'precioCert'},
+    {nombre:M('Descuento','US$'),   k:'desc', ck:'desc', cod:cod.desc, cant:+P.desc, precio:-1},
   ];
 }
 function pcSet(k,v){
@@ -568,7 +598,9 @@ function pcSet(k,v){
 function procoopSyncCfg(){
   const c=S.cfg, t=String(c.tipo||'nvme').toLowerCase();
   const prev=S.procoop||{};
-  S.procoop=Object.assign({},prev,{vcpu:+c.vcpu,ram:+c.ram,disco_nvme:0,disco_ssd:0,disco_hdd:0,bw:+c.bw,ips:+c.ips,sf:+c.sf,sr:+c.sr});
+  // Base con los manuales en 0 (bug cazado el 21/10: un lead SIN procoop guardado
+  // dejaba cert/desc undefined → NaN → totales «US$ —» hasta tocar los campos).
+  S.procoop=Object.assign({cert:0,vpn:0,desc:0,precioVpn:30,precioCert:2},prev,{vcpu:+c.vcpu,ram:+c.ram,disco_nvme:0,disco_ssd:0,disco_hdd:0,bw:+c.bw,ips:+c.ips,sf:+c.sf,sr:+c.sr});
   S.procoop['disco_'+t]=+c.disco;
 }
 const PC_DERIVADOS=['vcpu','ram','disco_nvme','disco_ssd','disco_hdd','bw','ips','sf','sr'];
@@ -580,6 +612,11 @@ function renderProcoop(){
   document.getElementById('procoopKpis').innerHTML=
     kpi('Subtotal servicios',usd(sub))+kpi('Descuento',usd(desc))+kpi('TOTAL facturado',usd(total));
   document.getElementById('procoopBody').innerHTML=ls.map(l=>{
+    // N° de servicio en Procoop: editable en el simulador GLOBAL (dato de
+    // catálogo, viaja con la definición); en la hoja del lead solo se mira.
+    const celdaCod=(VISTA==='lead')
+      ? `<span class="sub" style="font-weight:700">${l.cod||'—'}</span>`
+      : `<input type="text" value="${l.cod||''}" placeholder="—" onchange="pcSetCod('${l.ck}',this.value)" style="width:64px;text-align:center" title="N° de servicio en Procoop (se guarda con la definición global; vacío = servicio aún no creado)">`;
     let celda;
     if(l.k===null){
       celda=`<b>${l.cant}</b> <span class="sub" title="Se recalcula solo desde Disco, Snap c/h y Ret.">⚙</span>`;
@@ -589,17 +626,19 @@ function renderProcoop(){
     } else {
       celda=`<input type="number" min="0" step="any" value="${l.cant}" onchange="pcSet('${l.k}',this.value)" style="width:90px;text-align:right">`;
     }
-    const subLinea=(typeof l.cant==='number')?l.cant*l.precio:0;
+    const subLinea=((typeof l.cant==='number')?l.cant*l.precio:0)||0; // ||0 limpia el «-0» (descuento en 0)
     const celdaPrecio=l.pk
       ? `<input type="number" min="0" step="any" value="${l.precio}" onchange="pcSet('${l.pk}',this.value)" style="width:80px;text-align:right" title="Precio manual (sin modelo de costos detrás aún)">`
       : (l.precio===0?'—':usd(l.precio,l.precio<0?2:5));
-    return `<tr><td>${l.nombre}</td><td class="num">${celda}</td><td class="num">${celdaPrecio}</td><td class="num ${subLinea<0?'':'pos'}">${(l.precio===0&&!l.pk)?'—':usd(subLinea)}</td></tr>`;
+    return `<tr><td style="text-align:center">${celdaCod}</td><td style="text-align:left">${l.nombre}</td><td class="num">${celda}</td><td class="num">${celdaPrecio}</td><td class="num ${subLinea<0?'':'pos'}">${(l.precio===0&&!l.pk)?'—':usd(subLinea)}</td></tr>`;
   }).join('');
   document.getElementById('procoopTotal').innerHTML='TOTAL FACTURADO: '+usd(total);
-  document.getElementById('pcCliente').textContent='Plan para: '+(S.cliente||'—');
+  // SO: línea técnica (no es un servicio de Procoop — no se factura), derivada
+  // en vivo de la config para que Carola lo tenga a la vista al cargar el alta.
+  document.getElementById('pcCliente').textContent='Plan para: '+(S.cliente||'—')+' · Sistema operativo: '+soLabel(soDe(S.cfg));
 }
 function copiarProcoop(){
-  const txt=lineasProcoop().map(l=>`${l.nombre}\t${l.cant}`).join('\n');
+  const txt=lineasProcoop().map(l=>`${l.cod||''}\t${l.nombre}\t${l.cant}`).join('\n');
   navigator.clipboard?.writeText(txt).then(()=>alert('Plan copiado: pegalo en Procoop (servicio + cantidad), idéntico.')).catch(()=>alert(txt));
 }
 
@@ -699,7 +738,9 @@ function planCoincide(pl,c){
 }
 function usarPlan(i){
   const pl=S.planes[i]; if(!pl)return;
-  S.cfg={vcpu:+pl.vcpu,ram:+pl.ram,disco:+pl.disco,tipo:pl.tipo,bw:+pl.bw,ips:+pl.ips,sf:+pl.sf,sr:+pl.sr};
+  // El SO no es parte de las specs del plan (como en la landing): elegir un
+  // plan conserva el sistema operativo ya elegido.
+  S.cfg={vcpu:+pl.vcpu,ram:+pl.ram,disco:+pl.disco,tipo:pl.tipo,bw:+pl.bw,ips:+pl.ips,sf:+pl.sf,sr:+pl.sr,so:soDe(S.cfg)};
   recalc();
 }
 function renderChips(){
@@ -716,13 +757,14 @@ function renderConfig(){
   document.getElementById('cfgControls').innerHTML=
     sl('vcpu','vCPU',1,64,1,'vCPU')+sl('ram','RAM',1,256,1,'GB')+sl('disco','Disco',50,4000,50,'GB')+
     `<div class="field" style="margin:6px 0"><label>Tipo de storage</label><select data-cfg="tipo">${TIPOS.map(t=>`<option value="${t}" ${t===c.tipo?'selected':''}>${t.toUpperCase()}</option>`).join('')}</select></div>`+
+    `<div class="field" style="margin:6px 0"><label>Sistema operativo</label><select data-cfg="so" title="Parámetro técnico: no cambia el precio">${SOS.map(s=>`<option value="${s}" ${s===soDe(c)?'selected':''}>${soLabel(s)}</option>`).join('')}</select></div>`+
     sl('bw','Ancho de banda',0,2000,10,'Mbps')+sl('ips','IPs públicas',0,16,1,'IP')+sl('sf','Snapshot cada',1,48,1,'h')+sl('sr','Retención',0,30,1,'días');
-  document.querySelectorAll('[data-cfg]').forEach(el=>el.addEventListener('input',e=>{const f=e.target.dataset.cfg;S.cfg[f]=(f==='tipo')?e.target.value:(+e.target.value);const lab=document.getElementById('cv-'+f);if(lab)lab.textContent=fmtN(S.cfg[f]);recalc();}));
+  document.querySelectorAll('[data-cfg]').forEach(el=>el.addEventListener('input',e=>{const f=e.target.dataset.cfg;S.cfg[f]=(f==='tipo'||f==='so')?e.target.value:(+e.target.value);const lab=document.getElementById('cv-'+f);if(lab)lab.textContent=fmtN(S.cfg[f]);recalc();}));
   const r=costoVM(c),precio=precioDe(r.costo);
   document.getElementById('cfgKpis').innerHTML=kpi('Costo mensual',usd(r.costo))+kpi('Precio mensual',usd(precio))+kpi('Ganancia',usd(precio-r.costo));
   const tb=document.getElementById('cfgBody');
-  const rows=[['vCPU',c.vcpu+' vCPU','vcpu'],['RAM',c.ram+' GB','ram'],['Disco '+c.tipo.toUpperCase(),c.disco+' GB','disco'],['Ancho de banda',c.bw+' Mbps','bw'],['IP pública',c.ips+' IP','ip'],['Snapshots',fmtN(r.snaps)+' ('+fmtN(r.gbSnap)+' GB)','snap']];
-  tb.innerHTML=rows.map(([n,q,k])=>`<tr><td>${n}</td><td class="num">${q}</td><td class="num">${usd(r.comp[k])}</td><td class="num pos">${usd(precioDe(r.comp[k]))}</td></tr>`).join('')+
+  const rows=[['Sistema operativo',soLabel(soDe(c)),null],['vCPU',c.vcpu+' vCPU','vcpu'],['RAM',c.ram+' GB','ram'],['Disco '+c.tipo.toUpperCase(),c.disco+' GB','disco'],['Ancho de banda',c.bw+' Mbps','bw'],['IP pública',c.ips+' IP','ip'],['Snapshots',fmtN(r.snaps)+' ('+fmtN(r.gbSnap)+' GB)','snap']];
+  tb.innerHTML=rows.map(([n,q,k])=>`<tr><td>${n}</td><td class="num">${q}</td><td class="num">${k?usd(r.comp[k]):'—'}</td><td class="num pos">${k?usd(precioDe(r.comp[k])):'—'}</td></tr>`).join('')+
     `<tr class="tot-row"><td>Total</td><td></td><td class="num">${usd(r.costo)}</td><td class="num">${usd(precio)}</td></tr>`;
 }
 
@@ -830,7 +872,7 @@ function exportPDF(){
   doc.setDrawColor(140,198,63);doc.setLineWidth(.8);doc.line(12,46,198,46);
   let y=58; doc.setFontSize(11);doc.setTextColor(15,63,94);doc.text('Configuración de la VM',12,y);
   doc.setTextColor(40);doc.setFontSize(10);y+=8;
-  const rows=[['vCPU',c.vcpu+' vCPU'],['Memoria RAM',c.ram+' GB'],['Almacenamiento',c.disco+' GB '+c.tipo.toUpperCase()],['Ancho de banda',c.bw+' Mbps'],['IPs públicas',c.ips],['Snapshots',fmtN(r.snaps)+' (cada '+c.sf+'h, ret. '+c.sr+' días)'],['Backup del sistema','Incluido']];
+  const rows=[['Sistema operativo',soLabel(soDe(c))],['vCPU',c.vcpu+' vCPU'],['Memoria RAM',c.ram+' GB'],['Almacenamiento',c.disco+' GB '+c.tipo.toUpperCase()],['Ancho de banda',c.bw+' Mbps'],['IPs públicas',c.ips],['Snapshots',fmtN(r.snaps)+' (cada '+c.sf+'h, ret. '+c.sr+' días)'],['Backup del sistema','Incluido']];
   rows.forEach(([k,v])=>{doc.text(k,14,y);doc.text(String(v),120,y);y+=7;});
   y+=4;doc.setDrawColor(220);doc.line(12,y,198,y);y+=12;
   doc.setFillColor(238,246,238);doc.rect(12,y-8,186,14,'F');
@@ -857,15 +899,17 @@ function exportPDFFacturacion(){
   const cli=S.cliente||document.getElementById('cfgCliente')?.value||'—';
   doc.setTextColor(40);doc.setFontSize(10);
   doc.text('Cliente: '+cli,12,42);doc.text('Fecha: '+new Date().toLocaleDateString('es-AR'),150,42);
-  doc.setDrawColor(140,198,63);doc.setLineWidth(.8);doc.line(12,46,198,46);
-  let y=56;doc.setFontSize(9);doc.setTextColor(15,63,94);
-  doc.text('Servicio',12,y);doc.text('Cantidad',128,y,{align:'right'});doc.text('P. unitario',162,y,{align:'right'});doc.text('Subtotal',196,y,{align:'right'});
+  doc.text('Sistema operativo: '+soLabel(soDe(S.cfg)),12,48);
+  doc.setDrawColor(140,198,63);doc.setLineWidth(.8);doc.line(12,51,198,51);
+  let y=60;doc.setFontSize(9);doc.setTextColor(15,63,94);
+  doc.text('N° serv.',12,y);doc.text('Servicio',30,y);doc.text('Cantidad',128,y,{align:'right'});doc.text('P. unitario',162,y,{align:'right'});doc.text('Subtotal',196,y,{align:'right'});
   doc.setDrawColor(220);doc.line(12,y+2,198,y+2);y+=8;doc.setTextColor(40);
   ls.forEach(l=>{
-    doc.text(l.nombre,12,y);
+    doc.text(String(l.cod||'—'),12,y);
+    doc.text(l.nombre,30,y);
     doc.text(String(l.cant),128,y,{align:'right'});
     doc.text(l.precio===0?'—':usd(l.precio,l.precio<0?2:4),162,y,{align:'right'});
-    const st=(typeof l.cant==='number')?l.cant*l.precio:0;
+    const st=((typeof l.cant==='number')?l.cant*l.precio:0)||0;
     doc.text(l.precio===0?'—':usd(st),196,y,{align:'right'});
     y+=7;
   });
