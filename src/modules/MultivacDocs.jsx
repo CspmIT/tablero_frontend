@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '../data/DataContext.jsx';
-import { getImage, saveImage } from '../api/minio.js';
+import { getImage, saveImage, saveFile } from '../api/minio.js';
 // Visor PDF PROPIO con pdf.js (18/08): en Android el visor nativo embebido
 // (iframe/embed) NO renderiza PDFs — el técnico de campo con celu es el caso
 // principal de esta solapa, así que el PDF se dibuja en canvas dentro de la
@@ -212,7 +212,7 @@ export default function MultivacDocs() {
       } catch (e1) {
         if (!esComprimido(f.name)) throw e1;
         const camuflado = new File([buf], f.name + '.pdf', { type: 'application/pdf' });
-        key = await saveImage(camuflado);
+        key = await saveFile(camuflado); // /uploadImg solo acepta jpeg/png; el .pdf entra por /uploadFile
       }
       // Verificación de ida y vuelta (mismo patrón que los releases de
       // firmware): se baja lo recién subido y se compara la huella — si el

@@ -13,7 +13,7 @@ import { useData } from '../data/DataContext.jsx';
 // Espressif (Web Serial). Los binarios viven en MinIO (gateway storageov).
 import { ESPLoader, Transport } from 'esptool-js';
 import { md5 } from 'js-md5';
-import { getImage, saveImage } from '../api/minio.js';
+import { getImage, saveImage, saveFile } from '../api/minio.js';
 // Configuración guiada por firmware (13/08): formulario que lee/edita/graba
 // la config de la placa — el terminal queda como registro limpio.
 import MultivacConfigReconecta from './MultivacConfigReconecta.jsx';
@@ -603,7 +603,7 @@ export default function Multivac() {
           key = await saveImage(archivo);
         } catch {
           const camuflado = new File([buf], archivo.name + '.pdf', { type: 'application/pdf' });
-          key = await saveImage(camuflado);
+          key = await saveFile(camuflado); // /uploadImg solo acepta jpeg/png; el .pdf entra por /uploadFile
         }
         // VERIFICACIÓN DE IDA Y VUELTA: se descarga lo recién subido y se
         // compara el SHA-256 con el del archivo original. Si el almacenamiento

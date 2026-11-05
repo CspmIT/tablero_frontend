@@ -32,7 +32,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Megaphone, Folder, FolderPlus, CalendarPlus, ArrowLeft, Pencil } from 'lucide-react';
 import { useData } from '../data/DataContext.jsx';
-import { getImage, saveImage } from '../api/minio.js';
+import { getImage, saveImage, saveFile } from '../api/minio.js';
 import { LIMITE_UNA_PASADA, subirEnPartes, esGrande, urlDirecta } from '../api/storageGrande.js';
 import MarketingLanding from './MarketingLanding.jsx'; // 28/09: administración de la landing pública
 
@@ -310,7 +310,7 @@ export default function Marketing() {
         } catch (e1) {
           if (esImagen(f.name)) throw e1; // una imagen rechazada es otro problema
           const camuflado = new File([buf], f.name + '.pdf', { type: 'application/pdf' });
-          key = await saveImage(camuflado);
+          key = await saveFile(camuflado); // /uploadImg solo acepta jpeg/png; el .pdf entra por /uploadFile
         }
         // Verificación de ida y vuelta: huella igual o no se publica.
         setSubida({ txt: `Verificando "${f.name}"…` });
